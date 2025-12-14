@@ -1,0 +1,13 @@
+{
+  "name": "ascii-dungeon",
+  "version": "0.1.0",
+  "description": "ASCII raytraced dungeon engine",
+  "dependencies": [
+    "glfw3",
+    "glm",
+    "spdlog",
+    "vulkan-memory-allocator",
+    "lua",
+    "sol2"
+  ]
+}

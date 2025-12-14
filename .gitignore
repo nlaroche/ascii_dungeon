@@ -1,0 +1,31 @@
+# Build output
+build/
+out/
+
+# Downloaded installers/SDKs
+vulkan_sdk.exe
+rustup-init.exe
+*.exe.download
+
+# Working/temp files
+working/
+nul
+
+# Claude Code settings (personal)
+.claude/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# CMake
+CMakeUserPresets.json
