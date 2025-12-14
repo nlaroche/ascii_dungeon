@@ -1,122 +1,134 @@
-// Isometric camera for voxel rendering
+// Free-flying perspective camera for 3D editor
 
 export class Camera {
-  position: [number, number, number] = [10, 10, 10]
-  target: [number, number, number] = [5, 0, 5]
-  zoom: number = 10
+  position: [number, number, number] = [12, 8, 12]
 
-  // Current orbit state
-  private yaw: number = Math.PI / 4
-  private pitch: number = Math.atan(1 / Math.sqrt(2))
-  private distance: number = 10
+  // Euler angles
+  yaw: number = -Math.PI * 0.75  // Looking toward origin
+  pitch: number = -0.4  // Slightly looking down
 
-  // Target values for smooth interpolation
-  private targetYaw: number = Math.PI / 4
-  private targetPitch: number = Math.atan(1 / Math.sqrt(2))
-  private targetDistance: number = 10
+  // Field of view
+  fov: number = 60  // degrees
 
-  // Smoothing factor (higher = snappier)
-  private smoothing: number = 25
+  // For smooth movement
+  private velocity: [number, number, number] = [0, 0, 0]
+  private smoothing: number = 15
 
-  // Set up classic isometric view
-  setIsometric(centerX: number = 5, centerZ: number = 5, height: number = 0) {
-    this.target = [centerX, height, centerZ]
-    this.distance = this.zoom
-    this.targetDistance = this.zoom
-    this.yaw = Math.PI / 4
-    this.targetYaw = Math.PI / 4
-    this.pitch = Math.atan(1 / Math.sqrt(2))
-    this.targetPitch = this.pitch
-    this.updatePosition()
+  // Set starting position looking at a point
+  lookAt(targetX: number, targetY: number, targetZ: number) {
+    const dx = targetX - this.position[0]
+    const dy = targetY - this.position[1]
+    const dz = targetZ - this.position[2]
+
+    this.yaw = Math.atan2(dx, dz)
+    const dist = Math.sqrt(dx * dx + dz * dz)
+    this.pitch = Math.atan2(dy, dist)
   }
 
-  // Update camera each frame with smooth interpolation
+  // Update camera with velocity smoothing
   update(deltaTime: number) {
     const t = 1 - Math.exp(-this.smoothing * deltaTime)
 
-    // Lerp towards target values
-    this.yaw = this.lerp(this.yaw, this.targetYaw, t)
-    this.pitch = this.lerp(this.pitch, this.targetPitch, t)
-    this.distance = this.lerp(this.distance, this.targetDistance, t)
-    this.zoom = this.distance
+    // Apply velocity with damping
+    this.position[0] += this.velocity[0] * deltaTime
+    this.position[1] += this.velocity[1] * deltaTime
+    this.position[2] += this.velocity[2] * deltaTime
 
-    this.updatePosition()
+    // Dampen velocity
+    this.velocity[0] *= (1 - t)
+    this.velocity[1] *= (1 - t)
+    this.velocity[2] *= (1 - t)
   }
 
-  private lerp(a: number, b: number, t: number): number {
-    return a + (b - a) * t
-  }
-
-  // Update camera position from orbit parameters
-  private updatePosition() {
-    this.position = [
-      this.target[0] + this.distance * Math.cos(this.yaw) * Math.cos(this.pitch),
-      this.target[1] + this.distance * Math.sin(this.pitch),
-      this.target[2] + this.distance * Math.sin(this.yaw) * Math.cos(this.pitch),
+  // Get forward direction vector
+  getForward(): [number, number, number] {
+    return [
+      Math.sin(this.yaw) * Math.cos(this.pitch),
+      Math.sin(this.pitch),
+      Math.cos(this.yaw) * Math.cos(this.pitch),
     ]
   }
 
-  // Strafe camera left/right (A/D keys)
-  strafe(amount: number) {
-    // Move along the camera's right vector
-    const right: [number, number, number] = [
-      Math.sin(this.yaw),
+  // Get right direction vector
+  getRight(): [number, number, number] {
+    return [
+      Math.cos(this.yaw),
       0,
-      -Math.cos(this.yaw),
+      -Math.sin(this.yaw),
     ]
-    this.target[0] += right[0] * amount
-    this.target[2] += right[2] * amount
-    this.updatePosition()
   }
 
-  // Orbit camera (mouse drag)
-  orbit(deltaYaw: number, deltaPitch: number) {
-    this.targetYaw += deltaYaw
-    this.targetPitch = Math.max(0.1, Math.min(Math.PI / 2 - 0.1, this.targetPitch + deltaPitch))
+  // Move camera (WASD + QE)
+  move(forward: number, right: number, up: number) {
+    const fwd = this.getForward()
+    const rt = this.getRight()
+
+    this.position[0] += fwd[0] * forward + rt[0] * right
+    this.position[1] += fwd[1] * forward + up
+    this.position[2] += fwd[2] * forward + rt[2] * right
   }
 
-  // Zoom camera (W/S keys or scroll wheel)
-  zoomBy(delta: number) {
-    this.targetDistance = Math.max(2, Math.min(50, this.targetDistance + delta))
+  // Rotate camera (mouse look)
+  rotate(deltaYaw: number, deltaPitch: number) {
+    this.yaw += deltaYaw
+    this.pitch = Math.max(-Math.PI / 2 + 0.01, Math.min(Math.PI / 2 - 0.01, this.pitch + deltaPitch))
   }
 
-  // Stop all camera movement immediately
+  // Stop movement
   stop() {
-    this.targetYaw = this.yaw
-    this.targetPitch = this.pitch
-    this.targetDistance = this.distance
+    this.velocity = [0, 0, 0]
   }
 
   getViewMatrix(): Float32Array {
-    return lookAt(this.position, this.target, [0, 1, 0])
+    const forward = this.getForward()
+    const target: [number, number, number] = [
+      this.position[0] + forward[0],
+      this.position[1] + forward[1],
+      this.position[2] + forward[2],
+    ]
+    return lookAt(this.position, target, [0, 1, 0])
   }
 
   getProjectionMatrix(aspect: number): Float32Array {
-    // Orthographic projection for true isometric
-    const size = this.zoom
-    const left = -size * aspect
-    const right = size * aspect
-    const bottom = -size
-    const top = size
+    const fovRad = this.fov * Math.PI / 180
     const near = 0.1
-    const far = 100
-
-    return orthographic(left, right, bottom, top, near, far)
+    const far = 500
+    return perspective(fovRad, aspect, near, far)
   }
 
-  // For shadow mapping - light's view projection
+  // For shadow mapping - light's view projection centered on camera target area
   getLightViewProjection(lightDir: [number, number, number]): Float32Array {
-    const lightPos: [number, number, number] = [
-      this.target[0] - lightDir[0] * 20,
-      this.target[1] - lightDir[1] * 20,
-      this.target[2] - lightDir[2] * 20,
+    const forward = this.getForward()
+    const targetPos: [number, number, number] = [
+      this.position[0] + forward[0] * 10,
+      this.position[1] + forward[1] * 10,
+      this.position[2] + forward[2] * 10,
     ]
 
-    const lightView = lookAt(lightPos, this.target, [0, 1, 0])
-    const lightProj = orthographic(-15, 15, -15, 15, 0.1, 50)
+    const lightPos: [number, number, number] = [
+      targetPos[0] - lightDir[0] * 30,
+      targetPos[1] - lightDir[1] * 30,
+      targetPos[2] - lightDir[2] * 30,
+    ]
+
+    const lightView = lookAt(lightPos, targetPos, [0, 1, 0])
+    const lightProj = orthographic(-30, 30, -30, 30, -100, 100)
 
     return multiplyMatrices(lightProj, lightView)
   }
+}
+
+// Perspective projection matrix
+function perspective(fov: number, aspect: number, near: number, far: number): Float32Array {
+  const f = 1.0 / Math.tan(fov / 2)
+  const nf = 1 / (near - far)
+
+  return new Float32Array([
+    f / aspect, 0, 0, 0,
+    0, f, 0, 0,
+    0, 0, far * nf, -1,
+    0, 0, near * far * nf, 0,
+  ])
 }
 
 // Matrix math utilities (column-major for WebGPU)

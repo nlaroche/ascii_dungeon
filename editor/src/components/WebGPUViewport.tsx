@@ -56,18 +56,18 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
     const dy = e.clientY - lastMouseRef.current.y
     lastMouseRef.current = { x: e.clientX, y: e.clientY }
 
-    // Orbit camera with mouse drag (positive = drag right moves camera right)
-    const sensitivity = 0.008
-    cameraRef.current.orbit(dx * sensitivity, dy * sensitivity)
+    // Rotate camera with mouse drag
+    const sensitivity = 0.003
+    cameraRef.current.rotate(-dx * sensitivity, -dy * sensitivity)
   }, [])
 
   const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault()
     if (!cameraRef.current) return
 
-    // Zoom with scroll wheel
-    const zoomSpeed = 0.5
-    cameraRef.current.zoomBy(e.deltaY * 0.01 * zoomSpeed)
+    // Scroll to move forward/back
+    const moveAmount = -e.deltaY * 0.02
+    cameraRef.current.move(moveAmount, 0, 0)
   }, [])
 
   const handleContextMenu = useCallback((e: MouseEvent) => {
@@ -108,10 +108,9 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
 
         rendererRef.current = renderer
 
-        // Create camera - zoomed in more by default
+        // Create camera - start looking at scene center
         const camera = new Camera()
-        camera.zoom = 5  // Closer zoom
-        camera.setIsometric(5, 5, 0)  // Center on scene
+        camera.lookAt(5, 0, 5)
         cameraRef.current = camera
 
         // Create scene
@@ -145,19 +144,31 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
 
           // Handle keyboard input and update camera
           if (cameraRef.current) {
-            const zoomSpeed = 8 * deltaTime
-            const rotateSpeed = 2 * deltaTime
+            const moveSpeed = 10 * deltaTime
+            let forward = 0, right = 0, up = 0
 
-            // W/S = zoom in/out
-            if (keysRef.current.has('w')) cameraRef.current.zoomBy(-zoomSpeed)
-            if (keysRef.current.has('s')) cameraRef.current.zoomBy(zoomSpeed)
+            // WASD movement
+            if (keysRef.current.has('w')) forward += moveSpeed
+            if (keysRef.current.has('s')) forward -= moveSpeed
+            if (keysRef.current.has('a')) right += moveSpeed
+            if (keysRef.current.has('d')) right -= moveSpeed
 
-            // A/D = strafe left/right
-            const strafeSpeed = 5 * deltaTime
-            if (keysRef.current.has('a')) cameraRef.current.strafe(-strafeSpeed)
-            if (keysRef.current.has('d')) cameraRef.current.strafe(strafeSpeed)
+            // Q/E for up/down
+            if (keysRef.current.has('q')) up -= moveSpeed
+            if (keysRef.current.has('e')) up += moveSpeed
 
-            // Update camera smoothing
+            // Shift for faster movement
+            if (keysRef.current.has('shift')) {
+              forward *= 3
+              right *= 3
+              up *= 3
+            }
+
+            if (forward !== 0 || right !== 0 || up !== 0) {
+              cameraRef.current.move(forward, right, up)
+            }
+
+            // Update camera
             cameraRef.current.update(deltaTime)
           }
 
@@ -272,7 +283,7 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
             {fps} FPS
           </div>
           <div className="absolute bottom-2 left-2 bg-black/50 text-white text-xs px-2 py-1 rounded opacity-60">
-            W/S: Zoom | A/D: Strafe | Drag: Orbit | Scroll: Zoom
+            WASD: Move | Q/E: Up/Down | Drag: Look | Scroll: Forward | Shift: Fast
           </div>
         </>
       )}

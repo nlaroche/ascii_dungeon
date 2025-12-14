@@ -99,7 +99,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
   // Soft shadow sampling (PCF 3x3)
   var shadow = 0.0;
   let shadowCoord = input.shadowCoord.xyz / input.shadowCoord.w;
-  let texelSize = 1.0 / 1024.0; // Shadow map resolution
+  let texelSize = 1.0 / 1024.0;
 
   for (var x = -1; x <= 1; x++) {
     for (var y = -1; y <= 1; y++) {
@@ -108,7 +108,7 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
         shadowMap,
         shadowSampler,
         shadowCoord.xy + offset,
-        shadowCoord.z - 0.005 // Bias
+        shadowCoord.z - 0.005
       );
     }
   }

@@ -5,6 +5,8 @@ import { Scene } from './Scene'
 import { INSTANCE_BYTES } from './types'
 import voxelShaderCode from './shaders/voxel.wgsl?raw'
 import waterShaderCode from './shaders/water.wgsl?raw'
+import skyShaderCode from './shaders/sky.wgsl?raw'
+import gridShaderCode from './shaders/grid.wgsl?raw'
 
 // Cube geometry data
 const CUBE_VERTICES = new Float32Array([
@@ -74,6 +76,8 @@ export class WebGPURenderer {
   private mainPipeline!: GPURenderPipeline
   private shadowPipeline!: GPURenderPipeline
   private waterPipeline!: GPURenderPipeline
+  private skyPipeline!: GPURenderPipeline
+  private gridPipeline!: GPURenderPipeline
 
   // Textures
   private depthTexture!: GPUTexture
@@ -85,6 +89,11 @@ export class WebGPURenderer {
   private mainBindGroup!: GPUBindGroup
   private shadowBindGroup!: GPUBindGroup
   private waterBindGroup!: GPUBindGroup
+  private gridBindGroup!: GPUBindGroup
+
+  // Grid uniform buffer (viewProj + cameraPos)
+  private gridUniformBuffer!: GPUBuffer
+  private gridUniformData = new Float32Array(20) // viewProj(16) + cameraPos(4)
 
   // Samplers
   private shadowSampler!: GPUSampler
@@ -128,6 +137,12 @@ export class WebGPURenderer {
     // Create uniform buffer
     this.uniformBuffer = this.device.createBuffer({
       size: this.uniformData.byteLength,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    })
+
+    // Create grid uniform buffer
+    this.gridUniformBuffer = this.device.createBuffer({
+      size: this.gridUniformData.byteLength,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     })
 
@@ -328,6 +343,58 @@ export class WebGPURenderer {
         depthCompare: 'less',
       },
     })
+
+    // Sky pipeline (fullscreen gradient)
+    const skyModule = this.device.createShaderModule({ code: skyShaderCode })
+    this.skyPipeline = this.device.createRenderPipeline({
+      layout: 'auto',
+      vertex: {
+        module: skyModule,
+        entryPoint: 'vs_main',
+      },
+      fragment: {
+        module: skyModule,
+        entryPoint: 'fs_main',
+        targets: [{ format: this.format }],
+      },
+      primitive: {
+        topology: 'triangle-list',
+      },
+      depthStencil: {
+        format: 'depth24plus',
+        depthWriteEnabled: false,
+        depthCompare: 'always', // Always draw sky (it's at z=1)
+      },
+    })
+
+    // Grid pipeline
+    const gridModule = this.device.createShaderModule({ code: gridShaderCode })
+    this.gridPipeline = this.device.createRenderPipeline({
+      layout: 'auto',
+      vertex: {
+        module: gridModule,
+        entryPoint: 'vs_main',
+      },
+      fragment: {
+        module: gridModule,
+        entryPoint: 'fs_main',
+        targets: [{
+          format: this.format,
+          blend: {
+            color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' },
+            alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
+          },
+        }],
+      },
+      primitive: {
+        topology: 'triangle-list',
+      },
+      depthStencil: {
+        format: 'depth24plus',
+        depthWriteEnabled: false,
+        depthCompare: 'less-equal',
+      },
+    })
   }
 
   private createBindGroups() {
@@ -359,6 +426,14 @@ export class WebGPURenderer {
         { binding: 1, resource: { buffer: this.instanceBuffer } },
         { binding: 2, resource: this.reflectionTexture.createView() },
         { binding: 3, resource: this.reflectionSampler },
+      ],
+    })
+
+    // Grid bind group
+    this.gridBindGroup = this.device.createBindGroup({
+      layout: this.gridPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.gridUniformBuffer } },
       ],
     })
   }
@@ -490,7 +565,7 @@ export class WebGPURenderer {
     const mainPass = commandEncoder.beginRenderPass({
       colorAttachments: [{
         view: this.context.getCurrentTexture().createView(),
-        clearValue: { r: 0.4, g: 0.6, b: 0.9, a: 1.0 }, // Sky blue
+        clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
         loadOp: 'clear',
         storeOp: 'store',
       }],
@@ -501,6 +576,18 @@ export class WebGPURenderer {
         depthStoreOp: 'store',
       },
     })
+
+    // Draw sky gradient first
+    mainPass.setPipeline(this.skyPipeline)
+    mainPass.draw(3) // Fullscreen triangle
+
+    // Draw grid
+    this.gridUniformData.set(viewProj, 0)
+    this.gridUniformData.set(camera.position, 16)
+    this.device.queue.writeBuffer(this.gridUniformBuffer, 0, this.gridUniformData)
+    mainPass.setPipeline(this.gridPipeline)
+    mainPass.setBindGroup(0, this.gridBindGroup)
+    mainPass.draw(6) // Two triangles for the quad
 
     // Draw non-water instances
     mainPass.setPipeline(this.mainPipeline)
@@ -545,6 +632,7 @@ export class WebGPURenderer {
     this.indexBuffer?.destroy()
     this.instanceBuffer?.destroy()
     this.uniformBuffer?.destroy()
+    this.gridUniformBuffer?.destroy()
     this.depthTexture?.destroy()
     this.shadowMap?.destroy()
     this.reflectionTexture?.destroy()

@@ -48,7 +48,8 @@ export class Scene {
           Math.min(1, Math.max(0, color[2] + variation)),
           color[3],
         ]
-        this.addVoxel(startX + x, y, startZ + z, variedColor, 1, 0.2, 1)
+        // Ground tiles - 1 unit deep
+        this.addVoxel(startX + x, y - 0.5, startZ + z, variedColor, 1, 1.0, 1)
       }
     }
   }
