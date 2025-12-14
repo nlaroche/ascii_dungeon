@@ -1,0 +1,443 @@
+/* rc-dock custom terminal theme */
+/* Overrides default rc-dock styles to match ASCII Dungeon aesthetic */
+
+/* Import base rc-dock styles */
+@import 'rc-dock/dist/rc-dock.css';
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* CSS Variables for theming */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  --dock-bg: #09090b;
+  --dock-panel-bg: #18181b;
+  --dock-tab-bg: #18181b;
+  --dock-tab-active-bg: #27272a;
+  --dock-hover-bg: #52525b;
+  --dock-border: #27272a;
+  --dock-text: #d4d4d8;
+  --dock-text-muted: #a1a1aa;
+  --dock-accent: #22d3ee;
+  --dock-divider: #27272a;
+  --dock-menu-bg: #27272a;
+  --dock-menu-border: #52525b;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* Main dock container */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+.dock-layout {
+  background: var(--dock-bg) !important;
+  font-family: ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Mono", monospace;
+  font-size: 12px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* Panel styling */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+.dock-panel {
+  background: var(--dock-panel-bg) !important;
+  border: none !important;
+  border-radius: 0 !important;
+}
+
+.dock-panel.dock-style-headless {
+  border: none !important;
+}
+
+/* Remove extra borders from nested elements */
+.dock-box,
+.dock-vbox,
+.dock-hbox {
+  border: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* Tab bar - AGGRESSIVE OVERRIDES */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+.dock-bar {
+  background: var(--dock-tab-bg) !important;
+  border-bottom: 1px solid var(--dock-border) !important;
+  padding: 0 !important;
+}
+
+.dock-nav-wrap,
+.dock-nav,
+.dock-nav-list,
+.dock-nav-container {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* Target any white backgrounds in the tab area */
+.dock-panel > .dock-bar,
+.dock-panel > .dock-bar > *,
+.dock-bar > .dock-nav-wrap,
+.dock-bar > .dock-nav-wrap > * {
+  background: transparent !important;
+  background-color: transparent !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* Individual tabs */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+.dock-tab {
+  background: transparent !important;
+  border: none !important;
+  border-right: 1px solid var(--dock-border) !important;
+  border-bottom: 2px solid transparent !important;
+  color: var(--dock-text-muted) !important;
+  padding: 6px 16px !important;
+  font-size: 11px !important;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  transition: all 0.15s ease;
+  margin: 0 !important;
+  border-radius: 0 !important;
+}
+
+.dock-tab:hover {
+  background: var(--dock-tab-active-bg) !important;
+  color: var(--dock-text) !important;
+}
+
+.dock-tab.dock-tab-active {
+  background: var(--dock-tab-active-bg) !important;
+  border-bottom: 2px solid var(--dock-accent) !important;
+  color: var(--dock-accent) !important;
+}
+
+.dock-tab-hit-area {
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+/* Tab title styling */
+.dock-tab-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.dock-tab-icon {
+  opacity: 0.6;
+}
+
+/* Tab close button */
+.dock-tab-close-btn {
+  color: var(--dock-text-muted) !important;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  margin-left: 8px;
+  font-size: 10px;
+  background: transparent !important;
+}
+
+.dock-tab:hover .dock-tab-close-btn {
+  opacity: 0.6;
+}
+
+.dock-tab-close-btn:hover {
+  opacity: 1;
+  color: var(--dock-accent) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* Tab content area */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+.dock-tab-content,
+.dock-content,
+.dock-content-box {
+  background: var(--dock-panel-bg) !important;
+  color: var(--dock-text) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* Dividers/Splitters - thin and subtle */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+.dock-divider {
+  background: var(--dock-border) !important;
+  opacity: 0.5 !important;
+}
+
+.dock-divider:hover {
+  background: var(--dock-accent) !important;
+  opacity: 0.8 !important;
+}
+
+.dock-vbox > .dock-divider {
+  height: 1px !important;
+  min-height: 1px !important;
+  max-height: 1px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.dock-hbox > .dock-divider {
+  width: 1px !important;
+  min-width: 1px !important;
+  max-width: 1px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* Floating windows */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+.dock-float {
+  border: 1px solid var(--dock-border) !important;
+  border-radius: 0 !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5) !important;
+  background: var(--dock-panel-bg) !important;
+}
+
+.dock-float .dock-panel {
+  border: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* Drop indicators */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+.dock-drop-indicator {
+  background: var(--dock-accent) !important;
+  opacity: 0.3 !important;
+  border: 2px solid var(--dock-accent) !important;
+  border-radius: 0 !important;
+}
+
+.dock-drop-layer {
+  pointer-events: none;
+}
+
+/* Drop edge highlights */
+.dock-drop-edge {
+  background: var(--dock-accent) !important;
+  opacity: 0.2 !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* Maximized panel */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+.dock-panel.dock-panel-max-box {
+  background: var(--dock-bg) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* Extra buttons (more tabs dropdown, etc) */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+.dock-ink-bar {
+  display: none !important; /* We use border-bottom instead */
+}
+
+/* Panel extra buttons (maximize, etc) - subtle but visible */
+.dock-panel-extra-btn,
+.dock-extra-button,
+.dock-panel-max-btn {
+  color: var(--dock-text-muted) !important;
+  opacity: 0.5 !important;
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  font-size: 11px !important;
+  padding: 0 6px !important;
+  margin: 0 !important;
+  min-width: auto !important;
+  min-height: auto !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  line-height: 1 !important;
+  vertical-align: middle !important;
+  position: relative !important;
+  top: 2px !important;
+}
+
+.dock-panel-extra-btn:hover,
+.dock-extra-button:hover,
+.dock-panel-max-btn:hover {
+  color: var(--dock-accent) !important;
+  opacity: 1 !important;
+  background: transparent !important;
+}
+
+/* Maximize icon box styling */
+.dock-panel-max-btn::before,
+.dock-panel-max-btn::after {
+  border-color: currentColor !important;
+  border-width: 1px !important;
+}
+
+/* Extra content area in tab bar - vertically centered */
+.dock-extra-content {
+  background: transparent !important;
+  padding: 0 4px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  height: 100% !important;
+}
+
+.dock-extra-content > * {
+  background: transparent !important;
+  display: flex !important;
+  align-items: center !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* Scrollbars */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+.dock-tab-content::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.dock-tab-content::-webkit-scrollbar-track {
+  background: var(--dock-bg);
+}
+
+.dock-tab-content::-webkit-scrollbar-thumb {
+  background: var(--dock-border);
+  border-radius: 0;
+}
+
+.dock-tab-content::-webkit-scrollbar-thumb:hover {
+  background: var(--dock-text-muted);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* Drag preview */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+.dragging .dock-tab {
+  opacity: 0.8;
+}
+
+.dock-tab.dragging {
+  background: var(--dock-tab-active-bg) !important;
+  border: 1px solid var(--dock-accent) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* Nuclear option - catch any remaining white backgrounds */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+.dock-layout *:not(.dock-tab-content *) {
+  border-color: var(--dock-border);
+}
+
+.dock-nav-more {
+  background: var(--dock-tab-bg) !important;
+  color: var(--dock-text-muted) !important;
+}
+
+.dock-nav-more:hover {
+  color: var(--dock-text) !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* Context Menus and Dropdowns */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+/* rc-dock dropdown menus */
+.dock-dropdown,
+.dock-nav-more-popup,
+.dock-panel-extra-popup {
+  background: var(--dock-menu-bg) !important;
+  border: 1px solid var(--dock-menu-border) !important;
+  border-radius: 6px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6),
+              0 2px 8px rgba(0, 0, 0, 0.4),
+              inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+  padding: 6px !important;
+  min-width: 160px !important;
+}
+
+.dock-dropdown-item,
+.dock-nav-more-item,
+.dock-panel-extra-item {
+  padding: 10px 14px !important;
+  margin: 2px 0 !important;
+  border-radius: 4px !important;
+  color: var(--dock-text) !important;
+  background: transparent !important;
+  transition: all 0.1s ease !important;
+  cursor: pointer !important;
+}
+
+.dock-dropdown-item:hover,
+.dock-nav-more-item:hover,
+.dock-panel-extra-item:hover {
+  background: var(--dock-hover-bg) !important;
+  color: var(--dock-accent) !important;
+}
+
+/* Tab overflow menu */
+.dock-nav-more-popup {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════ */
+/* General App Menus (applies to MenuBar dropdowns too) */
+/* ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Menu container styles - targets common menu patterns */
+[role="menu"],
+[role="listbox"],
+.menu-dropdown,
+.dropdown-menu,
+.context-menu {
+  background: var(--dock-menu-bg) !important;
+  border: 1px solid var(--dock-menu-border) !important;
+  border-radius: 6px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6),
+              0 2px 8px rgba(0, 0, 0, 0.4),
+              inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+  padding: 6px !important;
+}
+
+[role="menuitem"],
+[role="option"],
+.menu-item,
+.dropdown-item {
+  padding: 10px 14px !important;
+  margin: 2px 0 !important;
+  border-radius: 4px !important;
+  color: var(--dock-text) !important;
+  transition: all 0.1s ease !important;
+}
+
+[role="menuitem"]:hover,
+[role="option"]:hover,
+.menu-item:hover,
+.dropdown-item:hover {
+  background: var(--dock-hover-bg) !important;
+  color: var(--dock-accent) !important;
+}
+
+/* Menu separators */
+[role="separator"],
+.menu-separator,
+.menu-divider {
+  height: 1px !important;
+  background: var(--dock-border) !important;
+  margin: 6px 8px !important;
+}
+
+/* Submenu arrows */
+.submenu-arrow,
+.menu-item-arrow {
+  color: var(--dock-text-muted) !important;
+  font-size: 10px !important;
+}

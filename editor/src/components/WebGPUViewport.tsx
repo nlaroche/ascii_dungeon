@@ -263,7 +263,7 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
   }
 
   return (
-    <div ref={containerRef} className={`relative ${className}`}>
+    <div ref={containerRef} className={`relative h-full w-full min-h-0 ${className}`}>
       <canvas
         ref={canvasRef}
         className="absolute inset-0 w-full h-full"

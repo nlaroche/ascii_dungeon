@@ -1,482 +1,1013 @@
-import { useEditorStore } from "./stores/editorStore";
-import type { FileItem } from "./stores/editorStore";
-import { WebGPUViewport } from "./components/WebGPUViewport";
+// ═══════════════════════════════════════════════════════════════════════════
+// ASCII Dungeon Engine - Data-Driven Editor with Dockable Panels
+// Everything is state. Everything can be modified. Panels can float.
+// ═══════════════════════════════════════════════════════════════════════════
+
+import { useEffect, useCallback, useRef, useState } from 'react';
+import { useEngineState, useTheme, useSelection, useEntities, useChat, useTemplate } from './stores/useEngineState';
+import { invoke } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { ThemeProvider } from './components/ui';
+import { DockableLayout } from './components/DockLayout';
+import { WebGPUViewport } from './components/WebGPUViewport';
+import { MenuBar } from './components/MenuBar';
+import { TemplateBrowser } from './components/TemplateBrowser';
+import { useProject } from './hooks/useProject';
+import { FileEntry } from './lib/filesystem';
+import { getTemplate, TemplateDefinition } from './lib/templates';
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main App
+// ─────────────────────────────────────────────────────────────────────────────
 
 function App() {
-  const {
-    engineRunning,
-    setEngineRunning,
-    fps,
-    frameTime,
-    activeTab,
-    setActiveTab,
-    currentTool,
-    setCurrentTool,
-    currentBrush,
-    setCurrentBrush,
-    selectedCell,
-    selectedEntity,
-    setSelectedEntity,
-    expandedFolders,
-    toggleFolder,
-    logs,
-    clearLogs,
-    entities,
-    files,
-    luaCode,
-  } = useEditorStore();
+  return (
+    <ThemeProvider>
+      <AppContent />
+    </ThemeProvider>
+  );
+}
 
-  const getCellColor = (char: string) => {
-    const colors: Record<string, string> = {
-      "#": "text-zinc-400",
-      ".": "text-zinc-600",
-      "~": "text-cyan-500",
-      "*": "text-orange-400",
-      "@": "text-emerald-400",
-      g: "text-green-500",
-      T: "text-red-400",
+function AppContent() {
+  const theme = useTheme();
+  const undo = useEngineState((s) => s.undo);
+  const redo = useEngineState((s) => s.redo);
+  const canUndo = useEngineState((s) => s.canUndo);
+  const canRedo = useEngineState((s) => s.canRedo);
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.key === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        if (canUndo()) undo();
+      }
+      if ((e.ctrlKey && e.shiftKey && e.key === 'z') || (e.ctrlKey && e.key === 'y')) {
+        e.preventDefault();
+        if (canRedo()) redo();
+      }
     };
-    return colors[char] || "text-zinc-500";
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [undo, redo, canUndo, canRedo]);
+
+  // Template management
+  const { currentId: currentTemplateId, applyTemplate } = useTemplate();
+
+  // Debug: log template changes
+  useEffect(() => {
+    console.log('[App] currentTemplateId changed:', currentTemplateId);
+  }, [currentTemplateId]);
+
+  const handleSelectTemplate = useCallback((template: TemplateDefinition) => {
+    console.log('[App] handleSelectTemplate called:', template.id, template.name);
+    applyTemplate(template);
+  }, [applyTemplate]);
+
+  // Render tab content based on tab ID
+  const renderTabContent = useCallback((tabId: string) => {
+    switch (tabId) {
+      // Core panels
+      case 'files':
+        return <FileTree />;
+      case 'entities':
+        return <EntityList />;
+      case 'assets':
+        return <AssetBrowser />;
+      case 'templates':
+        return (
+          <TemplateBrowser
+            currentTemplateId={currentTemplateId || undefined}
+            onSelectTemplate={handleSelectTemplate}
+          />
+        );
+      case 'scene':
+        return <SceneView />;
+      case 'code':
+        return <CodeEditor />;
+      case 'chat':
+        return <AIChat />;
+      case 'properties':
+        return <PropertiesPanel />;
+      case 'console':
+        return <ConsolePanel />;
+
+      // Deckbuilder panels
+      case 'cards':
+        return <TemplatePlaceholder icon="🃏" title="Card Library" description="Browse and manage your card collection" />;
+      case 'decks':
+        return <TemplatePlaceholder icon="📚" title="Deck Manager" description="Build and organize your decks" />;
+      case 'card-designer':
+        return <TemplatePlaceholder icon="🎨" title="Card Designer" description="Create and edit card layouts, effects, and artwork" />;
+      case 'playtest':
+        return <TemplatePlaceholder icon="▶" title="Play Test" description="Test your cards and decks in action" />;
+
+      // Visual Novel panels
+      case 'characters':
+        return <TemplatePlaceholder icon="👤" title="Characters" description="Manage characters, sprites, and expressions" />;
+      case 'scenes':
+        return <TemplatePlaceholder icon="🎬" title="Scenes" description="Organize backgrounds and scene settings" />;
+      case 'script-editor':
+        return <TemplatePlaceholder icon="📝" title="Script Editor" description="Write dialog, choices, and narrative branches" />;
+      case 'flowchart':
+        return <TemplatePlaceholder icon="🔀" title="Story Flow" description="Visualize and edit your narrative structure" />;
+      case 'preview':
+        return <TemplatePlaceholder icon="👁" title="Preview" description="Preview your visual novel in action" />;
+
+      default:
+        return <div className="p-4 text-zinc-500">Unknown tab: {tabId}</div>;
+    }
+  }, [currentTemplateId, handleSelectTemplate]);
+
+  return (
+    <div
+      className="h-screen flex flex-col text-sm overflow-hidden"
+      style={{
+        backgroundColor: theme.bg,
+        color: theme.text,
+        fontFamily: 'ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Mono", monospace',
+      }}
+    >
+      <MenuBar />
+      <div className="flex-1 relative">
+        <DockableLayout renderContent={renderTabContent} />
+      </div>
+      <StatusBar />
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Template Placeholder - For panels that aren't implemented yet
+// ─────────────────────────────────────────────────────────────────────────────
+
+function TemplatePlaceholder({ icon, title, description }: { icon: string; title: string; description: string }) {
+  const theme = useTheme();
+  return (
+    <div className="h-full flex items-center justify-center p-4" style={{ color: theme.textDim }}>
+      <div className="text-center max-w-xs">
+        <div className="text-5xl mb-4">{icon}</div>
+        <div className="font-bold text-lg mb-2" style={{ color: theme.text }}>{title}</div>
+        <div className="text-sm leading-relaxed">{description}</div>
+        <div
+          className="mt-4 px-3 py-1.5 rounded text-xs inline-block"
+          style={{ backgroundColor: theme.bgHover, color: theme.textMuted }}
+        >
+          Coming soon
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// File Tree
+// ─────────────────────────────────────────────────────────────────────────────
+
+function FileTree() {
+  const theme = useTheme();
+  const selectedFile = useEngineState((s) => s.project.selectedFile);
+  const setPath = useEngineState((s) => s.setPath);
+
+  const {
+    hasProject,
+    fileTree,
+    expandedDirs,
+    toggleDirectory,
+    openProject,
+    createProject,
+  } = useProject();
+
+  // Get file icon based on extension
+  const getFileIcon = (name: string, isDir: boolean) => {
+    if (isDir) return '▸';
+    const ext = name.split('.').pop()?.toLowerCase();
+    switch (ext) {
+      case 'lua': return '◈';
+      case 'json': return '{ }';
+      case 'wgsl': return '◇';
+      case 'md': return '≡';
+      default: return '○';
+    }
   };
 
-  const renderFileTree = (items: FileItem[], depth = 0) => {
-    return items.map((item, i) => (
-      <div key={i}>
+  // Render a file entry recursively
+  const renderEntry = (entry: FileEntry, depth: number = 0) => {
+    const isExpanded = expandedDirs.has(entry.path);
+    const isSelected = selectedFile === entry.path;
+    const paddingLeft = 8 + depth * 12;
+
+    return (
+      <div key={entry.path}>
         <div
-          className={`flex items-center gap-2 py-0.5 px-2 cursor-pointer hover:bg-zinc-800 ${
-            item.active ? "bg-zinc-800 text-cyan-400" : "text-zinc-400"
-          }`}
-          style={{ paddingLeft: `${depth * 12 + 8}px` }}
-          onClick={() => item.type === "folder" && toggleFolder(item.name)}
+          onClick={() => {
+            if (entry.isDirectory) {
+              toggleDirectory(entry.path);
+            } else {
+              setPath(['project', 'selectedFile'], entry.path, `Select ${entry.name}`);
+            }
+          }}
+          className="py-1 cursor-pointer rounded transition-colors flex items-center gap-1"
+          style={{
+            paddingLeft,
+            backgroundColor: isSelected ? theme.bgHover : 'transparent',
+            color: isSelected ? theme.accent : entry.isDirectory ? theme.warning : theme.textMuted,
+          }}
         >
-          <span className="text-zinc-600 w-4">
-            {item.type === "folder"
-              ? expandedFolders.includes(item.name)
-                ? "▼"
-                : "▶"
-              : "○"}
+          <span
+            className="text-xs transition-transform"
+            style={{
+              transform: entry.isDirectory && isExpanded ? 'rotate(90deg)' : 'none',
+              color: theme.textDim,
+            }}
+          >
+            {getFileIcon(entry.name, entry.isDirectory)}
           </span>
-          <span className={item.type === "folder" ? "text-amber-500" : ""}>
-            {item.name}
-          </span>
+          <span className="truncate">{entry.name}</span>
         </div>
-        {item.type === "folder" &&
-          item.children &&
-          expandedFolders.includes(item.name) &&
-          renderFileTree(item.children, depth + 1)}
+
+        {entry.isDirectory && isExpanded && entry.children && (
+          <div>
+            {entry.children.map((child) => renderEntry(child, depth + 1))}
+          </div>
+        )}
       </div>
-    ));
+    );
+  };
+
+  // No project open - show welcome screen
+  if (!hasProject) {
+    return (
+      <div className="h-full flex flex-col items-center justify-center p-4" style={{ color: theme.textDim }}>
+        <div className="text-center">
+          <div className="text-3xl mb-3" style={{ color: theme.accent }}>◆</div>
+          <div className="font-medium mb-3">No Project Open</div>
+          <div className="space-y-2">
+            <button
+              onClick={createProject}
+              className="w-full px-3 py-2 rounded text-xs transition-colors"
+              style={{ backgroundColor: theme.accent, color: theme.bg }}
+            >
+              New Project
+            </button>
+            <button
+              onClick={() => openProject()}
+              className="w-full px-3 py-2 rounded text-xs transition-colors"
+              style={{ backgroundColor: theme.bgHover, color: theme.text }}
+            >
+              Open Project
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full overflow-y-auto text-xs p-1">
+      {fileTree.length === 0 ? (
+        <div className="p-4 text-center" style={{ color: theme.textDim }}>
+          Empty project
+        </div>
+      ) : (
+        fileTree.map((entry) => renderEntry(entry))
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Entity List
+// ─────────────────────────────────────────────────────────────────────────────
+
+function EntityList() {
+  const theme = useTheme();
+  const { entities } = useEntities();
+  const { selection, selectEntity } = useSelection();
+
+  const getEntityColor = (type: string) => {
+    switch (type) {
+      case 'player': return theme.success;
+      case 'enemy': return theme.error;
+      default: return theme.warning;
+    }
   };
 
   return (
-    <div className="h-screen bg-zinc-950 text-zinc-300 flex flex-col text-sm overflow-hidden">
-      {/* Title Bar */}
-      <div className="h-10 bg-zinc-900 border-b border-zinc-800 flex items-center justify-between px-4 shrink-0">
-        <div className="flex items-center gap-4">
-          <span className="text-cyan-400 font-bold tracking-wider">
-            ◆ ASCII_DUNGEON
-          </span>
-          <span className="text-zinc-600">v0.1.0</span>
-          <span className="text-zinc-700">│</span>
-          <span className="text-zinc-500">test_dungeon.lua</span>
-        </div>
-
-        <div className="flex items-center gap-2">
-          {/* Engine Controls */}
-          <div className="flex items-center gap-1 bg-zinc-800 rounded px-1 py-0.5">
-            <button
-              onClick={() => setEngineRunning(!engineRunning)}
-              className={`px-3 py-1 rounded text-xs font-bold tracking-wide transition-colors ${
-                engineRunning
-                  ? "bg-emerald-600 text-emerald-100"
-                  : "bg-zinc-700 text-zinc-400 hover:bg-zinc-600"
-              }`}
-            >
-              {engineRunning ? "● LIVE" : "○ START"}
-            </button>
-            <button className="px-3 py-1 rounded text-xs text-zinc-400 hover:bg-zinc-700 transition-colors">
-              ⟳ RELOAD
-            </button>
-            <button className="px-3 py-1 rounded text-xs text-zinc-400 hover:bg-zinc-700 transition-colors">
-              ⏸ PAUSE
-            </button>
+    <div className="h-full overflow-y-auto">
+      {entities.map((entity) => (
+        <div
+          key={entity.id}
+          onClick={() => selectEntity(entity.id)}
+          className="px-3 py-2 cursor-pointer transition-colors"
+          style={{
+            backgroundColor: selection.entities.includes(entity.id) ? theme.bgHover : 'transparent',
+            borderBottom: `1px solid ${theme.border}50`,
+          }}
+        >
+          <div className="flex items-center justify-between">
+            <span style={{ color: getEntityColor(entity.type) }} className="font-medium">
+              {entity.glyph} {entity.name}
+            </span>
+            <span className="text-xs" style={{ color: theme.textDim }}>
+              {entity.type}
+            </span>
           </div>
-
-          <span className="text-zinc-700">│</span>
-
-          <div className="flex items-center gap-2 text-xs">
-            <span className="text-zinc-500">FPS:</span>
-            <span className="text-emerald-400 font-bold">{fps}</span>
-            <span className="text-zinc-700">│</span>
-            <span className="text-zinc-500">{frameTime}ms</span>
+          <div className="text-xs mt-0.5" style={{ color: theme.textMuted }}>
+            pos: {entity.position.map((n) => n.toFixed(0)).join(', ')}
           </div>
         </div>
+      ))}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Asset Browser
+// ─────────────────────────────────────────────────────────────────────────────
+
+function AssetBrowser() {
+  const theme = useTheme();
+  return (
+    <div className="h-full flex items-center justify-center" style={{ color: theme.textDim }}>
+      <div className="text-center">
+        <div className="text-4xl mb-2">◈</div>
+        <div>Assets</div>
+        <div className="text-xs mt-1">Coming soon</div>
       </div>
+    </div>
+  );
+}
 
-      <div className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar - File Browser */}
-        <div className="w-56 bg-zinc-900 border-r border-zinc-800 flex flex-col shrink-0">
-          <div className="p-2 border-b border-zinc-800 text-xs text-zinc-500 uppercase tracking-wider">
-            Project
-          </div>
-          <div className="flex-1 overflow-y-auto text-xs">
-            {renderFileTree(files)}
-          </div>
+// ─────────────────────────────────────────────────────────────────────────────
+// Scene View
+// ─────────────────────────────────────────────────────────────────────────────
 
-          {/* Quick Actions */}
-          <div className="border-t border-zinc-800 p-2 space-y-1">
-            <button className="w-full text-left px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-800 rounded flex items-center gap-2">
-              <span className="text-cyan-500">+</span> New Map
-            </button>
-            <button className="w-full text-left px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-800 rounded flex items-center gap-2">
-              <span className="text-cyan-500">+</span> New Sprite
-            </button>
-            <button className="w-full text-left px-2 py-1 text-xs text-zinc-400 hover:bg-zinc-800 rounded flex items-center gap-2">
-              <span className="text-cyan-500">+</span> New Script
-            </button>
-          </div>
-        </div>
+function SceneView() {
+  const theme = useTheme();
+  const tools = useEngineState((s) => s.tools);
+  const setPath = useEngineState((s) => s.setPath);
 
-        {/* Main Content Area */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          {/* Tabs */}
-          <div className="h-9 bg-zinc-900 border-b border-zinc-800 flex items-center gap-0 shrink-0">
-            {(["map", "code", "sprites", "materials"] as const).map((tab) => (
+  return (
+    <div className="h-full flex flex-col">
+      {/* Toolbar */}
+      <div
+        className="h-10 flex items-center gap-2 px-3 shrink-0"
+        style={{ borderBottom: `1px solid ${theme.border}` }}
+      >
+        <div
+          className="flex items-center gap-1 rounded p-0.5"
+          style={{ backgroundColor: theme.bgHover }}
+        >
+          {Object.values(tools.available)
+            .filter((t) => ['select', 'paint', 'erase', 'spawn'].includes(t.id))
+            .map((tool) => (
               <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`px-4 py-2 text-xs uppercase tracking-wider border-r border-zinc-800 transition-colors ${
-                  activeTab === tab
-                    ? "bg-zinc-800 text-cyan-400 border-b-2 border-b-cyan-500"
-                    : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50"
-                }`}
+                key={tool.id}
+                onClick={() => setPath(['tools', 'active'], tool.id, `Select ${tool.name} tool`)}
+                className="px-2 py-1 rounded text-xs transition-colors"
+                style={{
+                  backgroundColor: tools.active === tool.id ? theme.accent : 'transparent',
+                  color: tools.active === tool.id ? theme.bg : theme.textMuted,
+                }}
+                title={`${tool.name} (${tool.shortcut})`}
               >
-                {tab}
+                {tool.icon}
               </button>
             ))}
-          </div>
-
-          {/* Tab Content */}
-          <div className="flex-1 flex overflow-hidden">
-            {activeTab === "map" && (
-              <>
-                {/* Engine Viewport */}
-                <div className="flex-1 flex flex-col overflow-hidden">
-                  {/* Toolbar */}
-                  <div className="h-10 bg-zinc-900/50 border-b border-zinc-800 flex items-center gap-2 px-3 shrink-0">
-                    <div className="flex items-center gap-1 bg-zinc-800 rounded p-0.5">
-                      {(["select", "paint", "erase", "fill"] as const).map(
-                        (tool) => (
-                          <button
-                            key={tool}
-                            onClick={() => setCurrentTool(tool)}
-                            className={`px-2 py-1 rounded text-xs transition-colors ${
-                              currentTool === tool
-                                ? "bg-cyan-600 text-white"
-                                : "text-zinc-400 hover:bg-zinc-700"
-                            }`}
-                          >
-                            {tool === "select" && "◇"}
-                            {tool === "paint" && "✎"}
-                            {tool === "erase" && "✕"}
-                            {tool === "fill" && "◈"}
-                          </button>
-                        )
-                      )}
-                    </div>
-
-                    <span className="text-zinc-700">│</span>
-
-                    <div className="flex items-center gap-1">
-                      <span className="text-xs text-zinc-500">Brush:</span>
-                      <div className="flex gap-0.5 bg-zinc-800 rounded p-0.5">
-                        {["#", ".", "~", "*", "g", "T"].map((char) => (
-                          <button
-                            key={char}
-                            onClick={() => setCurrentBrush(char)}
-                            className={`w-6 h-6 rounded text-xs transition-colors ${
-                              currentBrush === char
-                                ? "bg-zinc-600 ring-1 ring-cyan-500"
-                                : "hover:bg-zinc-700"
-                            } ${getCellColor(char)}`}
-                          >
-                            {char}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="flex-1" />
-
-                    <span className="text-xs text-zinc-500">
-                      {selectedCell.x}, {selectedCell.y}
-                    </span>
-                  </div>
-
-                  {/* WebGPU Viewport - renders the voxel scene */}
-                  <WebGPUViewport className="flex-1" />
-                </div>
-
-                {/* Right Panel - Inspector */}
-                <div className="w-72 bg-zinc-900 border-l border-zinc-800 flex flex-col shrink-0 overflow-hidden">
-                  {/* Cell Inspector */}
-                  <div className="border-b border-zinc-800">
-                    <div className="p-2 text-xs text-zinc-500 uppercase tracking-wider bg-zinc-800/50">
-                      Cell Properties
-                    </div>
-                    <div className="p-3 space-y-3 text-xs">
-                      <div className="flex items-center justify-between">
-                        <span className="text-zinc-500">Position</span>
-                        <span className="text-zinc-300">
-                          {selectedCell.x}, {selectedCell.y}
-                        </span>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-zinc-500">Glyph</span>
-                        <span className="text-orange-400 text-lg">*</span>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <div className="flex items-center justify-between">
-                          <span className="text-zinc-500">Height</span>
-                          <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            defaultValue="30"
-                            className="w-24"
-                          />
-                          <span className="text-zinc-400 w-8 text-right">
-                            0.3
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-zinc-500">Roughness</span>
-                          <input
-                            type="range"
-                            min="0"
-                            max="100"
-                            defaultValue="20"
-                            className="w-24"
-                          />
-                          <span className="text-zinc-400 w-8 text-right">
-                            0.2
-                          </span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <span className="text-zinc-500">Color</span>
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded bg-orange-400 border border-zinc-600 cursor-pointer" />
-                          <span className="text-zinc-400">#F97316</span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between">
-                        <span className="text-zinc-500">Emission</span>
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded bg-orange-500 border border-zinc-600 cursor-pointer shadow-lg shadow-orange-500/50" />
-                          <span className="text-zinc-400">8.0</span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-4 pt-1">
-                        <label className="flex items-center gap-2 text-zinc-400 cursor-pointer">
-                          <input type="checkbox" defaultChecked />
-                          Walkable
-                        </label>
-                        <label className="flex items-center gap-2 text-zinc-400 cursor-pointer">
-                          <input type="checkbox" />
-                          Blocks sight
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Entities List */}
-                  <div className="flex-1 flex flex-col overflow-hidden">
-                    <div className="p-2 text-xs text-zinc-500 uppercase tracking-wider bg-zinc-800/50">
-                      Entities
-                    </div>
-                    <div className="flex-1 overflow-y-auto">
-                      {entities.map((entity) => (
-                        <div
-                          key={entity.id}
-                          onClick={() => setSelectedEntity(entity.id)}
-                          className={`px-3 py-2 border-b border-zinc-800/50 cursor-pointer transition-colors ${
-                            selectedEntity === entity.id
-                              ? "bg-zinc-800"
-                              : "hover:bg-zinc-800/50"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span
-                              className={`font-medium ${
-                                entity.type === "Player"
-                                  ? "text-emerald-400"
-                                  : entity.type === "Enemy"
-                                  ? "text-red-400"
-                                  : "text-amber-400"
-                              }`}
-                            >
-                              {entity.id}
-                            </span>
-                            <span className="text-xs text-zinc-500">
-                              {entity.type}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between text-xs text-zinc-500 mt-0.5">
-                            <span>pos: {entity.pos}</span>
-                            <span>hp: {entity.hp}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    <div className="p-2 border-t border-zinc-800">
-                      <button className="w-full py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded text-xs text-zinc-400 transition-colors">
-                        + Add Entity
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </>
-            )}
-
-            {activeTab === "code" && (
-              <div className="flex-1 flex flex-col overflow-hidden">
-                {/* Code Editor Header */}
-                <div className="h-8 bg-zinc-800/50 border-b border-zinc-800 flex items-center px-3 text-xs shrink-0">
-                  <span className="text-amber-500">sprites/</span>
-                  <span className="text-zinc-300">enemies.lua</span>
-                  <span className="text-zinc-600 ml-2">— modified</span>
-                </div>
-
-                {/* Code Content */}
-                <div className="flex-1 overflow-auto bg-zinc-950 p-4">
-                  <pre className="text-xs leading-relaxed">
-                    {luaCode.split("\n").map((line, i) => (
-                      <div key={i} className="flex hover:bg-zinc-900/50">
-                        <span className="w-8 text-zinc-600 text-right pr-4 select-none">
-                          {i + 1}
-                        </span>
-                        <code
-                          className={
-                            line.startsWith("--")
-                              ? "text-zinc-500"
-                              : line.includes("function")
-                              ? "text-violet-400"
-                              : line.includes("sprites.")
-                              ? "text-cyan-400"
-                              : line.includes("return")
-                              ? "text-rose-400"
-                              : line.includes('"') || line.includes("'")
-                              ? "text-amber-300"
-                              : "text-zinc-300"
-                          }
-                        >
-                          {line || " "}
-                        </code>
-                      </div>
-                    ))}
-                  </pre>
-                </div>
-              </div>
-            )}
-
-            {activeTab === "sprites" && (
-              <div className="flex-1 flex items-center justify-center text-zinc-600">
-                <div className="text-center">
-                  <div className="text-4xl mb-2">◇</div>
-                  <div>Sprite Editor</div>
-                  <div className="text-xs text-zinc-700 mt-1">Coming soon</div>
-                </div>
-              </div>
-            )}
-
-            {activeTab === "materials" && (
-              <div className="flex-1 flex items-center justify-center text-zinc-600">
-                <div className="text-center">
-                  <div className="text-4xl mb-2">◈</div>
-                  <div>Material Editor</div>
-                  <div className="text-xs text-zinc-700 mt-1">Coming soon</div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Console */}
-          <div className="h-40 bg-zinc-900 border-t border-zinc-800 flex flex-col shrink-0">
-            <div className="h-8 border-b border-zinc-800 flex items-center px-3 gap-4 shrink-0">
-              <span className="text-xs text-zinc-500 uppercase tracking-wider">
-                Console
-              </span>
-              <div className="flex-1" />
-              <button
-                onClick={clearLogs}
-                className="text-xs text-zinc-500 hover:text-zinc-300"
-              >
-                Clear
-              </button>
-            </div>
-            <div className="flex-1 overflow-y-auto p-2 text-xs">
-              {logs.map((log, i) => (
-                <div key={i} className="flex items-start gap-2 py-0.5">
-                  <span className="text-zinc-600 shrink-0">{log.time}</span>
-                  <span
-                    className={`shrink-0 ${
-                      log.type === "info"
-                        ? "text-zinc-500"
-                        : log.type === "warn"
-                        ? "text-amber-500"
-                        : log.type === "error"
-                        ? "text-red-500"
-                        : "text-emerald-500"
-                    }`}
-                  >
-                    {log.type === "info" && "●"}
-                    {log.type === "warn" && "⚠"}
-                    {log.type === "error" && "✕"}
-                    {log.type === "success" && "✓"}
-                  </span>
-                  <span
-                    className={
-                      log.type === "warn"
-                        ? "text-amber-200"
-                        : log.type === "error"
-                        ? "text-red-200"
-                        : log.type === "success"
-                        ? "text-emerald-200"
-                        : "text-zinc-400"
-                    }
-                  >
-                    {log.msg}
-                  </span>
-                </div>
-              ))}
-              <div className="flex items-center gap-2 pt-2 border-t border-zinc-800 mt-2">
-                <span className="text-cyan-500">❯</span>
-                <input
-                  type="text"
-                  placeholder="lua command..."
-                  className="flex-1 bg-transparent text-zinc-300 outline-none placeholder:text-zinc-700"
-                />
-              </div>
-            </div>
-          </div>
         </div>
       </div>
 
-      {/* Status Bar */}
-      <div className="h-6 bg-zinc-800 border-t border-zinc-700 flex items-center justify-between px-3 text-xs shrink-0">
-        <div className="flex items-center gap-4">
-          <span className="text-emerald-400">● WebGPU</span>
-          <span className="text-zinc-500">Renderer: Voxel Rasterizer</span>
+      {/* WebGPU Viewport */}
+      <div className="flex-1 relative min-h-0">
+        <WebGPUViewport className="absolute inset-0" />
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Code Editor
+// ─────────────────────────────────────────────────────────────────────────────
+
+function CodeEditor() {
+  const theme = useTheme();
+  const selectedFile = useEngineState((s) => s.project.selectedFile);
+
+  return (
+    <div className="h-full flex flex-col">
+      <div
+        className="h-8 flex items-center px-3 text-xs shrink-0"
+        style={{ borderBottom: `1px solid ${theme.border}` }}
+      >
+        <span style={{ color: theme.warning }}>
+          {selectedFile?.split('/').slice(-2, -1)}
+        </span>
+        <span style={{ color: theme.text }}>
+          /{selectedFile?.split('/').pop()}
+        </span>
+      </div>
+      <div className="flex-1 flex items-center justify-center" style={{ color: theme.textDim }}>
+        <div className="text-center">
+          <div className="text-4xl mb-2">{'{ }'}</div>
+          <div>Code Editor</div>
+          <div className="text-xs mt-1">Monaco integration coming</div>
         </div>
-        <div className="flex items-center gap-4">
-          <span className="text-zinc-500">Lua: 5.4</span>
-          <span className="text-zinc-500">Shadows: Soft</span>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AI Chat
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ClaudeStreamEvent {
+  event_type: 'start' | 'chunk' | 'done' | 'error';
+  content: string;
+  conversation_id: string;
+}
+
+function AIChat() {
+  const theme = useTheme();
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [claudeAvailable, setClaudeAvailable] = useState<boolean | null>(null);
+  const [claudePath, setClaudePath] = useState<string | null>(null);
+  const currentMessageIdRef = useRef<string>('');
+
+  const {
+    currentConversation,
+    conversations,
+    isStreaming,
+    inputDraft,
+    createConversation,
+    switchConversation,
+    addMessage,
+    appendToMessage,
+    updateMessage,
+    setStreaming,
+    setInputDraft,
+    branchConversation,
+  } = useChat();
+
+  // Check if Claude is available on mount
+  useEffect(() => {
+    Promise.all([
+      invoke<boolean>('check_claude_available'),
+      invoke<string | null>('get_claude_path'),
+    ])
+      .then(([available, path]) => {
+        setClaudeAvailable(available);
+        setClaudePath(path);
+        console.log('Claude available:', available, 'Path:', path);
+      })
+      .catch((err) => {
+        console.error('Failed to check Claude:', err);
+        setClaudeAvailable(false);
+      });
+  }, []);
+
+  // Track the conversation ID we're waiting for responses on
+  const pendingConversationIdRef = useRef<string>('');
+
+  // Listen for streaming events
+  useEffect(() => {
+    const unlisten = listen<ClaudeStreamEvent>('claude-stream', (event) => {
+      const { event_type, content, conversation_id } = event.payload;
+
+      console.log('[AIChat] Stream event:', event_type, 'conv:', conversation_id, 'content length:', content.length);
+
+      // Make sure this event is for a conversation we're expecting
+      // Use the ref instead of currentConversation to avoid race conditions
+      if (pendingConversationIdRef.current && conversation_id !== pendingConversationIdRef.current) {
+        console.log('[AIChat] Ignoring event for different conversation');
+        return;
+      }
+
+      switch (event_type) {
+        case 'start':
+          // Create assistant message placeholder
+          const msgId = addMessage('assistant', '', 'streaming');
+          currentMessageIdRef.current = msgId;
+          console.log('[AIChat] Created message:', msgId);
+          break;
+
+        case 'chunk':
+          // Append content to current message (don't add extra newline, content already formatted)
+          if (currentMessageIdRef.current) {
+            appendToMessage(currentMessageIdRef.current, content);
+          }
+          break;
+
+        case 'done':
+          // Mark message as complete
+          if (currentMessageIdRef.current) {
+            updateMessage(currentMessageIdRef.current, { status: 'complete' });
+            console.log('[AIChat] Message complete');
+          }
+          setStreaming(false);
+          currentMessageIdRef.current = '';
+          pendingConversationIdRef.current = '';
+          break;
+
+        case 'error':
+          // Mark message as error
+          if (currentMessageIdRef.current) {
+            updateMessage(currentMessageIdRef.current, {
+              status: 'error',
+              error: content,
+              content: content || 'Unknown error',
+            });
+          } else {
+            // No message created yet, create one with the error
+            addMessage('assistant', content || 'Unknown error', 'error');
+          }
+          console.log('[AIChat] Error:', content);
+          setStreaming(false);
+          currentMessageIdRef.current = '';
+          pendingConversationIdRef.current = '';
+          break;
+      }
+    });
+
+    return () => {
+      unlisten.then((fn) => fn());
+    };
+  }, [addMessage, appendToMessage, updateMessage, setStreaming]);
+
+  // Auto-scroll to bottom on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [currentConversation?.messages]);
+
+  // Send message
+  const sendMessage = async () => {
+    if (!inputDraft.trim() || isStreaming) return;
+
+    // Create conversation if needed
+    let convId = currentConversation?.id;
+    if (!convId) {
+      convId = createConversation('New Chat');
+    }
+
+    // Set the pending conversation ID before anything else
+    pendingConversationIdRef.current = convId;
+
+    // Add user message
+    addMessage('user', inputDraft.trim());
+    const userMessage = inputDraft.trim();
+    setInputDraft('');
+
+    // Start streaming
+    setStreaming(true);
+
+    console.log('[AIChat] Sending message to conversation:', convId);
+
+    try {
+      await invoke('send_claude_message', {
+        message: userMessage,
+        conversationId: convId,
+        workingDir: null, // Could pass project root here
+      });
+    } catch (error) {
+      console.error('[AIChat] Failed to send message:', error);
+      // Show error in UI
+      addMessage('assistant', `Error: ${error}`, 'error');
+      setStreaming(false);
+      pendingConversationIdRef.current = '';
+    }
+  };
+
+  // Handle input keydown
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
+
+  // No Claude available
+  if (claudeAvailable === false) {
+    return (
+      <div className="h-full flex items-center justify-center p-4" style={{ color: theme.textDim }}>
+        <div className="text-center max-w-sm">
+          <div className="text-4xl mb-4" style={{ color: theme.warning }}>⚠</div>
+          <div className="font-bold mb-2">Claude Code Not Found</div>
+          <div className="text-xs leading-relaxed">
+            Install Claude Code CLI to enable AI chat.
+            <br />
+            <a
+              href="https://claude.ai/claude-code"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline mt-2 inline-block"
+              style={{ color: theme.accent }}
+            >
+              Get Claude Code →
+            </a>
+          </div>
+          {claudePath && (
+            <div className="mt-4 text-xs" style={{ color: theme.textMuted }}>
+              Found at: {claudePath}
+            </div>
+          )}
         </div>
+      </div>
+    );
+  }
+
+  // Loading state
+  if (claudeAvailable === null) {
+    return (
+      <div className="h-full flex items-center justify-center" style={{ color: theme.textDim }}>
+        <div className="text-center">
+          <div className="text-2xl mb-2 animate-pulse" style={{ color: theme.accent }}>◆</div>
+          <div className="text-xs">Checking Claude...</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* Conversation tabs */}
+      <div
+        className="flex items-center gap-1 px-2 py-1 overflow-x-auto shrink-0"
+        style={{ borderBottom: `1px solid ${theme.border}` }}
+      >
+        {conversations.map((conv) => (
+          <button
+            key={conv.id}
+            onClick={() => switchConversation(conv.id)}
+            className="px-2 py-1 rounded text-xs whitespace-nowrap transition-colors"
+            style={{
+              backgroundColor: conv.id === currentConversation?.id ? theme.bgHover : 'transparent',
+              color: conv.id === currentConversation?.id ? theme.accent : theme.textMuted,
+            }}
+          >
+            {conv.title}
+          </button>
+        ))}
+        <button
+          onClick={() => createConversation()}
+          className="px-2 py-1 rounded text-xs transition-colors"
+          style={{ color: theme.textDim }}
+        >
+          + New
+        </button>
+      </div>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
+        {!currentConversation || currentConversation.messages.length === 0 ? (
+          <div className="h-full flex items-center justify-center" style={{ color: theme.textDim }}>
+            <div className="text-center">
+              <div className="text-4xl mb-2" style={{ color: theme.accent }}>◆</div>
+              <div className="font-medium">Claude Code</div>
+              <div className="text-xs mt-1 max-w-xs">
+                Ask me to create modules, edit Lua files, build UI components, or modify the engine.
+              </div>
+            </div>
+          </div>
+        ) : (
+          currentConversation.messages.map((msg, idx) => (
+            <div key={msg.id} className="group">
+              <div
+                className="flex gap-2 text-sm"
+                style={{
+                  flexDirection: msg.role === 'user' ? 'row-reverse' : 'row',
+                }}
+              >
+                {/* Avatar */}
+                <div
+                  className="w-6 h-6 rounded flex items-center justify-center shrink-0 text-xs"
+                  style={{
+                    backgroundColor: msg.role === 'user' ? theme.accent : theme.bgHover,
+                    color: msg.role === 'user' ? theme.bg : theme.accent,
+                  }}
+                >
+                  {msg.role === 'user' ? '@' : '◆'}
+                </div>
+
+                {/* Message content */}
+                <div
+                  className="flex-1 rounded px-3 py-2 text-xs leading-relaxed"
+                  style={{
+                    backgroundColor: msg.role === 'user' ? theme.accentBg + '50' : theme.bgHover,
+                    color: theme.text,
+                    maxWidth: '85%',
+                  }}
+                >
+                  {msg.status === 'streaming' && !msg.content ? (
+                    <span className="animate-pulse">●●●</span>
+                  ) : (
+                    <pre className="whitespace-pre-wrap font-[inherit]">{msg.content}</pre>
+                  )}
+                  {msg.status === 'error' && (
+                    <div className="mt-1 text-xs" style={{ color: theme.error }}>
+                      Error: {msg.error}
+                    </div>
+                  )}
+                </div>
+
+                {/* Branch button */}
+                <button
+                  onClick={() => branchConversation(idx)}
+                  className="opacity-0 group-hover:opacity-50 hover:opacity-100 transition-opacity p-1"
+                  style={{ color: theme.textMuted }}
+                  title="Branch from here"
+                >
+                  ↗
+                </button>
+              </div>
+            </div>
+          ))
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input */}
+      <div
+        className="p-3 shrink-0"
+        style={{ borderTop: `1px solid ${theme.border}` }}
+      >
+        <div
+          className="flex gap-2 rounded p-2"
+          style={{ backgroundColor: theme.bgHover }}
+        >
+          <textarea
+            ref={inputRef}
+            value={inputDraft}
+            onChange={(e) => setInputDraft(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={isStreaming ? 'Claude is thinking...' : 'Ask Claude...'}
+            disabled={isStreaming}
+            className="flex-1 bg-transparent outline-none resize-none text-sm"
+            style={{ color: theme.text, minHeight: '20px', maxHeight: '120px' }}
+            rows={1}
+          />
+          <button
+            onClick={sendMessage}
+            disabled={isStreaming || !inputDraft.trim()}
+            className="px-3 py-1 rounded text-xs font-medium transition-colors"
+            style={{
+              backgroundColor: isStreaming || !inputDraft.trim() ? theme.bgHover : theme.accent,
+              color: isStreaming || !inputDraft.trim() ? theme.textDim : theme.bg,
+            }}
+          >
+            {isStreaming ? '...' : 'Send'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Properties Panel
+// ─────────────────────────────────────────────────────────────────────────────
+
+function PropertiesPanel() {
+  const theme = useTheme();
+  const { selection } = useSelection();
+  const { entities } = useEntities();
+  const history = useEngineState((s) => s.session.undoStack);
+
+  const selectedEntity = entities.find((e) => selection.entities.includes(e.id));
+
+  return (
+    <div className="h-full overflow-y-auto">
+      {/* Properties Section */}
+      <div style={{ borderBottom: `1px solid ${theme.border}` }}>
+        <div
+          className="px-3 py-2 text-xs uppercase tracking-wider"
+          style={{ backgroundColor: theme.bgHover, color: theme.textMuted }}
+        >
+          Properties
+        </div>
+        <div className="p-3 text-xs">
+          {selectedEntity ? (
+            <div className="space-y-2">
+              <PropertyRow label="ID" value={selectedEntity.id} />
+              <PropertyRow label="Type" value={selectedEntity.type} />
+              <PropertyRow label="Glyph" value={selectedEntity.glyph} />
+              <PropertyRow
+                label="Position"
+                value={selectedEntity.position.map((n) => n.toFixed(1)).join(', ')}
+              />
+              <PropertyRow
+                label="Color"
+                value={
+                  <div
+                    className="w-4 h-4 rounded border"
+                    style={{
+                      backgroundColor: `rgb(${selectedEntity.color.map((c) => c * 255).join(',')})`,
+                      borderColor: theme.border,
+                    }}
+                  />
+                }
+              />
+            </div>
+          ) : (
+            <div style={{ color: theme.textMuted }}>No entity selected</div>
+          )}
+        </div>
+      </div>
+
+      {/* Components Section */}
+      <div style={{ borderBottom: `1px solid ${theme.border}` }}>
+        <div
+          className="px-3 py-2 text-xs uppercase tracking-wider"
+          style={{ backgroundColor: theme.bgHover, color: theme.textMuted }}
+        >
+          Components
+        </div>
+        <div className="p-3 text-xs">
+          {selectedEntity ? (
+            <div className="space-y-2">
+              {selectedEntity.components.map((comp) => (
+                <div
+                  key={comp}
+                  className="px-2 py-1.5 rounded"
+                  style={{ backgroundColor: theme.bgHover }}
+                >
+                  <span style={{ color: theme.accent }}>{comp}</span>
+                  {selectedEntity.componentData[comp] && (
+                    <div className="mt-1 pl-2" style={{ color: theme.textMuted }}>
+                      {Object.entries(selectedEntity.componentData[comp]).map(([k, v]) => (
+                        <div key={k}>{k}: {JSON.stringify(v)}</div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ color: theme.textMuted }}>No entity selected</div>
+          )}
+        </div>
+      </div>
+
+      {/* History Section */}
+      <div>
+        <div
+          className="px-3 py-2 text-xs uppercase tracking-wider"
+          style={{ backgroundColor: theme.bgHover, color: theme.textMuted }}
+        >
+          History
+        </div>
+        <div className="p-3 text-xs max-h-48 overflow-y-auto">
+          {history.length === 0 ? (
+            <div style={{ color: theme.textMuted }}>No history</div>
+          ) : (
+            <div className="space-y-1">
+              {[...history].reverse().slice(0, 20).map((entry, i) => (
+                <div
+                  key={entry.timestamp}
+                  className="px-2 py-1 rounded"
+                  style={{
+                    backgroundColor: i === 0 ? theme.accentBg + '50' : 'transparent',
+                    color: i === 0 ? theme.text : theme.textMuted,
+                  }}
+                >
+                  {entry.description}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PropertyRow({ label, value }: { label: string; value: React.ReactNode }) {
+  const theme = useTheme();
+  return (
+    <div className="flex items-center justify-between">
+      <span style={{ color: theme.textMuted }}>{label}</span>
+      <span style={{ color: theme.text }}>{value}</span>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Console Panel
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ConsolePanel() {
+  const theme = useTheme();
+  const logs = useEngineState((s) => s.console.logs);
+  const clearLogs = useEngineState((s) => s.clearLogs);
+
+  const getLogColor = (type: string) => {
+    switch (type) {
+      case 'warn': return theme.warning;
+      case 'error': return theme.error;
+      case 'success': return theme.success;
+      default: return theme.textMuted;
+    }
+  };
+
+  const getLogIcon = (type: string) => {
+    switch (type) {
+      case 'warn': return '⚠';
+      case 'error': return '✕';
+      case 'success': return '✓';
+      default: return '●';
+    }
+  };
+
+  return (
+    <div className="h-full flex flex-col">
+      <div
+        className="h-8 flex items-center px-3 gap-4 shrink-0"
+        style={{ borderBottom: `1px solid ${theme.border}` }}
+      >
+        <div className="flex-1" />
+        <button onClick={clearLogs} className="text-xs" style={{ color: theme.textMuted }}>
+          Clear
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-2 text-xs">
+        {logs.map((log, i) => (
+          <div key={i} className="flex items-start gap-2 py-0.5">
+            <span style={{ color: theme.textDim }} className="shrink-0">{log.time}</span>
+            <span style={{ color: getLogColor(log.type) }} className="shrink-0">
+              {getLogIcon(log.type)}
+            </span>
+            <span style={{ color: log.type === 'error' ? theme.error : theme.text }}>
+              {log.msg}
+            </span>
+          </div>
+        ))}
+
+        <div
+          className="flex items-center gap-2 pt-2 mt-2"
+          style={{ borderTop: `1px solid ${theme.border}` }}
+        >
+          <span style={{ color: theme.accent }}>❯</span>
+          <input
+            type="text"
+            placeholder="lua command..."
+            className="flex-1 bg-transparent outline-none"
+            style={{ color: theme.text }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Status Bar
+// ─────────────────────────────────────────────────────────────────────────────
+
+function StatusBar() {
+  const theme = useTheme();
+  const renderSettings = useEngineState((s) => s.renderSettings);
+  const template = useEngineState((s) => s.template);
+  const cameraMode = useEngineState((s) => s.camera.mode);
+  const undoCount = useEngineState((s) => s.session.undoStack.length);
+  const canUndoNow = useEngineState((s) => s.canUndo);
+
+  // Get current template info
+  const currentTemplate = getTemplate(template.currentId || '');
+
+  // Get render mode name
+  const renderModeName = currentTemplate?.render?.mode || cameraMode;
+
+  return (
+    <div
+      className="h-6 flex items-center justify-between px-3 text-xs shrink-0"
+      style={{
+        backgroundColor: theme.bgHover,
+        borderTop: `1px solid ${theme.border}`,
+      }}
+    >
+      <div className="flex items-center gap-4">
+        <span style={{ color: theme.success }}>● WebGPU</span>
+        <span style={{ color: theme.textMuted }}>
+          Mode: <span style={{ color: theme.accent }}>{renderModeName}</span>
+        </span>
+        {template.isCustomized && (
+          <span style={{ color: theme.warning }}>● Modified</span>
+        )}
+      </div>
+      <div className="flex items-center gap-4">
+        <span style={{ color: theme.textMuted }}>
+          Types: {currentTemplate ? Object.keys(currentTemplate.types).length : 0}
+        </span>
+        <span style={{ color: theme.textMuted }}>
+          Shadows: {renderSettings.shadowsEnabled ? 'On' : 'Off'}
+        </span>
+        <span style={{ color: theme.textMuted }}>
+          Undo: {undoCount} {canUndoNow() ? '(Ctrl+Z)' : ''}
+        </span>
       </div>
     </div>
   );

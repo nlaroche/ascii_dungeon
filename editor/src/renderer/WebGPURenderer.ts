@@ -496,7 +496,6 @@ export class WebGPURenderer {
       console.log('  Instance data length:', instanceData.length)
       console.log('  Canvas size:', this.width, 'x', this.height)
       console.log('  Camera position:', camera.position)
-      console.log('  Camera target:', camera.target)
     }
     this.frameCount++
 

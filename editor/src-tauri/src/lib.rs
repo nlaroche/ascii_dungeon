@@ -9,6 +9,8 @@ use std::sync::Arc;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // Initialize engine manager (wrapped in Arc for exit handler)
             let engine_manager = Arc::new(engine_process::EngineManager::new());
@@ -44,6 +46,10 @@ pub fn run() {
             commands::set_engine_follow,
             commands::show_engine,
             commands::get_window_hwnd,
+            // Claude Code integration
+            commands::check_claude_available,
+            commands::get_claude_path,
+            commands::send_claude_message,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

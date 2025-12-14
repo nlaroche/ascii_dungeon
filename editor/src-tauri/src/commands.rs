@@ -3,7 +3,10 @@ use crate::ipc_bridge::IpcBridge;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use tauri::{AppHandle, Manager, State};
+use std::process::Stdio;
+use tokio::process::Command;
+use tokio::io::{BufReader, AsyncBufReadExt};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineStats {
@@ -290,4 +293,223 @@ pub async fn get_window_hwnd(app: AppHandle) -> Result<u64, String> {
     {
         Err("Not supported on this platform".to_string())
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CLAUDE CODE INTEGRATION
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ClaudeStreamEvent {
+    pub event_type: String,  // "start", "chunk", "done", "error"
+    pub content: String,
+    pub conversation_id: String,
+}
+
+/// Find the claude executable path
+fn find_claude_path() -> Option<String> {
+    // First try using 'where' on Windows or 'which' on Unix to find it
+    #[cfg(windows)]
+    {
+        if let Ok(output) = std::process::Command::new("where")
+            .arg("claude")
+            .output()
+        {
+            if output.status.success() {
+                if let Ok(path) = String::from_utf8(output.stdout) {
+                    let first_line = path.lines().next().unwrap_or("").trim();
+                    if !first_line.is_empty() {
+                        return Some(first_line.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(not(windows))]
+    {
+        if let Ok(output) = std::process::Command::new("which")
+            .arg("claude")
+            .output()
+        {
+            if output.status.success() {
+                if let Ok(path) = String::from_utf8(output.stdout) {
+                    let trimmed = path.trim();
+                    if !trimmed.is_empty() {
+                        return Some(trimmed.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    // Try common locations as fallback
+    let possible_paths = vec![
+        "claude".to_string(),  // In PATH
+        #[cfg(windows)]
+        format!("{}\\AppData\\Local\\Programs\\claude-code\\claude.exe", std::env::var("USERPROFILE").unwrap_or_default()),
+        #[cfg(windows)]
+        format!("{}\\AppData\\Roaming\\npm\\claude.cmd", std::env::var("USERPROFILE").unwrap_or_default()),
+        #[cfg(windows)]
+        format!("{}\\.claude\\local\\claude.exe", std::env::var("USERPROFILE").unwrap_or_default()),
+        #[cfg(windows)]
+        format!("{}\\scoop\\shims\\claude.cmd", std::env::var("USERPROFILE").unwrap_or_default()),
+        #[cfg(not(windows))]
+        format!("{}/.claude/local/claude", std::env::var("HOME").unwrap_or_default()),
+        #[cfg(not(windows))]
+        "/usr/local/bin/claude".to_string(),
+        #[cfg(not(windows))]
+        format!("{}/.local/bin/claude", std::env::var("HOME").unwrap_or_default()),
+    ];
+
+    for path in possible_paths {
+        if !path.is_empty() {
+            // Check if file exists
+            if std::path::Path::new(&path).exists() {
+                return Some(path);
+            }
+            // Try running it
+            let result = std::process::Command::new(&path)
+                .arg("--version")
+                .output();
+
+            if result.is_ok() {
+                return Some(path);
+            }
+        }
+    }
+
+    None
+}
+
+/// Check if Claude Code CLI is available
+#[tauri::command]
+pub async fn check_claude_available() -> Result<bool, String> {
+    Ok(find_claude_path().is_some())
+}
+
+/// Get the path to claude executable
+#[tauri::command]
+pub async fn get_claude_path() -> Result<Option<String>, String> {
+    Ok(find_claude_path())
+}
+
+/// Send a message to Claude Code and stream the response
+#[tauri::command]
+pub async fn send_claude_message(
+    app: AppHandle,
+    message: String,
+    conversation_id: String,
+    working_dir: Option<String>,
+) -> Result<(), String> {
+    // Find claude executable
+    let claude_path = find_claude_path()
+        .ok_or_else(|| "Claude Code CLI not found".to_string())?;
+
+    println!("[Claude] Using path: {}", claude_path);
+    println!("[Claude] Message: {}", message);
+
+    // Emit start event
+    let _ = app.emit("claude-stream", ClaudeStreamEvent {
+        event_type: "start".to_string(),
+        content: "".to_string(),
+        conversation_id: conversation_id.clone(),
+    });
+
+    // Build the claude command
+    // Using -p (print mode) with --output-format text for clean output
+    let mut cmd = Command::new(&claude_path);
+    cmd.arg("-p")  // print mode (non-interactive)
+        .arg(&message)
+        .arg("--output-format")
+        .arg("text")  // plain text output, no markdown streaming artifacts
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .stdin(Stdio::null());  // No stdin to prevent interactive prompts
+
+    // Set working directory if provided
+    if let Some(dir) = working_dir {
+        cmd.current_dir(&dir);
+    }
+
+    // Spawn the process
+    let mut child = cmd.spawn()
+        .map_err(|e| format!("Failed to spawn claude: {}", e))?;
+
+    println!("[Claude] Process spawned");
+
+    // Get stdout and stderr for streaming
+    let stdout = child.stdout.take()
+        .ok_or("Failed to capture stdout")?;
+    let stderr = child.stderr.take();
+
+    // Read stdout in chunks for better streaming
+    let mut reader = BufReader::new(stdout);
+    let mut full_response = String::new();
+    let mut buffer = [0u8; 1024];
+
+    use tokio::io::AsyncReadExt;
+
+    loop {
+        match reader.read(&mut buffer).await {
+            Ok(0) => break, // EOF
+            Ok(n) => {
+                if let Ok(text) = String::from_utf8(buffer[..n].to_vec()) {
+                    full_response.push_str(&text);
+
+                    // Emit chunk event for each read
+                    let _ = app.emit("claude-stream", ClaudeStreamEvent {
+                        event_type: "chunk".to_string(),
+                        content: text,
+                        conversation_id: conversation_id.clone(),
+                    });
+                }
+            }
+            Err(e) => {
+                println!("[Claude] Read error: {}", e);
+                break;
+            }
+        }
+    }
+
+    // Check stderr for errors
+    if let Some(stderr) = stderr {
+        let mut stderr_reader = BufReader::new(stderr);
+        let mut stderr_content = String::new();
+        use tokio::io::AsyncReadExt;
+        let _ = stderr_reader.read_to_string(&mut stderr_content).await;
+        if !stderr_content.is_empty() {
+            println!("[Claude] Stderr: {}", stderr_content);
+        }
+    }
+
+    // Wait for process to complete
+    let status = child.wait().await
+        .map_err(|e| format!("Error waiting for process: {}", e))?;
+
+    println!("[Claude] Process exited with status: {}", status);
+
+    if status.success() {
+        // Emit done event
+        let _ = app.emit("claude-stream", ClaudeStreamEvent {
+            event_type: "done".to_string(),
+            content: full_response.clone(),
+            conversation_id: conversation_id.clone(),
+        });
+        println!("[Claude] Response length: {} chars", full_response.len());
+    } else {
+        // Emit error event
+        let error_msg = if full_response.is_empty() {
+            format!("Claude exited with status: {}", status)
+        } else {
+            full_response
+        };
+        let _ = app.emit("claude-stream", ClaudeStreamEvent {
+            event_type: "error".to_string(),
+            content: error_msg,
+            conversation_id: conversation_id.clone(),
+        });
+    }
+
+    Ok(())
 }
