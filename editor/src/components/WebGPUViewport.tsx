@@ -24,12 +24,22 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
   const [loading, setLoading] = useState(true)
   const [fps, setFps] = useState(0)
 
-  // Handle keyboard input
+  // Handle keyboard input - only when not typing in an input
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
+    // Don't capture keys when typing in inputs, textareas, or contenteditable
+    const target = e.target as HTMLElement
+    if (
+      target.tagName === 'INPUT' ||
+      target.tagName === 'TEXTAREA' ||
+      target.isContentEditable
+    ) {
+      return
+    }
     keysRef.current.add(e.key.toLowerCase())
   }, [])
 
   const handleKeyUp = useCallback((e: KeyboardEvent) => {
+    // Always remove key from set on keyup to prevent stuck keys
     keysRef.current.delete(e.key.toLowerCase())
   }, [])
 

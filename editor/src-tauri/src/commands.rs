@@ -4,9 +4,12 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::Arc;
 use std::process::Stdio;
+use std::path::PathBuf;
 use tokio::process::Command;
-use tokio::io::{BufReader, AsyncBufReadExt};
 use tauri::{AppHandle, Emitter, Manager, State};
+use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
+use std::sync::Mutex;
+use std::time::Duration;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EngineStats {
@@ -308,9 +311,34 @@ pub struct ClaudeStreamEvent {
 
 /// Find the claude executable path
 fn find_claude_path() -> Option<String> {
-    // First try using 'where' on Windows or 'which' on Unix to find it
+    // On Windows, prefer .cmd files from npm
     #[cfg(windows)]
     {
+        // First check npm global install location directly (most common)
+        let npm_cmd = format!("{}\\AppData\\Roaming\\npm\\claude.cmd",
+            std::env::var("USERPROFILE").unwrap_or_default());
+        if std::path::Path::new(&npm_cmd).exists() {
+            println!("[Claude] Found npm cmd: {}", npm_cmd);
+            return Some(npm_cmd);
+        }
+
+        // Try 'where' command
+        if let Ok(output) = std::process::Command::new("where")
+            .arg("claude.cmd")
+            .output()
+        {
+            if output.status.success() {
+                if let Ok(path) = String::from_utf8(output.stdout) {
+                    let first_line = path.lines().next().unwrap_or("").trim();
+                    if !first_line.is_empty() {
+                        println!("[Claude] Found via where: {}", first_line);
+                        return Some(first_line.to_string());
+                    }
+                }
+            }
+        }
+
+        // Also try without .cmd extension
         if let Ok(output) = std::process::Command::new("where")
             .arg("claude")
             .output()
@@ -319,7 +347,14 @@ fn find_claude_path() -> Option<String> {
                 if let Ok(path) = String::from_utf8(output.stdout) {
                     let first_line = path.lines().next().unwrap_or("").trim();
                     if !first_line.is_empty() {
-                        return Some(first_line.to_string());
+                        // If it's an npm path without extension, add .cmd
+                        let path_str = if first_line.contains("npm") && !first_line.ends_with(".cmd") {
+                            format!("{}.cmd", first_line)
+                        } else {
+                            first_line.to_string()
+                        };
+                        println!("[Claude] Found via where (adjusted): {}", path_str);
+                        return Some(path_str);
                     }
                 }
             }
@@ -345,7 +380,6 @@ fn find_claude_path() -> Option<String> {
 
     // Try common locations as fallback
     let possible_paths = vec![
-        "claude".to_string(),  // In PATH
         #[cfg(windows)]
         format!("{}\\AppData\\Local\\Programs\\claude-code\\claude.exe", std::env::var("USERPROFILE").unwrap_or_default()),
         #[cfg(windows)]
@@ -363,19 +397,9 @@ fn find_claude_path() -> Option<String> {
     ];
 
     for path in possible_paths {
-        if !path.is_empty() {
-            // Check if file exists
-            if std::path::Path::new(&path).exists() {
-                return Some(path);
-            }
-            // Try running it
-            let result = std::process::Command::new(&path)
-                .arg("--version")
-                .output();
-
-            if result.is_ok() {
-                return Some(path);
-            }
+        if !path.is_empty() && std::path::Path::new(&path).exists() {
+            println!("[Claude] Found at fallback path: {}", path);
+            return Some(path);
         }
     }
 
@@ -386,6 +410,55 @@ fn find_claude_path() -> Option<String> {
 #[tauri::command]
 pub async fn check_claude_available() -> Result<bool, String> {
     Ok(find_claude_path().is_some())
+}
+
+/// Open a terminal window for Claude authentication
+#[tauri::command]
+pub async fn open_claude_auth() -> Result<(), String> {
+    let claude_path = find_claude_path()
+        .ok_or_else(|| "Claude Code CLI not found".to_string())?;
+
+    println!("[Claude] Opening terminal for authentication...");
+
+    #[cfg(windows)]
+    {
+        // On Windows, open a new cmd window with claude running
+        std::process::Command::new("cmd")
+            .args(["/c", "start", "cmd", "/k", &claude_path])
+            .spawn()
+            .map_err(|e| format!("Failed to open terminal: {}", e))?;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        // On macOS, open Terminal.app
+        std::process::Command::new("osascript")
+            .args(["-e", &format!("tell app \"Terminal\" to do script \"{}\"", claude_path)])
+            .spawn()
+            .map_err(|e| format!("Failed to open terminal: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // On Linux, try common terminal emulators
+        let terminals = ["gnome-terminal", "konsole", "xterm", "x-terminal-emulator"];
+        let mut opened = false;
+        for term in terminals {
+            if std::process::Command::new(term)
+                .args(["--", &claude_path])
+                .spawn()
+                .is_ok()
+            {
+                opened = true;
+                break;
+            }
+        }
+        if !opened {
+            return Err("Could not find a terminal emulator".to_string());
+        }
+    }
+
+    Ok(())
 }
 
 /// Get the path to claude executable
@@ -404,112 +477,374 @@ pub async fn send_claude_message(
 ) -> Result<(), String> {
     // Find claude executable
     let claude_path = find_claude_path()
-        .ok_or_else(|| "Claude Code CLI not found".to_string())?;
+        .ok_or_else(|| "Claude Code CLI not found. Install it from https://claude.ai/claude-code".to_string())?;
 
     println!("[Claude] Using path: {}", claude_path);
     println!("[Claude] Message: {}", message);
+    println!("[Claude] Working dir: {:?}", working_dir);
 
-    // Emit start event
-    let _ = app.emit("claude-stream", ClaudeStreamEvent {
+    // Emit start event immediately
+    if let Err(e) = app.emit("claude-stream", ClaudeStreamEvent {
         event_type: "start".to_string(),
         content: "".to_string(),
         conversation_id: conversation_id.clone(),
-    });
+    }) {
+        println!("[Claude] Failed to emit start event: {}", e);
+    }
 
     // Build the claude command
-    // Using -p (print mode) with --output-format text for clean output
-    let mut cmd = Command::new(&claude_path);
-    cmd.arg("-p")  // print mode (non-interactive)
-        .arg(&message)
-        .arg("--output-format")
-        .arg("text")  // plain text output, no markdown streaming artifacts
-        .stdout(Stdio::piped())
+    // Using -p (print mode) for non-interactive single-prompt execution
+    // On Windows, npm-installed CLI tools are .cmd batch files that need cmd.exe
+    // The 'where' command may return paths without extension, so we check multiple patterns
+    let is_npm_cmd = cfg!(windows) && (
+        claude_path.ends_with(".cmd") ||
+        claude_path.ends_with(".CMD") ||
+        claude_path.contains("\\npm\\") ||
+        claude_path.contains("/npm/") ||
+        claude_path.contains("\\AppData\\Roaming\\npm")
+    );
+
+    println!("[Claude] Is npm cmd file: {}", is_npm_cmd);
+
+    // Use --print flag with message piped through stdin
+    // Use --dangerously-skip-permissions so Claude can execute code changes
+    // Note: We use plain text output (no --output-format) for simplicity
+    let mut cmd = if is_npm_cmd {
+        // Run through cmd.exe for batch files
+        let mut c = Command::new("cmd.exe");
+        c.arg("/C")
+            .arg(&claude_path)
+            .arg("--print")
+            .arg("--dangerously-skip-permissions");
+        c
+    } else {
+        let mut c = Command::new(&claude_path);
+        c.arg("--print")
+            .arg("--dangerously-skip-permissions");
+        c
+    };
+
+    cmd.stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .stdin(Stdio::null());  // No stdin to prevent interactive prompts
+        .stdin(Stdio::piped());  // Message will be piped through stdin
+
+    // IMPORTANT: Remove ANTHROPIC_API_KEY to force Claude to use Max subscription auth
+    // instead of an invalid/expired API key
+    cmd.env_remove("ANTHROPIC_API_KEY");
 
     // Set working directory if provided
-    if let Some(dir) = working_dir {
-        cmd.current_dir(&dir);
+    if let Some(ref dir) = working_dir {
+        cmd.current_dir(dir);
     }
 
     // Spawn the process
-    let mut child = cmd.spawn()
-        .map_err(|e| format!("Failed to spawn claude: {}", e))?;
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => {
+            let error_msg = format!("Failed to spawn claude: {}. Path: {}", e, claude_path);
+            println!("[Claude] {}", error_msg);
+            let _ = app.emit("claude-stream", ClaudeStreamEvent {
+                event_type: "error".to_string(),
+                content: error_msg.clone(),
+                conversation_id: conversation_id.clone(),
+            });
+            return Err(error_msg);
+        }
+    };
 
-    println!("[Claude] Process spawned");
+    println!("[Claude] Process spawned successfully");
+
+    // Write the message to stdin
+    if let Some(mut stdin) = child.stdin.take() {
+        use tokio::io::AsyncWriteExt;
+        println!("[Claude] Writing message to stdin: {}", message);
+        if let Err(e) = stdin.write_all(message.as_bytes()).await {
+            println!("[Claude] Failed to write to stdin: {}", e);
+        }
+        // Close stdin to signal end of input
+        drop(stdin);
+        println!("[Claude] Stdin closed");
+    }
 
     // Get stdout and stderr for streaming
     let stdout = child.stdout.take()
         .ok_or("Failed to capture stdout")?;
-    let stderr = child.stderr.take();
+    let stderr = child.stderr.take()
+        .ok_or("Failed to capture stderr")?;
 
-    // Read stdout in chunks for better streaming
-    let mut reader = BufReader::new(stdout);
-    let mut full_response = String::new();
-    let mut buffer = [0u8; 1024];
-
+    // Read stdout and stderr concurrently using raw bytes for better streaming
     use tokio::io::AsyncReadExt;
 
-    loop {
-        match reader.read(&mut buffer).await {
-            Ok(0) => break, // EOF
-            Ok(n) => {
-                if let Ok(text) = String::from_utf8(buffer[..n].to_vec()) {
-                    full_response.push_str(&text);
+    let app_stdout = app.clone();
+    let conv_id_stdout = conversation_id.clone();
 
-                    // Emit chunk event for each read
-                    let _ = app.emit("claude-stream", ClaudeStreamEvent {
-                        event_type: "chunk".to_string(),
-                        content: text,
-                        conversation_id: conversation_id.clone(),
-                    });
+    // Spawn task to read stdout in small chunks for real-time streaming
+    let stdout_handle = tokio::spawn(async move {
+        let mut stdout = stdout;
+        let mut full_response = String::new();
+        let mut buffer = [0u8; 256]; // Small buffer for responsive streaming
+        let mut chunk_count = 0;
+
+        loop {
+            match stdout.read(&mut buffer).await {
+                Ok(0) => break, // EOF
+                Ok(n) => {
+                    chunk_count += 1;
+                    if let Ok(text) = String::from_utf8(buffer[..n].to_vec()) {
+                        println!("[Claude] stdout chunk {}: {} bytes", chunk_count, n);
+                        full_response.push_str(&text);
+
+                        // Emit chunk event immediately
+                        if let Err(e) = app_stdout.emit("claude-stream", ClaudeStreamEvent {
+                            event_type: "chunk".to_string(),
+                            content: text,
+                            conversation_id: conv_id_stdout.clone(),
+                        }) {
+                            println!("[Claude] Failed to emit chunk: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("[Claude] stdout read error: {}", e);
+                    break;
                 }
             }
-            Err(e) => {
-                println!("[Claude] Read error: {}", e);
-                break;
+        }
+
+        println!("[Claude] stdout done, {} chunks, {} total chars", chunk_count, full_response.len());
+        full_response
+    });
+
+    // Spawn task to read stderr and emit progress events
+    let app_stderr = app.clone();
+    let conv_id_stderr = conversation_id.clone();
+    let stderr_handle = tokio::spawn(async move {
+        let mut stderr = stderr;
+        let mut stderr_content = String::new();
+        let mut buffer = [0u8; 1024];
+
+        loop {
+            match stderr.read(&mut buffer).await {
+                Ok(0) => break,
+                Ok(n) => {
+                    if let Ok(text) = String::from_utf8(buffer[..n].to_vec()) {
+                        println!("[Claude] stderr: {}", text);
+                        stderr_content.push_str(&text);
+
+                        // Emit progress event so UI can show what's happening
+                        let _ = app_stderr.emit("claude-stream", ClaudeStreamEvent {
+                            event_type: "progress".to_string(),
+                            content: text,
+                            conversation_id: conv_id_stderr.clone(),
+                        });
+                    }
+                }
+                Err(_) => break,
             }
         }
-    }
 
-    // Check stderr for errors
-    if let Some(stderr) = stderr {
-        let mut stderr_reader = BufReader::new(stderr);
-        let mut stderr_content = String::new();
-        use tokio::io::AsyncReadExt;
-        let _ = stderr_reader.read_to_string(&mut stderr_content).await;
-        if !stderr_content.is_empty() {
-            println!("[Claude] Stderr: {}", stderr_content);
+        stderr_content
+    });
+
+    // Wait for both readers to complete with a timeout
+    // Code execution can take a while - 3 minutes should cover most cases
+    let timeout_duration = tokio::time::Duration::from_secs(180);
+
+    let result = tokio::time::timeout(
+        timeout_duration,
+        async {
+            let (stdout_result, stderr_result) = tokio::join!(stdout_handle, stderr_handle);
+
+            let full_response = stdout_result.unwrap_or_else(|e| {
+                println!("[Claude] stdout task error: {}", e);
+                String::new()
+            });
+
+            let stderr_content = stderr_result.unwrap_or_else(|e| {
+                println!("[Claude] stderr task error: {}", e);
+                String::new()
+            });
+
+            // Wait for process to complete
+            let status = child.wait().await;
+
+            (full_response, stderr_content, status)
         }
-    }
+    ).await;
 
-    // Wait for process to complete
-    let status = child.wait().await
-        .map_err(|e| format!("Error waiting for process: {}", e))?;
+    // Handle timeout
+    let (full_response, stderr_content, status_result) = match result {
+        Ok(data) => data,
+        Err(_) => {
+            println!("[Claude] Process timed out after {} seconds", timeout_duration.as_secs());
+            let error_msg = format!(
+                "Claude process timed out after {} seconds. This usually means Claude is waiting for authentication. \
+                Please run 'claude' in a terminal first to authenticate.",
+                timeout_duration.as_secs()
+            );
+            let _ = app.emit("claude-stream", ClaudeStreamEvent {
+                event_type: "error".to_string(),
+                content: error_msg.clone(),
+                conversation_id: conversation_id.clone(),
+            });
+            return Err(error_msg);
+        }
+    };
+
+    let status = status_result.map_err(|e| format!("Error waiting for process: {}", e))?;
 
     println!("[Claude] Process exited with status: {}", status);
+    println!("[Claude] Response length: {} chars", full_response.len());
+    if !stderr_content.is_empty() {
+        println!("[Claude] Stderr content: {}", stderr_content);
+    }
 
-    if status.success() {
+    if status.success() && !full_response.is_empty() {
         // Emit done event
-        let _ = app.emit("claude-stream", ClaudeStreamEvent {
+        if let Err(e) = app.emit("claude-stream", ClaudeStreamEvent {
             event_type: "done".to_string(),
-            content: full_response.clone(),
+            content: full_response,
             conversation_id: conversation_id.clone(),
-        });
-        println!("[Claude] Response length: {} chars", full_response.len());
+        }) {
+            println!("[Claude] Failed to emit done event: {}", e);
+        }
     } else {
-        // Emit error event
-        let error_msg = if full_response.is_empty() {
-            format!("Claude exited with status: {}", status)
+        // Log detailed error info
+        println!("[Claude] ERROR - Status: {}", status);
+        println!("[Claude] ERROR - Stdout length: {}", full_response.len());
+        println!("[Claude] ERROR - Stderr: {}", stderr_content);
+        println!("[Claude] ERROR - Stdout preview: {}", &full_response.chars().take(500).collect::<String>());
+
+        // Emit error event with helpful message - include raw stderr for debugging
+        let error_msg = if stderr_content.contains("out of") || stderr_content.contains("credits") || stderr_content.contains("disabled") {
+            "API credits exhausted. Add credits at console.anthropic.com or sign in with Claude Max.".to_string()
+        } else if stderr_content.contains("Login") || stderr_content.contains("auth") {
+            format!("Authentication issue: {}", stderr_content)
+        } else if !stderr_content.is_empty() {
+            format!("Error: {}", stderr_content)
+        } else if full_response.is_empty() {
+            format!("Claude exited with status {} but produced no output. Stderr was empty. This may indicate an authentication issue.", status)
         } else {
-            full_response
+            format!("Claude exited with status: {} - Output: {}", status, &full_response.chars().take(200).collect::<String>())
         };
-        let _ = app.emit("claude-stream", ClaudeStreamEvent {
+
+        if let Err(e) = app.emit("claude-stream", ClaudeStreamEvent {
             event_type: "error".to_string(),
             content: error_msg,
             conversation_id: conversation_id.clone(),
-        });
+        }) {
+            println!("[Claude] Failed to emit error event: {}", e);
+        }
     }
 
+    Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FILE SYSTEM WATCHING
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Event emitted when files change
+#[derive(Debug, Clone, Serialize)]
+pub struct FileChangeEvent {
+    pub event_type: String,  // "create", "modify", "delete"
+    pub path: String,
+}
+
+/// State for managing the file watcher
+pub struct FileWatcherState {
+    /// The debouncer handle - dropping it stops watching
+    debouncer: Option<notify_debouncer_mini::Debouncer<notify::RecommendedWatcher>>,
+    /// Path being watched
+    watched_path: Option<PathBuf>,
+}
+
+impl Default for FileWatcherState {
+    fn default() -> Self {
+        Self {
+            debouncer: None,
+            watched_path: None,
+        }
+    }
+}
+
+/// Start watching a directory for file changes
+#[tauri::command]
+pub async fn start_file_watcher(
+    app: AppHandle,
+    watcher_state: State<'_, Mutex<FileWatcherState>>,
+    path: String,
+) -> Result<(), String> {
+    let watch_path = PathBuf::from(&path);
+
+    if !watch_path.exists() {
+        return Err(format!("Directory does not exist: {}", path));
+    }
+
+    println!("[FileWatcher] Starting watcher for: {}", path);
+
+    // Stop any existing watcher
+    {
+        let mut state = watcher_state.lock().map_err(|e| e.to_string())?;
+        state.debouncer = None;
+        state.watched_path = None;
+    }
+
+    // Create the watcher
+    let app_handle = app.clone();
+    let debouncer = new_debouncer(
+        Duration::from_millis(500), // Debounce for 500ms
+        move |result: Result<Vec<notify_debouncer_mini::DebouncedEvent>, notify::Error>| {
+            match result {
+                Ok(events) => {
+                    for event in events {
+                        let event_type = "modify".to_string(); // Debouncer only reports "any" event type
+                        let path_str = event.path.to_string_lossy().to_string();
+
+                        println!("[FileWatcher] File changed: {}", path_str);
+
+                        // Emit event to frontend
+                        if let Err(e) = app_handle.emit("file-change", FileChangeEvent {
+                            event_type,
+                            path: path_str,
+                        }) {
+                            println!("[FileWatcher] Failed to emit event: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    println!("[FileWatcher] Error: {:?}", e);
+                }
+            }
+        },
+    ).map_err(|e| format!("Failed to create watcher: {}", e))?;
+
+    // Start watching
+    {
+        let mut state = watcher_state.lock().map_err(|e| e.to_string())?;
+        let mut debouncer = debouncer;
+        debouncer.watcher().watch(&watch_path, RecursiveMode::Recursive)
+            .map_err(|e| format!("Failed to start watching: {}", e))?;
+
+        state.debouncer = Some(debouncer);
+        state.watched_path = Some(watch_path);
+    }
+
+    println!("[FileWatcher] Watcher started successfully");
+    Ok(())
+}
+
+/// Stop the file watcher
+#[tauri::command]
+pub async fn stop_file_watcher(
+    watcher_state: State<'_, Mutex<FileWatcherState>>,
+) -> Result<(), String> {
+    println!("[FileWatcher] Stopping watcher");
+
+    let mut state = watcher_state.lock().map_err(|e| e.to_string())?;
+    state.debouncer = None;
+    state.watched_path = None;
+
+    println!("[FileWatcher] Watcher stopped");
     Ok(())
 }

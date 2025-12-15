@@ -1,9 +1,10 @@
 // Dockable panel layout using rc-dock
 // Supports dragging tabs to float, splitting, and re-docking
 
-import { useRef, useCallback, useEffect, ReactNode } from 'react';
+import { useRef, useCallback, useEffect, ReactNode, useMemo } from 'react';
 import DockLayout, { LayoutData, TabData, TabGroup, PanelData, BoxData } from 'rc-dock';
 import { useEngineState } from '../stores/useEngineState';
+import { getCustomPanels, CustomPanel } from '../lib/lua/panels';
 import '../styles/dock.css';
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -13,6 +14,13 @@ import '../styles/dock.css';
 interface DockablePanelProps {
   renderContent: (tabId: string) => ReactNode;
   onLayoutChange?: (layout: LayoutData) => void;
+  onDockReady?: (api: DockAPI) => void;
+}
+
+// API for programmatically manipulating the dock
+export interface DockAPI {
+  addTab: (tabId: string, targetPanel?: string) => void;
+  getCustomPanels: () => CustomPanel[];
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -25,9 +33,12 @@ const TAB_DEFINITIONS: Record<string, { icon: string; label: string }> = {
   entities: { icon: '◉', label: 'Entities' },
   assets: { icon: '◈', label: 'Assets' },
   templates: { icon: '◇', label: 'Templates' },
+  components: { icon: '▣', label: 'Components' },
+  'node-editor': { icon: '◎', label: 'Node Editor' },
   scene: { icon: '▦', label: 'Scene' },
   code: { icon: '{ }', label: 'Code' },
   chat: { icon: '◆', label: 'AI Chat' },
+  notes: { icon: '📝', label: 'Note taking' },
   properties: { icon: '⚙', label: 'Properties' },
   console: { icon: '❯', label: 'Console' },
 
@@ -64,7 +75,6 @@ const TEMPLATE_LAYOUTS: Record<string, () => LayoutData> = {
               tabs: [
                 { id: 'files', title: 'Files', group: 'default' },
                 { id: 'entities', title: 'Entities', group: 'default' },
-                { id: 'templates', title: 'Templates', group: 'default' },
               ],
               activeId: 'files',
             } as PanelData,
@@ -80,6 +90,8 @@ const TEMPLATE_LAYOUTS: Record<string, () => LayoutData> = {
               tabs: [
                 { id: 'scene', title: 'Scene', group: 'default' },
                 { id: 'code', title: 'Code', group: 'default' },
+                { id: 'components', title: 'Components', group: 'default' },
+                { id: 'node-editor', title: 'Node Editor', group: 'default' },
               ],
               activeId: 'scene',
             } as PanelData,
@@ -125,7 +137,6 @@ const TEMPLATE_LAYOUTS: Record<string, () => LayoutData> = {
               tabs: [
                 { id: 'files', title: 'Files', group: 'default' },
                 { id: 'cards', title: 'Cards', group: 'default' },
-                { id: 'templates', title: 'Templates', group: 'default' },
               ],
               activeId: 'cards',
             } as PanelData,
@@ -188,7 +199,6 @@ const TEMPLATE_LAYOUTS: Record<string, () => LayoutData> = {
                 { id: 'files', title: 'Files', group: 'default' },
                 { id: 'characters', title: 'Characters', group: 'default' },
                 { id: 'scenes', title: 'Scenes', group: 'default' },
-                { id: 'templates', title: 'Templates', group: 'default' },
               ],
               activeId: 'characters',
             } as PanelData,
@@ -244,10 +254,44 @@ const createDefaultLayout = (): LayoutData => TEMPLATE_LAYOUTS['isometric-rpg'](
 // Component
 // ═══════════════════════════════════════════════════════════════════════════
 
-export function DockableLayout({ renderContent, onLayoutChange }: DockablePanelProps) {
+export function DockableLayout({ renderContent, onLayoutChange, onDockReady }: DockablePanelProps) {
   const dockRef = useRef<DockLayout>(null);
   const currentTemplateId = useEngineState((s) => s.template.currentId);
   const prevTemplateIdRef = useRef<string | null>(currentTemplateId);
+
+  // Get custom panels and merge with static definitions
+  const customPanels = useMemo(() => getCustomPanels(), []);
+
+  // Create and expose the dock API
+  useEffect(() => {
+    if (!onDockReady || !dockRef.current) return;
+
+    const api: DockAPI = {
+      addTab: (tabId: string) => {
+        if (!dockRef.current) return;
+
+        const newTab: TabData = {
+          id: tabId,
+          title: tabId,
+          group: 'default',
+          content: <></>, // Content is rendered via loadTab
+        };
+
+        // Try to find a panel to add to
+        dockRef.current.dockMove(newTab, null, 'float');
+      },
+      getCustomPanels: () => getCustomPanels(),
+    };
+
+    onDockReady(api);
+  }, [onDockReady]);
+  const allTabDefs = useMemo(() => {
+    const defs = { ...TAB_DEFINITIONS };
+    for (const panel of customPanels) {
+      defs[panel.id] = { icon: panel.icon, label: panel.name };
+    }
+    return defs;
+  }, [customPanels]);
 
   // Tab group configuration
   const groups: Record<string, TabGroup> = {
@@ -256,6 +300,8 @@ export function DockableLayout({ renderContent, onLayoutChange }: DockablePanelP
       floatable: true,
       // Allow tabs to be maximized
       maximizable: true,
+      // Allow tabs to be closed
+      closable: true,
       // Animation
       animated: true,
     },
@@ -264,7 +310,7 @@ export function DockableLayout({ renderContent, onLayoutChange }: DockablePanelP
   // Load tab content
   const loadTab = useCallback((tab: TabData): TabData => {
     const tabId = tab.id as string;
-    const def = TAB_DEFINITIONS[tabId] || { icon: '○', label: tabId };
+    const def = allTabDefs[tabId] || { icon: '○', label: tabId };
     return {
       ...tab,
       title: (
@@ -278,10 +324,11 @@ export function DockableLayout({ renderContent, onLayoutChange }: DockablePanelP
           {renderContent(tabId)}
         </div>
       ),
+      closable: true,
       minWidth: 200,
       minHeight: 100,
     };
-  }, [renderContent]);
+  }, [renderContent, allTabDefs]);
 
   // Handle layout changes
   const handleLayoutChange = useCallback((newLayout: LayoutData, _currentTabId?: string, _direction?: string) => {

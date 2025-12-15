@@ -142,10 +142,11 @@ class WebFileSystem implements FileSystem {
   async pickDirectory(): Promise<string | null> {
     try {
       // @ts-expect-error - showDirectoryPicker is not in all TS libs
-      this.rootHandle = await window.showDirectoryPicker({
+      const handle = await window.showDirectoryPicker({
         mode: 'readwrite',
       });
-      this.rootPath = this.rootHandle.name;
+      this.rootHandle = handle;
+      this.rootPath = handle.name;
       return this.rootPath;
     } catch {
       return null;
@@ -540,21 +541,52 @@ return {
 `,
 };
 
+/**
+ * Normalize path for cross-platform compatibility
+ * Converts backslashes to forward slashes and removes trailing slashes
+ */
+function normalizePath(path: string): string {
+  return path.replace(/\\/g, '/').replace(/\/+$/, '');
+}
+
 export async function createProjectFromTemplate(fs: FileSystem, basePath: string): Promise<void> {
-  console.log('[filesystem] Creating project from template at:', basePath);
+  // Normalize the base path
+  const normalizedBase = normalizePath(basePath);
+  console.log('[filesystem] Creating project from template at:', normalizedBase);
+  console.log('[filesystem] Original path:', basePath);
+
+  // First, check if the directory exists and is accessible
+  try {
+    const exists = await fs.exists(normalizedBase);
+    console.log('[filesystem] Base path exists:', exists);
+  } catch (err) {
+    console.error('[filesystem] Error checking base path:', err);
+    throw new Error(`Cannot access directory: ${normalizedBase}. Error: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
+  // Process each template file
   for (const [relativePath, content] of Object.entries(PROJECT_TEMPLATE)) {
-    const fullPath = `${basePath}/${relativePath}`;
+    const fullPath = `${normalizedBase}/${relativePath}`;
     const dir = fullPath.substring(0, fullPath.lastIndexOf('/'));
 
     console.log('[filesystem] Processing:', relativePath);
+    console.log('[filesystem] Full path:', fullPath);
+    console.log('[filesystem] Directory:', dir);
+
     // Create directory if needed
-    if (dir !== basePath) {
+    if (dir !== normalizedBase) {
       console.log('[filesystem] Creating directory:', dir);
       try {
         await fs.createDirectory(dir);
+        console.log('[filesystem] Directory created successfully');
       } catch (err) {
-        console.error('[filesystem] Failed to create directory:', dir, err);
-        throw err;
+        // Directory might already exist, which is fine
+        const errMsg = err instanceof Error ? err.message : String(err);
+        if (!errMsg.includes('already exists') && !errMsg.includes('AlreadyExists')) {
+          console.error('[filesystem] Failed to create directory:', dir, err);
+          throw new Error(`Failed to create directory ${dir}: ${errMsg}`);
+        }
+        console.log('[filesystem] Directory already exists, continuing...');
       }
     }
 
@@ -562,9 +594,11 @@ export async function createProjectFromTemplate(fs: FileSystem, basePath: string
     console.log('[filesystem] Writing file:', fullPath);
     try {
       await fs.writeFile(fullPath, content);
+      console.log('[filesystem] File written successfully');
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
       console.error('[filesystem] Failed to write file:', fullPath, err);
-      throw err;
+      throw new Error(`Failed to write file ${fullPath}: ${errMsg}`);
     }
   }
   console.log('[filesystem] Project template created successfully');

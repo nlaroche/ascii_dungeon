@@ -14,6 +14,7 @@ import {
   ChatMessage,
   Conversation,
 } from './engineState';
+import type { TemplateDefinition } from '../lib/templates';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Path Types
@@ -397,6 +398,20 @@ export function useTheme() {
 }
 
 /**
+ * Hook for UI scale
+ */
+export function useUIScale() {
+  const scale = useEngineState((state) => state.ui.scale);
+  const setPath = useEngineState((state) => state.setPath);
+
+  const setScale = (newScale: number) => {
+    setPath(['ui', 'scale'], newScale, `Set UI scale to ${Math.round(newScale * 100)}%`);
+  };
+
+  return { scale, setScale };
+}
+
+/**
  * Hook for active tool
  */
 export function useActiveTool() {
@@ -503,7 +518,7 @@ export function useChat() {
 
   // Create a new conversation
   const createConversation = (title?: string): string => {
-    const id = `conv_${Date.now()}`;
+    const id = `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const newConversation: Conversation = {
       id,
       title: title || 'New Chat',
@@ -528,7 +543,7 @@ export function useChat() {
     const convId = chat.currentConversationId;
     if (!convId) return '';
 
-    const msgId = `msg_${Date.now()}`;
+    const msgId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const message: ChatMessage = {
       id: msgId,
       role,
@@ -674,22 +689,7 @@ export function useTemplate() {
   const log = useEngineState((state) => state.log);
 
   // Apply a template - updates tools, render settings, etc.
-  const applyTemplate = (templateDef: {
-    id: string;
-    name: string;
-    icon: string;
-    render?: {
-      mode?: string;
-      camera?: Record<string, unknown>;
-      grid?: { enabled?: boolean; size?: number };
-      lighting?: { ambient?: number[] };
-      postProcess?: string;
-    };
-    view?: {
-      tools?: Record<string, { id: string; name: string; icon: string; shortcut?: string }>;
-      defaultTool?: string;
-    };
-  }) => {
+  const applyTemplate = (templateDef: TemplateDefinition) => {
     console.log('[useTemplate] applyTemplate called with:', templateDef.id, templateDef.name);
     const updates: Array<{ path: (string | number)[]; value: unknown }> = [];
 

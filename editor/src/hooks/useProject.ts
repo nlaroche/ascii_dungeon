@@ -3,9 +3,16 @@
 // Handles opening, saving, creating projects and browsing files
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { getFileSystem, FileSystem, FileEntry, createProjectFromTemplate } from '../lib/filesystem';
 import { useEngineState } from '../stores/useEngineState';
+import { invoke } from '@tauri-apps/api/core';
+import { listen, UnlistenFn } from '@tauri-apps/api/event';
+
+interface FileChangeEvent {
+  event_type: string;
+  path: string;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -46,6 +53,9 @@ export function useProject() {
 
   const setPath = useEngineState((s) => s.setPath);
   const log = useEngineState((s) => s.log);
+
+  // Track if we've attempted auto-open
+  const autoOpenAttempted = useRef(false);
 
   // Initialize filesystem
   useEffect(() => {
@@ -134,6 +144,51 @@ export function useProject() {
     }
   }, [expandedDirs]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Store refreshFileTree in a ref for the file watcher callback
+  const refreshFileTreeRef = useRef(refreshFileTree);
+  useEffect(() => {
+    refreshFileTreeRef.current = refreshFileTree;
+  }, [refreshFileTree]);
+
+  // File system watching
+  useEffect(() => {
+    if (!projectPath) return;
+
+    let unlisten: UnlistenFn | null = null;
+    let mounted = true;
+
+    const setupWatcher = async () => {
+      try {
+        // Start the native file watcher
+        await invoke('start_file_watcher', { path: projectPath });
+        console.log('[useProject] File watcher started for:', projectPath);
+
+        // Listen for file change events
+        unlisten = await listen<FileChangeEvent>('file-change', (event) => {
+          console.log('[useProject] File changed:', event.payload.path);
+          // Debounce refresh - use the ref to get latest function
+          if (mounted) {
+            refreshFileTreeRef.current();
+          }
+        });
+      } catch (err) {
+        console.error('[useProject] Failed to start file watcher:', err);
+        // File watching is optional, don't block on this
+      }
+    };
+
+    setupWatcher();
+
+    return () => {
+      mounted = false;
+      // Stop the watcher and unlisten
+      if (unlisten) {
+        unlisten();
+      }
+      invoke('stop_file_watcher').catch(console.error);
+    };
+  }, [projectPath]);
+
   // Open a project
   const openProject = useCallback(async (path?: string) => {
     if (!fs) return;
@@ -192,11 +247,45 @@ export function useProject() {
     }
   }, [fs, loadDirectory, setPath, log, addToRecentProjects]);
 
+  // Auto-open last project on startup
+  useEffect(() => {
+    if (!fs || autoOpenAttempted.current || projectPath) return;
+
+    // Only attempt once
+    autoOpenAttempted.current = true;
+
+    // Get recent projects from localStorage directly (state might not be set yet)
+    try {
+      const saved = localStorage.getItem(RECENT_PROJECTS_KEY);
+      if (saved) {
+        const recent = JSON.parse(saved) as RecentProject[];
+        if (recent.length > 0) {
+          const lastProject = recent[0];
+          console.log('[useProject] Auto-opening last project:', lastProject.path);
+          // Check if path exists before opening
+          fs.exists(lastProject.path).then((exists) => {
+            if (exists) {
+              openProject(lastProject.path);
+            } else {
+              console.log('[useProject] Last project path no longer exists:', lastProject.path);
+            }
+          });
+        }
+      }
+    } catch {
+      // Ignore
+    }
+  }, [fs, projectPath, openProject]);
+
   // Create a new project
   const createProject = useCallback(async () => {
-    console.log('[useProject] createProject called, fs:', !!fs);
+    console.log('[useProject] createProject called');
+    console.log('[useProject] fs available:', !!fs);
+
     if (!fs) {
-      log('error', 'File system not initialized');
+      const errMsg = 'File system not initialized. Please wait and try again.';
+      log('error', errMsg);
+      setError(errMsg);
       return;
     }
 
@@ -204,10 +293,18 @@ export function useProject() {
     setError(null);
 
     try {
+      // Check fs availability
+      const fsAvailable = await fs.isAvailable();
+      console.log('[useProject] fs.isAvailable():', fsAvailable);
+      if (!fsAvailable) {
+        throw new Error('File system is not available on this platform');
+      }
+
       // Pick directory
       console.log('[useProject] Picking directory...');
       const projectDir = await fs.pickDirectory();
       console.log('[useProject] Directory picked:', projectDir);
+
       if (!projectDir) {
         setIsLoading(false);
         log('info', 'Project creation cancelled');
@@ -215,18 +312,30 @@ export function useProject() {
       }
 
       // Create project from template
-      console.log('[useProject] Creating project from template...');
+      console.log('[useProject] Creating project from template at:', projectDir);
+      log('info', `Creating project at: ${projectDir}`);
+
       await createProjectFromTemplate(fs, projectDir);
-      console.log('[useProject] Template files created');
+      console.log('[useProject] Template files created successfully');
 
       // Load the new project
-      console.log('[useProject] Opening project...');
+      console.log('[useProject] Opening newly created project...');
       await openProject(projectDir);
 
       log('success', `Created new project at: ${projectDir}`);
     } catch (err) {
       console.error('[useProject] Error creating project:', err);
-      const message = err instanceof Error ? err.message : 'Failed to create project';
+      // Extract detailed error message
+      let message: string;
+      if (err instanceof Error) {
+        message = err.message;
+        // Log full stack for debugging
+        console.error('[useProject] Stack:', err.stack);
+      } else if (typeof err === 'string') {
+        message = err;
+      } else {
+        message = `Failed to create project: ${JSON.stringify(err)}`;
+      }
       setError(message);
       log('error', message);
     } finally {

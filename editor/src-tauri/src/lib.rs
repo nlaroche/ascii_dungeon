@@ -3,7 +3,7 @@ mod engine_process;
 mod ipc_bridge;
 
 use tauri::Manager;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -19,6 +19,10 @@ pub fn run() {
             // Initialize IPC bridge
             let ipc_bridge = ipc_bridge::IpcBridge::new();
             app.manage(ipc_bridge);
+
+            // Initialize file watcher state
+            let watcher_state = Mutex::new(commands::FileWatcherState::default());
+            app.manage(watcher_state);
 
             Ok(())
         })
@@ -50,6 +54,10 @@ pub fn run() {
             commands::check_claude_available,
             commands::get_claude_path,
             commands::send_claude_message,
+            commands::open_claude_auth,
+            // File system watching
+            commands::start_file_watcher,
+            commands::stop_file_watcher,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

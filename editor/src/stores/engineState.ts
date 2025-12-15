@@ -65,6 +65,7 @@ export interface UIState {
   panels: Record<string, Panel>;
   theme: Theme;
   shortcuts: Record<string, string>;
+  scale: number; // UI zoom level (0.75 = 75%, 1.0 = 100%, 1.25 = 125%, etc.)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -460,6 +461,7 @@ export const INITIAL_ENGINE_STATE: EngineState = {
       'f5': 'runGame',
       'f6': 'stopGame',
     },
+    scale: 1.0, // Default 100% UI scale
   },
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -673,24 +675,15 @@ create shaders, spawn entities, and more.`,
   // Project
   // ─────────────────────────────────────────────────────────────────────────
   project: {
-    name: 'My Game',
-    root: '/project',
-    files: [
-      { path: '/project/main.lua', type: 'lua', modified: false },
-      { path: '/project/game/state.lua', type: 'lua', modified: false },
-      { path: '/project/game/combat.lua', type: 'lua', modified: false },
-      { path: '/project/entities/player.lua', type: 'lua', modified: false },
-      { path: '/project/entities/goblin.lua', type: 'lua', modified: true },
-      { path: '/project/sprites/enemies.lua', type: 'lua', modified: false },
-      { path: '/project/maps/dungeon_1.lua', type: 'map', modified: false },
-      { path: '/project/shaders/fire.wgsl', type: 'wgsl', modified: false },
-    ],
-    openFiles: ['/project/entities/goblin.lua'],
-    selectedFile: '/project/entities/goblin.lua',
+    name: '',
+    root: '', // Empty until a project is opened
+    files: [],
+    openFiles: [],
+    selectedFile: null,
     settings: {
       targetFPS: 60,
       resolution: [1280, 720],
-      startScene: '/project/maps/dungeon_1.lua',
+      startScene: '',
     },
   },
 
