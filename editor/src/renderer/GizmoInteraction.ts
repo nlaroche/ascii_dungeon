@@ -10,6 +10,9 @@ export interface DragState {
   startWorldPos: [number, number, number]
   startTransform: Transform
   accumulatedDelta: [number, number, number]
+  // For rotation/scale: angle or distance at drag start
+  startAngle?: number
+  startDistance?: number
 }
 
 export class GizmoInteraction {
@@ -234,12 +237,16 @@ export class GizmoInteraction {
 
   private updateMoveDrag(
     ray: Ray,
-    gizmoPos: [number, number, number],
+    _gizmoPos: [number, number, number], // Not used - we use startWorldPos instead
     axis: GizmoAxis,
     snapEnabled: boolean,
     gridSize: number
   ): Transform | null {
     if (!this.dragState) return null
+
+    // Use the start position from when drag began (not current gizmo position)
+    // This prevents feedback loops where updating position changes the gizmo position
+    const startGizmoPos = this.dragState.startWorldPos
 
     // Find intersection with constraint plane
     let normal: [number, number, number]
@@ -263,18 +270,18 @@ export class GizmoInteraction {
         return null
     }
 
-    // Intersect ray with plane through gizmo position
-    const hitPoint = this.rayPlaneIntersect(ray, gizmoPos, normal)
+    // Intersect ray with plane through the START gizmo position (not current)
+    const hitPoint = this.rayPlaneIntersect(ray, startGizmoPos, normal)
     if (!hitPoint) return null
 
     // Project movement onto constraint axis
     const delta: [number, number, number] = [
-      (hitPoint[0] - gizmoPos[0]) * constraintDir[0],
-      (hitPoint[1] - gizmoPos[1]) * constraintDir[1],
-      (hitPoint[2] - gizmoPos[2]) * constraintDir[2],
+      (hitPoint[0] - startGizmoPos[0]) * constraintDir[0],
+      (hitPoint[1] - startGizmoPos[1]) * constraintDir[1],
+      (hitPoint[2] - startGizmoPos[2]) * constraintDir[2],
     ]
 
-    // Calculate new position
+    // Calculate new position from the start transform
     let newPos: [number, number, number] = [
       this.dragState.startTransform.position[0] + delta[0],
       this.dragState.startTransform.position[1] + delta[1],
@@ -299,12 +306,15 @@ export class GizmoInteraction {
 
   private updateRotateDrag(
     ray: Ray,
-    gizmoPos: [number, number, number],
+    _gizmoPos: [number, number, number], // Not used - we use startWorldPos instead
     axis: GizmoAxis,
     snapEnabled: boolean,
     angleSnap: number
   ): Transform | null {
     if (!this.dragState) return null
+
+    // Use start position to avoid feedback
+    const startGizmoPos = this.dragState.startWorldPos
 
     // Get rotation plane normal
     let normal: [number, number, number]
@@ -327,15 +337,15 @@ export class GizmoInteraction {
         return null
     }
 
-    // Find intersection with rotation plane
-    const hitPoint = this.rayPlaneIntersect(ray, gizmoPos, normal)
+    // Find intersection with rotation plane at start position
+    const hitPoint = this.rayPlaneIntersect(ray, startGizmoPos, normal)
     if (!hitPoint) return null
 
     // Calculate angle from center
     const localHit: [number, number, number] = [
-      hitPoint[0] - gizmoPos[0],
-      hitPoint[1] - gizmoPos[1],
-      hitPoint[2] - gizmoPos[2],
+      hitPoint[0] - startGizmoPos[0],
+      hitPoint[1] - startGizmoPos[1],
+      hitPoint[2] - startGizmoPos[2],
     ]
 
     let angle: number
@@ -353,18 +363,23 @@ export class GizmoInteraction {
         return null
     }
 
-    // Calculate delta from start
-    const startAngle = this.dragState.startTransform.rotation[rotAxisIndex]
-    let deltaAngle = angle - startAngle
+    // Store initial angle on first drag update
+    if (this.dragState.startAngle === undefined) {
+      this.dragState.startAngle = angle
+    }
 
-    // Apply snap
+    // Calculate delta angle from where we started dragging (not from object's rotation)
+    let deltaAngle = angle - this.dragState.startAngle
+
+    // Apply snap to the result
+    let newAngle = this.dragState.startTransform.rotation[rotAxisIndex] + deltaAngle
     if (snapEnabled && angleSnap > 0) {
       const snapRad = angleSnap * Math.PI / 180
-      deltaAngle = Math.round(deltaAngle / snapRad) * snapRad
+      newAngle = Math.round(newAngle / snapRad) * snapRad
     }
 
     const newRotation: [number, number, number] = [...this.dragState.startTransform.rotation]
-    newRotation[rotAxisIndex] = startAngle + deltaAngle
+    newRotation[rotAxisIndex] = newAngle
 
     return {
       position: [...this.dragState.startTransform.position] as [number, number, number],
@@ -375,53 +390,88 @@ export class GizmoInteraction {
 
   private updateScaleDrag(
     ray: Ray,
-    gizmoPos: [number, number, number],
+    _gizmoPos: [number, number, number], // Not used - we use startWorldPos instead
     axis: GizmoAxis,
     snapEnabled: boolean,
     snapSize: number
   ): Transform | null {
     if (!this.dragState) return null
 
-    // Find intersection with constraint plane
+    // Use start position to avoid feedback
+    const startGizmoPos = this.dragState.startWorldPos
+
+    // Find intersection with constraint plane (vertical plane facing camera)
     const normal: [number, number, number] = [ray.direction[0], 0, ray.direction[2]]
     this.normalize(normal)
 
-    const hitPoint = this.rayPlaneIntersect(ray, gizmoPos, normal)
-    if (!hitPoint) return null
-
-    // Calculate distance from gizmo center
-    const dist = Math.sqrt(
-      (hitPoint[0] - gizmoPos[0]) ** 2 +
-      (hitPoint[1] - gizmoPos[1]) ** 2 +
-      (hitPoint[2] - gizmoPos[2]) ** 2
-    )
-
-    // Scale factor based on distance
-    let scaleFactor = dist / 0.5  // Normalize to starting scale
-
-    // Apply snap
-    if (snapEnabled && snapSize > 0) {
-      scaleFactor = Math.round(scaleFactor / snapSize) * snapSize
+    // If normal is too short (looking straight down), use a horizontal plane
+    const normalLen = Math.sqrt(normal[0] ** 2 + normal[2] ** 2)
+    if (normalLen < 0.1) {
+      normal[0] = 0
+      normal[1] = 1
+      normal[2] = 0
     }
 
-    scaleFactor = Math.max(0.1, scaleFactor)  // Minimum scale
+    const hitPoint = this.rayPlaneIntersect(ray, startGizmoPos, normal)
+    if (!hitPoint) return null
 
+    // Calculate distance from start gizmo center
+    const dist = Math.sqrt(
+      (hitPoint[0] - startGizmoPos[0]) ** 2 +
+      (hitPoint[1] - startGizmoPos[1]) ** 2 +
+      (hitPoint[2] - startGizmoPos[2]) ** 2
+    )
+
+    // Store initial distance on first drag update
+    if (this.dragState.startDistance === undefined) {
+      this.dragState.startDistance = dist
+      // Avoid division by zero
+      if (this.dragState.startDistance < 0.01) {
+        this.dragState.startDistance = 0.5
+      }
+    }
+
+    // Scale factor is ratio of current distance to start distance
+    let scaleFactor = dist / this.dragState.startDistance
+
+    // Apply snap to resulting scale values
     const newScale: [number, number, number] = [...this.dragState.startTransform.scale]
 
     switch (axis) {
       case 'x':
         newScale[0] = this.dragState.startTransform.scale[0] * scaleFactor
+        if (snapEnabled && snapSize > 0) {
+          newScale[0] = Math.round(newScale[0] / snapSize) * snapSize
+        }
+        newScale[0] = Math.max(0.1, newScale[0])
         break
       case 'y':
         newScale[1] = this.dragState.startTransform.scale[1] * scaleFactor
+        if (snapEnabled && snapSize > 0) {
+          newScale[1] = Math.round(newScale[1] / snapSize) * snapSize
+        }
+        newScale[1] = Math.max(0.1, newScale[1])
         break
       case 'z':
         newScale[2] = this.dragState.startTransform.scale[2] * scaleFactor
+        if (snapEnabled && snapSize > 0) {
+          newScale[2] = Math.round(newScale[2] / snapSize) * snapSize
+        }
+        newScale[2] = Math.max(0.1, newScale[2])
         break
       case 'xyz':
         newScale[0] = this.dragState.startTransform.scale[0] * scaleFactor
         newScale[1] = this.dragState.startTransform.scale[1] * scaleFactor
         newScale[2] = this.dragState.startTransform.scale[2] * scaleFactor
+        if (snapEnabled && snapSize > 0) {
+          newScale[0] = Math.max(0.1, Math.round(newScale[0] / snapSize) * snapSize)
+          newScale[1] = Math.max(0.1, Math.round(newScale[1] / snapSize) * snapSize)
+          newScale[2] = Math.max(0.1, Math.round(newScale[2] / snapSize) * snapSize)
+        } else {
+          newScale[0] = Math.max(0.1, newScale[0])
+          newScale[1] = Math.max(0.1, newScale[1])
+          newScale[2] = Math.max(0.1, newScale[2])
+        }
         break
     }
 

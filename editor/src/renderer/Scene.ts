@@ -3,8 +3,9 @@
 import { VoxelInstance, VoxelFlags, INSTANCE_BYTES } from './types'
 import { buildGlyph } from './GlyphBuilder'
 import { getGlyphMesh, clearGlyphMeshCache } from './GlyphMeshBuilder'
-import type { Node } from '../stores/engineState'
+import type { Node, NormalizedNode, EntityMaps } from '../stores/engineState'
 import type { AABB, PickableInstance } from './Raycaster'
+import { entitySubscriptions, type EntitiesChangeCallback } from '../stores/subscriptions'
 
 export class Scene {
   private instances: VoxelInstance[] = []
@@ -24,6 +25,14 @@ export class Scene {
 
   // Use smooth mesh rendering for glyphs
   private useSmoothGlyphs: boolean = true
+
+  // Entity subscription for automatic scene updates
+  private unsubscribeEntities: (() => void) | null = null
+  private unsubscribeSelection: (() => void) | null = null
+  private cachedEntities: EntityMaps | null = null
+  private cachedSelectedNodes: string[] = []
+  private needsRebuild: boolean = false
+  private onSceneChanged: (() => void) | null = null
 
   // Add a single voxel cube
   addVoxel(
@@ -83,50 +92,99 @@ export class Scene {
     char: string,
     x: number, y: number, z: number,
     color: [number, number, number, number],
-    scale = 1,
+    scaleX = 1, scaleY = 1, scaleZ = 1,
+    rotation: [number, number, number] = [0, 0, 0],
     emission = 0
   ) {
     if (this.useSmoothGlyphs) {
-      this.addSmoothGlyph(char, x, y, z, color, scale, emission)
+      this.addSmoothGlyph(char, x, y, z, color, scaleX, scaleY, scaleZ, rotation, emission)
     } else {
       // Fallback to voxel-based rendering
-      this.addVoxelGlyph(char, x, y, z, color, scale, emission)
+      this.addVoxelGlyph(char, x, y, z, color, Math.min(scaleX, scaleY, scaleZ), emission)
     }
   }
 
-  // Add a smooth polygon mesh glyph
+  // Build rotation matrix from Euler angles (XYZ order, degrees)
+  private buildRotationMatrix(rotation: [number, number, number]): number[] {
+    const [rx, ry, rz] = rotation.map(r => (r * Math.PI) / 180)
+
+    const cosX = Math.cos(rx), sinX = Math.sin(rx)
+    const cosY = Math.cos(ry), sinY = Math.sin(ry)
+    const cosZ = Math.cos(rz), sinZ = Math.sin(rz)
+
+    // Combined rotation matrix (Rz * Ry * Rx) - row-major
+    return [
+      cosY * cosZ,                        cosY * sinZ,                        -sinY,
+      sinX * sinY * cosZ - cosX * sinZ,   sinX * sinY * sinZ + cosX * cosZ,   sinX * cosY,
+      cosX * sinY * cosZ + sinX * sinZ,   cosX * sinY * sinZ - sinX * cosZ,   cosX * cosY
+    ]
+  }
+
+  // Apply rotation matrix to a 3D vector
+  private rotateVector(v: [number, number, number], m: number[]): [number, number, number] {
+    return [
+      m[0] * v[0] + m[1] * v[1] + m[2] * v[2],
+      m[3] * v[0] + m[4] * v[1] + m[5] * v[2],
+      m[6] * v[0] + m[7] * v[1] + m[8] * v[2]
+    ]
+  }
+
+  // Add a smooth polygon mesh glyph with full transform support
   private addSmoothGlyph(
     char: string,
     x: number, y: number, z: number,
     color: [number, number, number, number],
-    scale: number,
+    scaleX: number, scaleY: number, scaleZ: number,
+    rotation: [number, number, number],
     emission: number
   ) {
     const mesh = getGlyphMesh(char)
 
     if (!mesh) {
       // Fallback to voxel rendering for unsupported characters
-      this.addVoxelGlyph(char, x, y, z, color, scale, emission)
+      this.addVoxelGlyph(char, x, y, z, color, Math.min(scaleX, scaleY, scaleZ), emission)
       return
     }
 
     const baseVertex = this.glyphVertexCount
 
+    // Build rotation matrix from Euler angles
+    const rotMatrix = this.buildRotationMatrix(rotation)
+
     // Transform mesh vertices to world position
     // Mesh vertices are: position (3) + normal (3) = 6 floats per vertex
     // We output: position (3) + normal (3) + color (4) + emission (1) = 11 floats per vertex
     for (let i = 0; i < mesh.vertices.length; i += 6) {
-      // Position (transformed)
+      // Get local position and apply scale
+      const localPos: [number, number, number] = [
+        mesh.vertices[i] * scaleX,
+        mesh.vertices[i + 1] * scaleY,
+        mesh.vertices[i + 2] * scaleZ
+      ]
+
+      // Apply rotation to scaled position
+      const rotatedPos = this.rotateVector(localPos, rotMatrix)
+
+      // Position (transformed to world)
       this.glyphVertices.push(
-        x + mesh.vertices[i] * scale,      // x
-        y + mesh.vertices[i + 1] * scale,  // y
-        z + mesh.vertices[i + 2] * scale   // z
+        x + rotatedPos[0],
+        y + rotatedPos[1],
+        z + rotatedPos[2]
       )
-      // Normal (unchanged)
-      this.glyphVertices.push(
+
+      // Get local normal and rotate it (normals only need rotation, not scale)
+      const localNormal: [number, number, number] = [
         mesh.vertices[i + 3],
         mesh.vertices[i + 4],
         mesh.vertices[i + 5]
+      ]
+      const rotatedNormal = this.rotateVector(localNormal, rotMatrix)
+
+      // Normal (rotated)
+      this.glyphVertices.push(
+        rotatedNormal[0],
+        rotatedNormal[1],
+        rotatedNormal[2]
       )
       // Color
       this.glyphVertices.push(color[0], color[1], color[2], color[3])
@@ -383,11 +441,80 @@ export class Scene {
   }
 
   // Build scene from Node tree (from engine state)
+  // Supports full transform inheritance: children are affected by parent transforms
   buildFromNodes(rootNode: Node, selectedNodes: string[] = []) {
     this.clear()
 
-    // Recursively process all nodes
-    const processNode = (node: Node) => {
+    // World transform type
+    type WorldTransform = {
+      position: [number, number, number]
+      rotation: [number, number, number]  // Euler angles in degrees
+      scale: [number, number, number]
+    }
+
+    // Compute world transform by combining parent and local transforms
+    const computeWorldTransform = (
+      parentWorld: WorldTransform,
+      localTransform: { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] }
+    ): WorldTransform => {
+      // Scale: multiply component-wise
+      const worldScale: [number, number, number] = [
+        parentWorld.scale[0] * localTransform.scale[0],
+        parentWorld.scale[1] * localTransform.scale[1],
+        parentWorld.scale[2] * localTransform.scale[2],
+      ]
+
+      // Rotation: add Euler angles (simplified - proper solution would use quaternions)
+      const worldRotation: [number, number, number] = [
+        parentWorld.rotation[0] + localTransform.rotation[0],
+        parentWorld.rotation[1] + localTransform.rotation[1],
+        parentWorld.rotation[2] + localTransform.rotation[2],
+      ]
+
+      // Position: scale local position by parent scale, then rotate by parent rotation, then add parent position
+      // For now, simplified version without rotation (rotation support can be added later)
+      const scaledLocalPos: [number, number, number] = [
+        localTransform.position[0] * parentWorld.scale[0],
+        localTransform.position[1] * parentWorld.scale[1],
+        localTransform.position[2] * parentWorld.scale[2],
+      ]
+
+      // Apply parent Y rotation to local position (most common use case)
+      const parentYRotRad = (parentWorld.rotation[1] * Math.PI) / 180
+      const cosY = Math.cos(parentYRotRad)
+      const sinY = Math.sin(parentYRotRad)
+      const rotatedPos: [number, number, number] = [
+        scaledLocalPos[0] * cosY - scaledLocalPos[2] * sinY,
+        scaledLocalPos[1],
+        scaledLocalPos[0] * sinY + scaledLocalPos[2] * cosY,
+      ]
+
+      const worldPosition: [number, number, number] = [
+        parentWorld.position[0] + rotatedPos[0],
+        parentWorld.position[1] + rotatedPos[1],
+        parentWorld.position[2] + rotatedPos[2],
+      ]
+
+      return { position: worldPosition, rotation: worldRotation, scale: worldScale }
+    }
+
+    // Identity transform for root
+    const identityTransform: WorldTransform = {
+      position: [0, 0, 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+    }
+
+    // Recursively process all nodes with inherited transforms
+    const processNode = (node: Node, parentWorldTransform: WorldTransform) => {
+      // Compute world transform for this node
+      const localTransform = node.transform || { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }
+      const worldTransform = computeWorldTransform(parentWorldTransform, localTransform as {
+        position: [number, number, number]
+        rotation: [number, number, number]
+        scale: [number, number, number]
+      })
+
       // Check for floor generator component (builtin)
       const floorComp = node.components.find(c => c.script === 'builtin:floor_generator')
       if (floorComp && floorComp.enabled) {
@@ -396,8 +523,8 @@ export class Scene {
 
       // Only render nodes that have both transform and visual properties
       if (node.transform && node.visual && node.visual.visible) {
-        const [px, py, pz] = node.transform.position
-        const [sx, sy, sz] = node.transform.scale
+        const [px, py, pz] = worldTransform.position
+        const [sx, sy, sz] = worldTransform.scale
         const [r, g, b] = node.visual.color
         const opacity = node.visual.opacity
 
@@ -421,16 +548,15 @@ export class Scene {
         if (node.visual.glyph && node.visual.glyph.length > 0) {
           const char = node.visual.glyph[0]
           const color: [number, number, number, number] = [r, g, b, opacity]
-          const glyphScale = Math.min(sx, sy, sz)
           const voxelEmission = getHighlightedEmission(emission)
 
-          // Use the new addGlyph method (smooth mesh or voxel fallback)
-          this.addGlyph(char, px, py, pz, color, glyphScale, voxelEmission)
+          // Use full scale and rotation for glyph rendering
+          this.addGlyph(char, px, py, pz, color, sx, sy, sz, worldTransform.rotation, voxelEmission)
 
-          // Track for picking (single bounding box for the whole glyph)
+          // Track for picking - bounding box needs to account for scale
           // Glyph is roughly 1 unit wide and 1.4 units tall after normalization
-          const glyphBounds: [number, number, number] = [glyphScale, glyphScale * 1.4, glyphScale * 0.4]
-          this.trackInstance(node.id, [px, py + glyphScale * 0.7, pz], glyphBounds)
+          const glyphBounds: [number, number, number] = [sx, sy * 1.4, sz * 0.4]
+          this.trackInstance(node.id, [px, py + sy * 0.7, pz], glyphBounds)
         } else {
           // No glyph - render as a simple cube
           const color: [number, number, number, number] = [r, g, b, opacity]
@@ -441,15 +567,15 @@ export class Scene {
         }
       }
 
-      // Process children recursively
+      // Process children recursively with this node's world transform
       for (const child of node.children) {
-        processNode(child)
+        processNode(child, worldTransform)
       }
     }
 
     // Start processing from root's children (skip the root itself)
     for (const child of rootNode.children) {
-      processNode(child)
+      processNode(child, identityTransform)
     }
 
     // If no floor node with component exists, add default floor
@@ -513,6 +639,220 @@ export class Scene {
         // this.trackInstance('__floor__', [x, -0.5, z], [1, 0.1, 1])
       }
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Entity Subscription System
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /**
+   * Connect to the entity subscription system for automatic updates
+   * Call this once when the scene is initialized
+   */
+  connectToStore(onChanged?: () => void) {
+    this.onSceneChanged = onChanged || null
+
+    // Subscribe to entity changes
+    this.unsubscribeEntities = entitySubscriptions.subscribeToEntities(
+      (entities, changedNodeIds, changedComponentIds) => {
+        this.cachedEntities = entities
+        this.needsRebuild = true
+
+        // Notify that scene needs rebuild
+        if (this.onSceneChanged) {
+          this.onSceneChanged()
+        }
+      }
+    )
+
+    // Subscribe to selection changes
+    this.unsubscribeSelection = entitySubscriptions.subscribeToSelection(
+      (nodeIds, _primaryId) => {
+        this.cachedSelectedNodes = nodeIds
+        this.needsRebuild = true
+
+        if (this.onSceneChanged) {
+          this.onSceneChanged()
+        }
+      }
+    )
+  }
+
+  /**
+   * Disconnect from the entity subscription system
+   * Call this when cleaning up the scene
+   */
+  disconnectFromStore() {
+    if (this.unsubscribeEntities) {
+      this.unsubscribeEntities()
+      this.unsubscribeEntities = null
+    }
+    if (this.unsubscribeSelection) {
+      this.unsubscribeSelection()
+      this.unsubscribeSelection = null
+    }
+    this.cachedEntities = null
+    this.cachedSelectedNodes = []
+    this.onSceneChanged = null
+  }
+
+  /**
+   * Check if scene needs rebuild (entities changed)
+   */
+  needsSceneRebuild(): boolean {
+    return this.needsRebuild
+  }
+
+  /**
+   * Rebuild scene from cached entities (call this from render loop when needsRebuild is true)
+   */
+  rebuildFromCachedEntities() {
+    if (!this.cachedEntities) return
+
+    this.buildFromEntities(this.cachedEntities, this.cachedSelectedNodes)
+    this.needsRebuild = false
+  }
+
+  /**
+   * Build scene directly from normalized entities (O(n) through nodeOrder)
+   * More efficient than tree traversal for large scenes
+   */
+  buildFromEntities(entities: EntityMaps, selectedNodes: string[] = []) {
+    this.clear()
+
+    // Process nodes in depth-first order (parents before children)
+    // This ensures transforms are computed correctly
+    const worldTransforms = new Map<string, {
+      position: [number, number, number]
+      rotation: [number, number, number]
+      scale: [number, number, number]
+    }>()
+
+    // Compute world transform by combining parent and local transforms
+    const computeWorldTransform = (
+      node: NormalizedNode,
+      parentWorld: { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] }
+    ) => {
+      const localTransform = node.transform || { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }
+
+      // Scale: multiply component-wise
+      const worldScale: [number, number, number] = [
+        parentWorld.scale[0] * localTransform.scale[0],
+        parentWorld.scale[1] * localTransform.scale[1],
+        parentWorld.scale[2] * localTransform.scale[2],
+      ]
+
+      // Rotation: add Euler angles (simplified)
+      const worldRotation: [number, number, number] = [
+        parentWorld.rotation[0] + localTransform.rotation[0],
+        parentWorld.rotation[1] + localTransform.rotation[1],
+        parentWorld.rotation[2] + localTransform.rotation[2],
+      ]
+
+      // Position: apply parent transform
+      const scaledLocalPos: [number, number, number] = [
+        localTransform.position[0] * parentWorld.scale[0],
+        localTransform.position[1] * parentWorld.scale[1],
+        localTransform.position[2] * parentWorld.scale[2],
+      ]
+
+      // Apply parent Y rotation
+      const parentYRotRad = (parentWorld.rotation[1] * Math.PI) / 180
+      const cosY = Math.cos(parentYRotRad)
+      const sinY = Math.sin(parentYRotRad)
+      const rotatedPos: [number, number, number] = [
+        scaledLocalPos[0] * cosY - scaledLocalPos[2] * sinY,
+        scaledLocalPos[1],
+        scaledLocalPos[0] * sinY + scaledLocalPos[2] * cosY,
+      ]
+
+      const worldPosition: [number, number, number] = [
+        parentWorld.position[0] + rotatedPos[0],
+        parentWorld.position[1] + rotatedPos[1],
+        parentWorld.position[2] + rotatedPos[2],
+      ]
+
+      return { position: worldPosition, rotation: worldRotation, scale: worldScale }
+    }
+
+    const identityTransform = {
+      position: [0, 0, 0] as [number, number, number],
+      rotation: [0, 0, 0] as [number, number, number],
+      scale: [1, 1, 1] as [number, number, number],
+    }
+
+    // Process nodes in order (depth-first)
+    for (const nodeId of entities.nodeOrder) {
+      const node = entities.nodes[nodeId]
+      if (!node) continue
+
+      // Get parent world transform
+      const parentWorld = node.parentId
+        ? worldTransforms.get(node.parentId) || identityTransform
+        : identityTransform
+
+      // Compute and cache this node's world transform
+      const worldTransform = computeWorldTransform(node, parentWorld)
+      worldTransforms.set(nodeId, worldTransform)
+
+      // Check for floor generator component
+      const components = node.componentIds
+        .map(id => entities.components[id])
+        .filter(c => c !== undefined)
+
+      const floorComp = components.find(c => c.script === 'builtin:floor_generator')
+      if (floorComp && floorComp.enabled) {
+        this.generateFloorTiles(nodeId, floorComp.properties as FloorConfig)
+      }
+
+      // Only render nodes with transform and visual
+      if (node.transform && node.visual && node.visual.visible) {
+        const [px, py, pz] = worldTransform.position
+        const [sx, sy, sz] = worldTransform.scale
+        const [r, g, b] = node.visual.color
+        const opacity = node.visual.opacity
+
+        const isSelected = selectedNodes.includes(nodeId)
+        let emission = 0
+        if (node.visual.emission && node.visual.emissionPower) {
+          emission = node.visual.emissionPower
+        }
+
+        const getHighlightedEmission = (baseEmission: number) => {
+          if (isSelected) return Math.max(baseEmission, 0.5)
+          return baseEmission
+        }
+
+        if (node.visual.glyph && node.visual.glyph.length > 0) {
+          const char = node.visual.glyph[0]
+          const color: [number, number, number, number] = [r, g, b, opacity]
+          const voxelEmission = getHighlightedEmission(emission)
+
+          // Use full scale and rotation for glyph rendering
+          this.addGlyph(char, px, py, pz, color, sx, sy, sz, worldTransform.rotation, voxelEmission)
+          const glyphBounds: [number, number, number] = [sx, sy * 1.4, sz * 0.4]
+          this.trackInstance(nodeId, [px, py + sy * 0.7, pz], glyphBounds)
+        } else {
+          const color: [number, number, number, number] = [r, g, b, opacity]
+          const voxelEmission = getHighlightedEmission(emission)
+
+          this.addVoxel(px, py, pz, color, sx, sy, sz, voxelEmission, VoxelFlags.NONE)
+          this.trackInstance(nodeId, [px, py, pz], [sx, sy, sz])
+        }
+      }
+    }
+
+    // Add default floor if needed
+    if (!this.hasFloorGenerated()) {
+      this.generateDefaultFloor()
+    }
+  }
+
+  /**
+   * Check if connected to store
+   */
+  isConnectedToStore(): boolean {
+    return this.unsubscribeEntities !== null
   }
 }
 

@@ -1,10 +1,12 @@
 // WebGPU Viewport - React component for the voxel renderer
+// Uses subscription system for reactive updates
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { WebGPURenderer, Camera, Scene, Raycaster, GizmoInteraction } from '../renderer'
 import type { GizmoMode, GizmoAxis } from '../renderer'
-import { useEngineState } from '../stores/useEngineState'
-import type { Node } from '../stores/engineState'
+import { useEngineState, useNormalizedEntities } from '../stores/useEngineState'
+import type { Node, NormalizedNode, Transform } from '../stores/engineState'
+import { entitySubscriptions } from '../stores/subscriptions'
 
 interface WebGPUViewportProps {
   className?: string
@@ -26,6 +28,7 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
   const lastHoverCheckRef = useRef<number>(0)
   const hoverThrottleMs = 50 // Check hover every 50ms
   const clickThreshold = 5 // pixels - max movement to count as click
+  const pointerCaptureElementRef = useRef<HTMLCanvasElement | null>(null)
 
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -37,50 +40,93 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
   const [gizmoHoveredAxis, setGizmoHoveredAxis] = useState<GizmoAxis>(null)
   const isDraggingGizmoRef = useRef(false)
 
-  // Get scene data from engine state
+  // Get scene data from engine state - using normalized entities for O(1) lookups
   const rootNode = useEngineState((s) => s.scene.rootNode)
   const selectedNodes = useEngineState((s) => s.selection.nodes)
   const setPath = useEngineState((s) => s.setPath)
   const activeTool = useEngineState((s) => s.tools.active) as GizmoMode
   const toolSettings = useEngineState((s) => s.tools.available)
 
+  // Normalized entities for O(1) lookups (replaces tree traversal)
+  const { nodes: normalizedNodes, getNode: getNormalizedNode } = useNormalizedEntities()
+
+  // Cached bounding boxes - updated reactively via subscriptions
+  const boundsCache = useRef<Map<string, {
+    position: [number, number, number]
+    bounds: [number, number, number]
+    rotation: [number, number, number]
+  }>>(new Map())
+
   // Refs for values needed in render loop (updated by effects)
+  // Using refs prevents callback recreation when these values change,
+  // which would cause event listener re-registration and break active drags
   const activeToolRef = useRef<GizmoMode>('select')
   const selectedNodesRef = useRef<string[]>([])
   const gizmoHoveredAxisRef = useRef<GizmoAxis>(null)
   const selectedPositionRef = useRef<[number, number, number] | null>(null)
-  const hoveredNodeRef = useRef<string | null>(null) // Ref for hover comparison to avoid callback recreation
-  const rootNodeRef = useRef<Node>(rootNode) // Ref for root node to access in callbacks
+  const hoveredNodeRef = useRef<string | null>(null)
+  const rootNodeRef = useRef<Node>(rootNode)
+  const setPathRef = useRef(setPath)
+  const toolSettingsRef = useRef(toolSettings)
+  const normalizedNodesRef = useRef(normalizedNodes)
 
-  // Keep rootNodeRef in sync
-  useEffect(() => {
-    rootNodeRef.current = rootNode
-  }, [rootNode])
+  // Keep refs in sync SYNCHRONOUSLY - useEffect is too slow for animation loop
+  // These run during render, before animation frame callbacks
+  rootNodeRef.current = rootNode
+  setPathRef.current = setPath
+  toolSettingsRef.current = toolSettings
+  normalizedNodesRef.current = normalizedNodes
 
-  // Helper to find a node by ID in the tree
-  const findNodeById = useCallback((root: Node, id: string): Node | null => {
-    if (root.id === id) return root
-    for (const child of root.children) {
-      const found = findNodeById(child, id)
-      if (found) return found
-    }
-    return null
-  }, [])
-
-  // Get selected node's position for gizmo
-  const getSelectedNodePosition = useCallback((): [number, number, number] | null => {
-    if (selectedNodes.length === 0) return null
-    const node = findNodeById(rootNode, selectedNodes[0])
-    if (!node?.transform) return null
-    return node.transform.position
-  }, [selectedNodes, rootNode, findNodeById])
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Helpers
+  // ═══════════════════════════════════════════════════════════════════════════
 
   // Find path to a node in tree (returns array of indices)
+  // Still uses tree for path building (needed for setPath)
   const findNodePath = useCallback((root: Node, targetId: string, path: number[] = []): number[] | null => {
     if (root.id === targetId) return path
     for (let i = 0; i < root.children.length; i++) {
       const result = findNodePath(root.children[i], targetId, [...path, i])
       if (result) return result
+    }
+    return null
+  }, [])
+
+  // Calculate visual bounds for a normalized node
+  // Handles floor generator, glyphs, and regular transforms
+  const calculateNodeBounds = useCallback((node: NormalizedNode): [number, number, number] => {
+    // Check for floor generator component
+    const floorCompId = node.componentIds.find(id => {
+      const comp = useEngineState.getState().entities.components[id]
+      return comp?.script === 'builtin:floor_generator'
+    })
+    if (floorCompId) {
+      const comp = useEngineState.getState().entities.components[floorCompId]
+      if (comp?.properties) {
+        const props = comp.properties as { size?: [number, number]; tileSize?: number }
+        const size = props.size || [21, 21]
+        const tileSize = props.tileSize || 1
+        return [size[0] * tileSize, 0.1, size[1] * tileSize]
+      }
+    }
+
+    // For glyph nodes, bounds scale with the transform
+    if (node.visual?.glyph && node.visual.glyph.length > 0) {
+      const scale = node.transform?.scale || [1, 1, 1]
+      // Glyph bounds: width=scaleX, height=scaleY*1.4 (glyph aspect), depth=scaleZ*0.4
+      return [scale[0], scale[1] * 1.4, scale[2] * 0.4]
+    }
+
+    // Default: use transform scale directly
+    return (node.transform?.scale as [number, number, number]) || [1, 1, 1]
+  }, [])
+
+  // Legacy helper for tree operations (still needed for setPath)
+  const findNodeById = useCallback((root: Node, id: string): Node | null => {
+    if (root.id === id) return root
+    for (const child of root.children) {
+      const found = findNodeById(child, id)
+      if (found) return found
     }
     return null
   }, [])
@@ -114,6 +160,7 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
   }, [getRayFromScreen])
 
   // Handle keyboard input - only when not typing in an input
+  // Uses refs for state to avoid callback recreation
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     // Don't capture keys when typing in inputs, textareas, or contenteditable
     const target = e.target as HTMLElement
@@ -128,48 +175,64 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
     // Tool shortcuts
     switch (e.key.toLowerCase()) {
       case 'v':
-        setPath(['tools', 'active'], 'select', 'Switch to Select tool')
+        setPathRef.current(['tools', 'active'], 'select', 'Switch to Select tool')
         break
       case 'g':
-        setPath(['tools', 'active'], 'move', 'Switch to Move tool')
+        setPathRef.current(['tools', 'active'], 'move', 'Switch to Move tool')
         break
       case 'r':
-        setPath(['tools', 'active'], 'rotate', 'Switch to Rotate tool')
+        setPathRef.current(['tools', 'active'], 'rotate', 'Switch to Rotate tool')
         break
       // Note: 's' is used for backward movement, so we use 't' for scale
       // Or we could use only when not moving
       case 't':
-        setPath(['tools', 'active'], 'scale', 'Switch to Scale tool')
+        setPathRef.current(['tools', 'active'], 'scale', 'Switch to Scale tool')
         break
     }
 
     keysRef.current.add(e.key.toLowerCase())
-  }, [setPath])
+  }, [])
 
   const handleKeyUp = useCallback((e: KeyboardEvent) => {
     // Always remove key from set on keyup to prevent stuck keys
     keysRef.current.delete(e.key.toLowerCase())
   }, [])
 
-  // Handle mouse input
-  const handleMouseDown = useCallback((e: MouseEvent) => {
+  // Handle pointer input - uses pointer capture for reliable dragging
+  const handleMouseDown = useCallback((e: PointerEvent | MouseEvent) => {
+    const canvas = canvasRef.current
+    const pointerId = 'pointerId' in e ? e.pointerId : 1
+
     if (e.button === 0) { // Left click
       // Check if clicking on gizmo first
-      const nodePos = selectedPositionRef.current
-      if (nodePos && gizmoHoveredAxisRef.current) {
-        // Start gizmo drag - gizmo at center of selection box (y + 0.5)
-        const gizmoCenter: [number, number, number] = [nodePos[0], nodePos[1] + 0.5, nodePos[2]]
-        const selectedId = selectedNodesRef.current[0]
-        const node = findNodeById(rootNodeRef.current, selectedId)
+      const selectedId = selectedNodesRef.current[0]
+      const cachedBounds = selectedId ? boundsCache.current.get(selectedId) : null
+      if (cachedBounds && gizmoHoveredAxisRef.current) {
+        // Start gizmo drag - gizmo at center of bounding box
+        const gizmoCenter: [number, number, number] = [
+          cachedBounds.position[0],
+          cachedBounds.position[1] + cachedBounds.bounds[1] * 0.5,
+          cachedBounds.position[2]
+        ]
+        const node = normalizedNodesRef.current[selectedId]
         if (node?.transform) {
           gizmoInteractionRef.current.beginDrag(
             gizmoHoveredAxisRef.current,
             [e.clientX, e.clientY],
             gizmoCenter,
-            node.transform
+            node.transform as Transform
           )
           isDraggingGizmoRef.current = true
           lastMouseRef.current = { x: e.clientX, y: e.clientY }
+          // Capture pointer for reliable drag handling
+          if (canvas && 'setPointerCapture' in canvas) {
+            try {
+              canvas.setPointerCapture(pointerId)
+              pointerCaptureElementRef.current = canvas
+            } catch {
+              // Ignore if capture fails
+            }
+          }
           return
         }
       }
@@ -182,9 +245,21 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
       isDraggingRef.current = true
       lastMouseRef.current = { x: e.clientX, y: e.clientY }
     }
-  }, [findNodeById])
+  }, []) // Uses refs only - no dependencies needed
 
-  const handleMouseUp = useCallback((e: MouseEvent) => {
+  const handleMouseUp = useCallback((e: PointerEvent | MouseEvent) => {
+    const pointerId = 'pointerId' in e ? e.pointerId : 1
+
+    // Release pointer capture if we had it
+    if (pointerCaptureElementRef.current) {
+      try {
+        pointerCaptureElementRef.current.releasePointerCapture(pointerId)
+      } catch {
+        // Ignore - pointer capture may already be released
+      }
+      pointerCaptureElementRef.current = null
+    }
+
     // Handle gizmo drag end
     if (isDraggingGizmoRef.current) {
       gizmoInteractionRef.current.endDrag()
@@ -209,36 +284,43 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
         const nodeId = pickNodeAtPosition(e.clientX, e.clientY)
         if (nodeId) {
           // Select the node
-          setPath(['selection', 'nodes'], [nodeId], 'Select node')
+          setPathRef.current(['selection', 'nodes'], [nodeId], 'Select node')
           console.log('[WebGPUViewport] Selected node:', nodeId)
         } else {
           // Clicked empty space - clear selection
-          setPath(['selection', 'nodes'], [], 'Clear selection')
+          setPathRef.current(['selection', 'nodes'], [], 'Clear selection')
           console.log('[WebGPUViewport] Cleared selection')
         }
       }
     }
     clickStartRef.current = null
-  }, [pickNodeAtPosition, setPath])
+  }, [pickNodeAtPosition])
 
+  // Mouse move handler - uses refs to avoid callback recreation which would break drags
   const handleMouseMove = useCallback((e: MouseEvent) => {
+    // Get cached bounds for selected node (used in multiple places below)
+    const selectedId = selectedNodesRef.current[0]
+    const cachedBounds = selectedId ? boundsCache.current.get(selectedId) : null
+
     // Handle gizmo dragging
     if (isDraggingGizmoRef.current) {
       const ray = getRayFromScreen(e.clientX, e.clientY)
-      if (!ray) return
+      if (!ray || !cachedBounds) return
 
-      const nodePos = selectedPositionRef.current
-      if (!nodePos) return
-
-      // Gizmo at center of selection box (y + 0.5)
-      const gizmoCenter: [number, number, number] = [nodePos[0], nodePos[1] + 0.5, nodePos[2]]
+      // Gizmo at center of bounding box
+      const gizmoCenter: [number, number, number] = [
+        cachedBounds.position[0],
+        cachedBounds.position[1] + cachedBounds.bounds[1] * 0.5,
+        cachedBounds.position[2]
+      ]
 
       const tool = activeToolRef.current
       const mode = tool === 'select' ? 'move' : tool
 
-      // Get snap settings based on tool
-      const moveSettings = (toolSettings as Record<string, { settings?: { snapToGrid?: boolean; gridSize?: number; snapAngle?: number } }>).move?.settings
-      const rotateSettings = (toolSettings as Record<string, { settings?: { snapToGrid?: boolean; gridSize?: number; snapAngle?: number } }>).rotate?.settings
+      // Get snap settings based on tool (use ref to avoid callback recreation)
+      const settings = toolSettingsRef.current as Record<string, { settings?: { snapToGrid?: boolean; gridSize?: number; snapAngle?: number } }>
+      const moveSettings = settings.move?.settings
+      const rotateSettings = settings.rotate?.settings
       const snap = {
         enabled: moveSettings?.snapToGrid ?? true,
         gridSize: moveSettings?.gridSize ?? 1,
@@ -247,12 +329,11 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
 
       const newTransform = gizmoInteractionRef.current.updateDrag(mode, ray, gizmoCenter, snap)
       if (newTransform) {
-        const selectedId = selectedNodesRef.current[0]
         const nodePath = findNodePath(rootNodeRef.current, selectedId)
         if (nodePath) {
           // Build path to the node's transform
           const fullPath = ['scene', 'rootNode', ...nodePath.flatMap(i => ['children', i]), 'transform']
-          setPath(fullPath, newTransform, 'Move node')
+          setPathRef.current(fullPath, newTransform, 'Move node')
         }
       }
       return
@@ -283,12 +364,15 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
     lastHoverCheckRef.current = now
 
     // Check gizmo hover first
-    const nodePos = selectedPositionRef.current
-    if (nodePos && cameraRef.current) {
+    if (cachedBounds && cameraRef.current) {
       const ray = getRayFromScreen(e.clientX, e.clientY)
       if (ray) {
-        // Gizmo at center of selection box (y + 0.5)
-        const gizmoCenter: [number, number, number] = [nodePos[0], nodePos[1] + 0.5, nodePos[2]]
+        // Gizmo at center of bounding box
+        const gizmoCenter: [number, number, number] = [
+          cachedBounds.position[0],
+          cachedBounds.position[1] + cachedBounds.bounds[1] * 0.5,
+          cachedBounds.position[2]
+        ]
 
         const tool = activeToolRef.current
         const mode = tool === 'select' ? 'move' : tool
@@ -324,10 +408,10 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
     // Check node hover
     const nodeId = pickNodeAtPosition(e.clientX, e.clientY)
 
-    // Check if this is a floor node - treat floor as empty space for hover
+    // Check if this is a floor node - treat floor as empty space for hover (O(1) lookup)
     let effectiveHoverId: string | null = nodeId
     if (nodeId) {
-      const node = findNodeById(rootNodeRef.current, nodeId)
+      const node = normalizedNodesRef.current[nodeId]
       if (node?.meta?.isFloor) {
         effectiveHoverId = null  // Don't highlight floor on hover
       }
@@ -341,7 +425,7 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
         sceneRef.current.setHoveredNode(effectiveHoverId)
       }
     }
-  }, [pickNodeAtPosition, getRayFromScreen, findNodePath, setPath, toolSettings, findNodeById])
+  }, [pickNodeAtPosition, getRayFromScreen, findNodePath])
 
   const handleWheel = useCallback((e: WheelEvent) => {
     e.preventDefault()
@@ -367,14 +451,62 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
     }
   }, [])
 
-  // Rebuild scene when nodes, selection, or hover changes
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Reactive Scene Updates via Subscriptions
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  // Subscribe to entity changes for reactive scene updates
   useEffect(() => {
     if (!sceneRef.current || loading) return
 
-    // Update hover state before rebuild
+    // Connect scene to subscription system
+    sceneRef.current.connectToStore(() => {
+      // Scene will set needsRebuild flag, render loop checks it
+    })
+
+    // Subscribe to entity changes to update bounds cache
+    const unsubscribeEntities = entitySubscriptions.subscribeToEntities(
+      (entities, changedNodeIds, _changedComponentIds) => {
+        // Update bounds cache for changed nodes
+        for (const nodeId of changedNodeIds) {
+          const node = entities.nodes[nodeId]
+          if (node?.transform) {
+            boundsCache.current.set(nodeId, {
+              position: node.transform.position,
+              bounds: calculateNodeBounds(node),
+              rotation: node.transform.rotation || [0, 0, 0]
+            })
+          } else {
+            boundsCache.current.delete(nodeId)
+          }
+        }
+      }
+    )
+
+    // Initial bounds cache population
+    const entities = useEngineState.getState().entities
+    for (const nodeId of entities.nodeOrder) {
+      const node = entities.nodes[nodeId]
+      if (node?.transform) {
+        boundsCache.current.set(nodeId, {
+          position: node.transform.position,
+          bounds: calculateNodeBounds(node),
+          rotation: node.transform.rotation || [0, 0, 0]
+        })
+      }
+    }
+
+    return () => {
+      unsubscribeEntities()
+      sceneRef.current?.disconnectFromStore()
+    }
+  }, [loading, calculateNodeBounds])
+
+  // Update hover state separately (doesn't require full scene rebuild)
+  useEffect(() => {
+    if (!sceneRef.current || loading) return
     sceneRef.current.setHoveredNode(hoveredNode)
-    sceneRef.current.buildFromNodes(rootNode, selectedNodes)
-  }, [rootNode, selectedNodes, hoveredNode, loading])
+  }, [hoveredNode, loading])
 
   // Sync state to refs for render loop
   useEffect(() => {
@@ -383,10 +515,14 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
 
   useEffect(() => {
     selectedNodesRef.current = selectedNodes
-    // Update selected position for gizmo
-    const pos = getSelectedNodePosition()
-    selectedPositionRef.current = pos
-  }, [selectedNodes, getSelectedNodePosition])
+    // Update selected position for gizmo from cache (O(1))
+    if (selectedNodes.length > 0) {
+      const cached = boundsCache.current.get(selectedNodes[0])
+      selectedPositionRef.current = cached?.position || null
+    } else {
+      selectedPositionRef.current = null
+    }
+  }, [selectedNodes, normalizedNodes]) // normalizedNodes triggers when entities change
 
   useEffect(() => {
     gizmoHoveredAxisRef.current = gizmoHoveredAxis
@@ -487,47 +623,53 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
             cameraRef.current.update(deltaTime)
           }
 
-          // Update scene animation
+          // Update scene - check if rebuild needed (reactive via subscriptions)
           if (sceneRef.current) {
             sceneRef.current.update(deltaTime)
+
+            // Check if scene needs rebuild (set by subscription callback)
+            if (sceneRef.current.needsSceneRebuild()) {
+              sceneRef.current.rebuildFromCachedEntities()
+            }
           }
 
           // Render
           if (rendererRef.current && sceneRef.current && cameraRef.current) {
             rendererRef.current.render(sceneRef.current, cameraRef.current)
 
-            // Build bounds array for both hover and selection
+            // Build bounds array using CACHED bounds (O(1) lookups, not recalculated)
             const bounds: Array<{
               position: [number, number, number]
               scale: [number, number, number]
               color: [number, number, number, number]
             }> = []
 
-            // Add hover bounds (white with alpha) - skip floor nodes
+            // Add hover bounds from cache (skip floor nodes)
             const hoveredId = hoveredNodeRef.current
             if (hoveredId && !selectedNodesRef.current.includes(hoveredId)) {
-              const hoveredNode = findNodeById(rootNode, hoveredId)
-              // Don't draw wireframe for floor nodes (they would be huge and confusing)
-              if (hoveredNode?.transform && !hoveredNode.meta?.isFloor) {
-                // Wireframe geometry has base at y=0, matching glyph base at node position
+              const cachedBounds = boundsCache.current.get(hoveredId)
+              const node = normalizedNodesRef.current[hoveredId]
+              if (cachedBounds && node && !node.meta?.isFloor) {
                 bounds.push({
-                  position: hoveredNode.transform.position as [number, number, number],
-                  scale: [1, 1, 1],
+                  position: cachedBounds.position,
+                  scale: cachedBounds.bounds,
                   color: [1.0, 1.0, 1.0, 0.5] // White with alpha for hover
                 })
               }
             }
 
-            // Add selection bounds (white with alpha)
+            // Add selection bounds from cache
             const tool = activeToolRef.current
-            const pos = selectedPositionRef.current
-            if (pos) {
-              // Wireframe geometry has base at y=0, matching glyph base at node position
-              bounds.push({
-                position: pos,
-                scale: [1, 1, 1],
-                color: [1.0, 1.0, 1.0, 0.8] // White with alpha for selection
-              })
+            if (selectedNodesRef.current.length > 0) {
+              const selectedId = selectedNodesRef.current[0]
+              const cachedBounds = boundsCache.current.get(selectedId)
+              if (cachedBounds) {
+                bounds.push({
+                  position: cachedBounds.position,
+                  scale: cachedBounds.bounds,
+                  color: [1.0, 1.0, 1.0, 0.8] // White with alpha for selection
+                })
+              }
             }
 
             // Render all bounds
@@ -535,16 +677,26 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
               rendererRef.current.renderSelectionBounds(cameraRef.current, bounds)
             }
 
-            // Render gizmo if a node is selected (at center of selection box)
-            if (pos) {
-              const gizmoMode = tool === 'select' ? 'move' : tool
-              const gizmoCenter: [number, number, number] = [pos[0], pos[1] + 0.5, pos[2]]
-              rendererRef.current.renderGizmo(
-                cameraRef.current,
-                gizmoMode,
-                gizmoCenter,
-                gizmoHoveredAxisRef.current
-              )
+            // Render gizmo if a node is selected (use cached position)
+            if (selectedNodesRef.current.length > 0) {
+              const selectedId = selectedNodesRef.current[0]
+              const cachedBounds = boundsCache.current.get(selectedId)
+              if (cachedBounds) {
+                const pos = cachedBounds.position
+                const gizmoMode = tool === 'select' ? 'move' : tool
+                // Gizmo at center of bounding box (offset by half height)
+                const gizmoCenter: [number, number, number] = [
+                  pos[0],
+                  pos[1] + cachedBounds.bounds[1] * 0.5,
+                  pos[2]
+                ]
+                rendererRef.current.renderGizmo(
+                  cameraRef.current,
+                  gizmoMode,
+                  gizmoCenter,
+                  gizmoHoveredAxisRef.current
+                )
+              }
             }
           }
 
@@ -562,17 +714,6 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
     }
 
     init()
-
-    // Add event listeners
-    window.addEventListener('keydown', handleKeyDown)
-    window.addEventListener('keyup', handleKeyUp)
-    canvas.addEventListener('mousedown', handleMouseDown)
-    window.addEventListener('mouseup', handleMouseUp)
-    window.addEventListener('mousemove', handleMouseMove)
-    canvas.addEventListener('mousemove', handleMouseMove) // Also on canvas for hover when not dragging
-    canvas.addEventListener('mouseleave', handleMouseLeave)
-    canvas.addEventListener('wheel', handleWheel, { passive: false })
-    canvas.addEventListener('contextmenu', handleContextMenu)
 
     // Handle resize
     const resizeObserver = new ResizeObserver((entries) => {
@@ -599,21 +740,37 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
       cancelAnimationFrame(animationIdRef.current)
       resizeObserver.disconnect()
 
-      // Remove event listeners
-      window.removeEventListener('keydown', handleKeyDown)
-      window.removeEventListener('keyup', handleKeyUp)
-      canvas.removeEventListener('mousedown', handleMouseDown)
-      window.removeEventListener('mouseup', handleMouseUp)
-      window.removeEventListener('mousemove', handleMouseMove)
-      canvas.removeEventListener('mousemove', handleMouseMove)
-      canvas.removeEventListener('mouseleave', handleMouseLeave)
-      canvas.removeEventListener('wheel', handleWheel)
-      canvas.removeEventListener('contextmenu', handleContextMenu)
-
       if (rendererRef.current) {
         rendererRef.current.destroy()
         rendererRef.current = null
       }
+    }
+  }, []) // No dependencies - init only once
+
+  // Separate effect for event listeners to avoid re-registration
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+
+    // Add event listeners - use window for drag events to capture outside canvas
+    window.addEventListener('keydown', handleKeyDown)
+    window.addEventListener('keyup', handleKeyUp)
+    canvas.addEventListener('pointerdown', handleMouseDown as EventListener)
+    window.addEventListener('pointerup', handleMouseUp as EventListener)
+    window.addEventListener('pointermove', handleMouseMove as EventListener)
+    canvas.addEventListener('mouseleave', handleMouseLeave)
+    canvas.addEventListener('wheel', handleWheel, { passive: false })
+    canvas.addEventListener('contextmenu', handleContextMenu)
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+      canvas.removeEventListener('pointerdown', handleMouseDown as EventListener)
+      window.removeEventListener('pointerup', handleMouseUp as EventListener)
+      window.removeEventListener('pointermove', handleMouseMove as EventListener)
+      canvas.removeEventListener('mouseleave', handleMouseLeave)
+      canvas.removeEventListener('wheel', handleWheel)
+      canvas.removeEventListener('contextmenu', handleContextMenu)
     }
   }, [handleKeyDown, handleKeyUp, handleMouseDown, handleMouseUp, handleMouseMove, handleMouseLeave, handleWheel, handleContextMenu])
 

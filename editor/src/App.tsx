@@ -24,6 +24,7 @@ import { NodeTree } from './components/NodeTree';
 import { TypeInspector } from './components/TypeInspector';
 import { EntityCollection, ItemCollection, TypeCollectionPanel } from './components/TypeCollectionPanel';
 import { EntitiesPanel, ModeAwarePropertiesPanel } from './components/ModeAwarePanels';
+import { RenderPipelinePanel } from './components/render';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main App
@@ -136,6 +137,9 @@ function AppContent() {
 
       case 'console':
         return <ConsolePanel />;
+
+      case 'render':
+        return <RenderPipelinePanel />;
 
       // Deckbuilder panels
       case 'cards':

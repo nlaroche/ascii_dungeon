@@ -10,6 +10,7 @@ import gridShaderCode from './shaders/grid.wgsl?raw'
 import gizmoShaderCode from './shaders/gizmo.wgsl?raw'
 import glyphShaderCode from './shaders/glyph.wgsl?raw'
 import { GizmoGeometry, type GizmoMode, type GizmoAxis } from './Gizmo'
+import { PostProcessManager } from './PostProcessManager'
 
 // Cube geometry data
 const CUBE_VERTICES = new Float32Array([
@@ -129,6 +130,10 @@ export class WebGPURenderer {
   private shadowSampler!: GPUSampler
   private reflectionSampler!: GPUSampler
 
+  // Post-processing
+  private postProcessManager!: PostProcessManager
+  private postProcessEnabled = true
+
   private width = 0
   private height = 0
   private initialized = false
@@ -194,6 +199,11 @@ export class WebGPURenderer {
     // Create bind groups
     this.createBindGroups()
 
+    // Initialize post-processing
+    this.postProcessManager = new PostProcessManager(this.device, this.format)
+    await this.postProcessManager.init()
+    this.postProcessManager.resize(this.width, this.height)
+
     this.initialized = true
   }
 
@@ -212,11 +222,11 @@ export class WebGPURenderer {
   }
 
   private createTextures() {
-    // Depth texture for main pass
+    // Depth texture for main pass (depth32float for post-process sampling)
     this.depthTexture = this.device.createTexture({
       size: [this.width, this.height],
-      format: 'depth24plus',
-      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+      format: 'depth32float',
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     })
 
     // Shadow map
@@ -235,7 +245,7 @@ export class WebGPURenderer {
 
     this.reflectionDepth = this.device.createTexture({
       size: [this.width, this.height],
-      format: 'depth24plus',
+      format: 'depth32float',
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
     })
   }
@@ -309,7 +319,7 @@ export class WebGPURenderer {
         cullMode: 'back',
       },
       depthStencil: {
-        format: 'depth24plus',
+        format: 'depth32float',
         depthWriteEnabled: true,
         depthCompare: 'less',
       },
@@ -374,7 +384,7 @@ export class WebGPURenderer {
         cullMode: 'back',
       },
       depthStencil: {
-        format: 'depth24plus',
+        format: 'depth32float',
         depthWriteEnabled: false, // Water doesn't write depth
         depthCompare: 'less',
       },
@@ -397,7 +407,7 @@ export class WebGPURenderer {
         topology: 'triangle-list',
       },
       depthStencil: {
-        format: 'depth24plus',
+        format: 'depth32float',
         depthWriteEnabled: false,
         depthCompare: 'always', // Always draw sky (it's at z=1)
       },
@@ -426,7 +436,7 @@ export class WebGPURenderer {
         topology: 'triangle-list',
       },
       depthStencil: {
-        format: 'depth24plus',
+        format: 'depth32float',
         depthWriteEnabled: false,
         depthCompare: 'less-equal',
       },
@@ -492,7 +502,7 @@ export class WebGPURenderer {
         cullMode: 'none', // Don't cull gizmo faces
       },
       depthStencil: {
-        format: 'depth24plus',
+        format: 'depth32float',
         depthWriteEnabled: false,
         depthCompare: 'less-equal',
       },
@@ -540,7 +550,7 @@ export class WebGPURenderer {
         topology: 'line-list',
       },
       depthStencil: {
-        format: 'depth24plus',
+        format: 'depth32float',
         depthWriteEnabled: false,
         depthCompare: 'less-equal',
       },
@@ -609,7 +619,7 @@ export class WebGPURenderer {
         cullMode: 'back',
       },
       depthStencil: {
-        format: 'depth24plus',
+        format: 'depth32float',
         depthWriteEnabled: true,
         depthCompare: 'less-equal',
       },
@@ -697,8 +707,8 @@ export class WebGPURenderer {
 
     this.depthTexture = this.device.createTexture({
       size: [width, height],
-      format: 'depth24plus',
-      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+      format: 'depth32float',
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     })
 
     this.reflectionTexture = this.device.createTexture({
@@ -709,7 +719,7 @@ export class WebGPURenderer {
 
     this.reflectionDepth = this.device.createTexture({
       size: [width, height],
-      format: 'depth24plus',
+      format: 'depth32float',
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
     })
 
@@ -723,6 +733,9 @@ export class WebGPURenderer {
         { binding: 3, resource: this.reflectionSampler },
       ],
     })
+
+    // Resize post-processing
+    this.postProcessManager?.resize(width, height)
   }
 
   private frameCount = 0
@@ -805,10 +818,20 @@ export class WebGPURenderer {
     reflectionPass.drawIndexed(36, scene.getNonWaterInstanceCount())
     reflectionPass.end()
 
+    // Determine render target (post-process scene texture or canvas)
+    const hasPostEffects = this.postProcessEnabled && this.postProcessManager?.hasActiveEffects()
+    const sceneTarget = hasPostEffects ? this.postProcessManager.getSceneTarget() : null
+    const mainRenderTarget = sceneTarget?.view ?? this.context.getCurrentTexture().createView()
+
+    // Pass depth texture to post-process manager for effects that need it
+    if (hasPostEffects) {
+      this.postProcessManager.setDepthTexture(this.depthTexture.createView())
+    }
+
     // Main pass
     const mainPass = commandEncoder.beginRenderPass({
       colorAttachments: [{
-        view: this.context.getCurrentTexture().createView(),
+        view: mainRenderTarget,
         clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
         loadOp: 'clear',
         storeOp: 'store',
@@ -866,6 +889,12 @@ export class WebGPURenderer {
     }
 
     mainPass.end()
+
+    // Execute post-processing chain
+    if (hasPostEffects) {
+      const canvasView = this.context.getCurrentTexture().createView()
+      this.postProcessManager.execute(commandEncoder, canvasView, scene.time)
+    }
 
     this.device.queue.submit([commandEncoder.finish()])
   }
@@ -1077,11 +1106,21 @@ export class WebGPURenderer {
     this.reflectionTexture?.destroy()
     this.reflectionDepth?.destroy()
 
+    // Destroy post-processing
+    this.postProcessManager?.destroy()
+
     // Clear geometry cache
     this.gizmoGeometryCache.forEach(({ vertices, indices }) => {
       vertices.destroy()
       indices.destroy()
     })
     this.gizmoGeometryCache.clear()
+  }
+
+  /**
+   * Enable or disable post-processing.
+   */
+  setPostProcessEnabled(enabled: boolean): void {
+    this.postProcessEnabled = enabled
   }
 }

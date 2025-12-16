@@ -55,6 +55,7 @@ const TAB_DEFINITIONS: Record<string, { icon: string; label: string }> = {
   notes: { icon: '✎', label: 'Note taking' },
   properties: { icon: '⚙', label: 'Properties' },
   console: { icon: '❯', label: 'Console' },
+  render: { icon: '◐', label: 'Render' },
 
   // Deckbuilder panels
   cards: { icon: '🃏', label: 'Cards' },
@@ -127,6 +128,7 @@ const TEMPLATE_LAYOUTS: Record<string, () => LayoutData> = {
             {
               tabs: [
                 { id: 'properties', title: 'Properties', group: 'default' },
+                { id: 'render', title: 'Render', group: 'default' },
                 { id: 'chat', title: 'AI Chat', group: 'default' },
               ],
               activeId: 'properties',

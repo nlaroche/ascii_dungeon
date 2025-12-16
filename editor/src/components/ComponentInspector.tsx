@@ -2,7 +2,7 @@
 // Component Inspector - Renders component properties using decorator metadata
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { useState } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { useTheme, useSelection, useNodes } from '../stores/useEngineState'
 import {
   componentRegistry,
@@ -600,6 +600,102 @@ function PropertyField({ label, type, value, onChange, options }: PropertyFieldP
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Draggable Number Input (Unity-style scrubber)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function DraggableNumber({
+  value,
+  onChange,
+  step = 0.1,
+  min,
+  max,
+  color,
+  label,
+}: {
+  value: number
+  onChange: (value: number) => void
+  step?: number
+  min?: number
+  max?: number
+  color?: string
+  label?: string
+}) {
+  const theme = useTheme()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const dragStartRef = useRef<{ x: number; startValue: number } | null>(null)
+
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    if (e.target === inputRef.current) return // Don't drag when clicking input
+
+    e.preventDefault()
+    dragStartRef.current = { x: e.clientX, startValue: value }
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!dragStartRef.current) return
+
+      const dx = moveEvent.clientX - dragStartRef.current.x
+      const sensitivity = step * (moveEvent.shiftKey ? 0.1 : moveEvent.ctrlKey ? 10 : 1)
+      let newValue = dragStartRef.current.startValue + dx * sensitivity
+
+      if (min !== undefined) newValue = Math.max(min, newValue)
+      if (max !== undefined) newValue = Math.min(max, newValue)
+
+      // Round to step
+      newValue = Math.round(newValue / step) * step
+      newValue = parseFloat(newValue.toFixed(4)) // Avoid floating point errors
+
+      onChange(newValue)
+    }
+
+    const handleMouseUp = () => {
+      dragStartRef.current = null
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+      document.body.style.cursor = ''
+    }
+
+    document.body.style.cursor = 'ew-resize'
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [value, onChange, step, min, max])
+
+  return (
+    <div
+      className="flex items-center gap-1 flex-1 cursor-ew-resize"
+      onMouseDown={handleMouseDown}
+    >
+      {label && (
+        <span
+          className="text-[10px] font-medium select-none"
+          style={{ color: color || theme.textDim, minWidth: '12px' }}
+        >
+          {label}
+        </span>
+      )}
+      <input
+        ref={inputRef}
+        type="number"
+        value={value}
+        step={step}
+        onChange={(e) => {
+          let v = parseFloat(e.target.value) || 0
+          if (min !== undefined) v = Math.max(min, v)
+          if (max !== undefined) v = Math.min(max, v)
+          onChange(v)
+        }}
+        className="w-full px-1 py-0.5 rounded text-xs text-center cursor-text"
+        style={{
+          backgroundColor: theme.bg,
+          color: theme.text,
+          border: `1px solid ${theme.border}`,
+        }}
+        onClick={(e) => e.stopPropagation()}
+      />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Vec3 Input Component
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -607,12 +703,16 @@ function Vec3Input({
   label,
   value,
   onChange,
+  step = 0.1,
 }: {
   label: string
   value: [number, number, number]
   onChange: (index: number, value: number) => void
+  step?: number
 }) {
   const theme = useTheme()
+  const axisColors = ['#ef4444', '#22c55e', '#3b82f6']
+  const axisLabels = ['X', 'Y', 'Z']
 
   return (
     <div className="flex items-center gap-2">
@@ -620,24 +720,15 @@ function Vec3Input({
         {label}
       </label>
       <div className="flex-1 flex gap-1">
-        {['X', 'Y', 'Z'].map((axis, i) => (
-          <div key={axis} className="flex-1 flex items-center gap-1">
-            <span style={{ color: ['#ef4444', '#22c55e', '#3b82f6'][i], fontSize: '10px' }}>
-              {axis}
-            </span>
-            <input
-              type="number"
-              value={value[i]}
-              step={0.1}
-              onChange={(e) => onChange(i, parseFloat(e.target.value) || 0)}
-              className="w-full px-1 py-0.5 rounded text-xs text-center"
-              style={{
-                backgroundColor: theme.bg,
-                color: theme.text,
-                border: `1px solid ${theme.border}`,
-              }}
-            />
-          </div>
+        {[0, 1, 2].map((i) => (
+          <DraggableNumber
+            key={i}
+            value={value[i]}
+            onChange={(v) => onChange(i, v)}
+            step={step}
+            color={axisColors[i]}
+            label={axisLabels[i]}
+          />
         ))}
       </div>
     </div>

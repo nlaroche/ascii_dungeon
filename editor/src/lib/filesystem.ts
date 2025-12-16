@@ -474,71 +474,83 @@ export const PROJECT_TEMPLATE = {
     },
   }, null, 2),
 
-  'main.lua': `-- Main entry point
-local game = require("game")
+  'src/main.ts': `// Main entry point
+import { Game } from './game';
 
-function init()
-  game.init()
-end
+const game = new Game();
 
-function update(dt)
-  game.update(dt)
-end
+export function init(): void {
+  game.init();
+}
 
-function draw()
-  game.draw()
-end
-`,
+export function update(dt: number): void {
+  game.update(dt);
+}
 
-  'game/init.lua': `-- Game module
-local M = {}
-
-function M.init()
-  print("Game initialized!")
-end
-
-function M.update(dt)
-  -- Update game logic
-end
-
-function M.draw()
-  -- Draw game
-end
-
-return M
-`,
-
-  'entities/player.lua': `-- Player entity
-local Player = {}
-Player.__index = Player
-
-function Player.new(x, y)
-  local self = setmetatable({}, Player)
-  self.x = x or 0
-  self.y = y or 0
-  self.glyph = "@"
-  self.color = {0.2, 0.9, 0.4}
-  self.health = 100
-  return self
-end
-
-function Player:update(dt)
-  -- Player update logic
-end
-
-return Player
-`,
-
-  'maps/level_1.lua': `-- Level 1 map data
-return {
-  width = 40,
-  height = 30,
-  tiles = {},
-  entities = {
-    { type = "player", x = 5, y = 5 },
-  },
+export function draw(): void {
+  game.draw();
 }
 `,
+
+  'src/game.ts': `// Game module
+export class Game {
+  init(): void {
+    console.log('Game initialized!');
+  }
+
+  update(dt: number): void {
+    // Update game logic
+  }
+
+  draw(): void {
+    // Draw game
+  }
+}
+`,
+
+  'src/entities/Player.ts': `// Player entity
+export class Player {
+  x: number;
+  y: number;
+  glyph: string = '@';
+  color: [number, number, number] = [0.2, 0.9, 0.4];
+  health: number = 100;
+
+  constructor(x: number = 0, y: number = 0) {
+    this.x = x;
+    this.y = y;
+  }
+
+  update(dt: number): void {
+    // Player update logic
+  }
+}
+`,
+
+  'src/maps/level1.ts': `// Level 1 map data
+export const level1 = {
+  width: 40,
+  height: 30,
+  tiles: [] as number[][],
+  entities: [
+    { type: 'player', x: 5, y: 5 },
+  ],
+};
+`,
+
+  'tsconfig.json': JSON.stringify({
+    compilerOptions: {
+      target: 'ES2020',
+      module: 'ESNext',
+      moduleResolution: 'bundler',
+      strict: true,
+      esModuleInterop: true,
+      skipLibCheck: true,
+      outDir: './dist',
+      rootDir: './src',
+    },
+    include: ['src/**/*'],
+  }, null, 2),
 };
 
 /**

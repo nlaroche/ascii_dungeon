@@ -69,26 +69,44 @@ export class Raycaster {
     return { hit: true, distance: tMin, normal: hitNormal }
   }
 
+  // Compute AABB volume for tie-breaking
+  private static getAABBVolume(aabb: AABB): number {
+    return (aabb.max[0] - aabb.min[0]) *
+           (aabb.max[1] - aabb.min[1]) *
+           (aabb.max[2] - aabb.min[2])
+  }
+
   // Pick against all instances, return closest hit
+  // When distances are equal, prefer smaller AABBs (more specific objects)
   static pick(ray: Ray, instances: PickableInstance[]): PickResult | null {
     let closest: PickResult | null = null
+    let closestVolume = Infinity
 
     for (const instance of instances) {
       const result = this.rayAABB(ray, instance.aabb)
 
-      if (result.hit && (!closest || result.distance < closest.distance)) {
-        const hitPoint: [number, number, number] = [
-          ray.origin[0] + ray.direction[0] * result.distance,
-          ray.origin[1] + ray.direction[1] * result.distance,
-          ray.origin[2] + ray.direction[2] * result.distance,
-        ]
+      if (result.hit) {
+        const volume = this.getAABBVolume(instance.aabb)
+        // Pick if closer, OR if same distance but smaller volume (more specific)
+        const isBetter = !closest ||
+          result.distance < closest.distance ||
+          (result.distance === closest.distance && volume < closestVolume)
 
-        closest = {
-          nodeId: instance.nodeId,
-          instanceIndex: instance.instanceIndex,
-          distance: result.distance,
-          hitPoint,
-          normal: result.normal,
+        if (isBetter) {
+          const hitPoint: [number, number, number] = [
+            ray.origin[0] + ray.direction[0] * result.distance,
+            ray.origin[1] + ray.direction[1] * result.distance,
+            ray.origin[2] + ray.direction[2] * result.distance,
+          ]
+
+          closest = {
+            nodeId: instance.nodeId,
+            instanceIndex: instance.instanceIndex,
+            distance: result.distance,
+            hitPoint,
+            normal: result.normal,
+          }
+          closestVolume = volume
         }
       }
     }

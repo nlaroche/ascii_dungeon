@@ -213,6 +213,82 @@ export interface SceneState {
   name: string;
   path?: string;            // File path if saved
   rootNode: Node;
+  rootNodeId: string;       // Reference to root node in entities (for normalized access)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// NORMALIZED ENTITY SYSTEM - O(1) lookups, proper subscriptions
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Normalized node - stores parent/child references instead of nested children.
+ * This enables O(1) lookups by ID and efficient tree mutations.
+ */
+export interface NormalizedNode {
+  id: string;
+  name: string;
+  type: string;
+
+  // Hierarchy references (O(1) lookups)
+  parentId: string | null;  // null for root node
+  childIds: string[];       // ordered list of child IDs
+
+  // Component references (stored separately in entities.components)
+  componentIds: string[];
+
+  // Optional features - same as Node
+  transform?: Transform;
+  visual?: NodeVisual;
+  meta: Record<string, unknown>;
+}
+
+/**
+ * Normalized component - stored separately from nodes.
+ * Enables O(1) component lookups and component-type queries.
+ */
+export interface NormalizedComponent {
+  id: string;
+  nodeId: string;           // Which node owns this component
+  script: string;           // Lua script path or builtin reference
+  enabled: boolean;
+  properties: Record<string, unknown>;
+}
+
+/**
+ * Entity storage maps - all entities stored by ID for O(1) access.
+ */
+export interface EntityMaps {
+  nodes: Record<string, NormalizedNode>;
+  components: Record<string, NormalizedComponent>;
+  nodeOrder: string[];      // Depth-first traversal order for iteration
+}
+
+/**
+ * Transient state - high-frequency updates that bypass history tracking.
+ * Used for dragging, hovering, and other interactive state.
+ */
+export interface TransientState {
+  drag: {
+    active: boolean;
+    nodeId: string | null;
+    startTransform: Transform | null;
+    axis: 'x' | 'y' | 'z' | 'xy' | 'xz' | 'yz' | 'xyz' | null;
+  };
+  hover: {
+    nodeId: string | null;
+    componentId: string | null;
+    gizmoAxis: string | null;
+  };
+  input: {
+    keysDown: Set<string>;
+    mousePosition: [number, number];
+    mouseButtons: number;
+  };
+  cameraOrbit: {
+    active: boolean;
+    startYaw: number;
+    startPitch: number;
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -262,7 +338,7 @@ export interface SelectionState {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RENDER SETTINGS
+// RENDER SETTINGS (Legacy - keeping for compatibility)
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface RenderSettings {
@@ -293,6 +369,139 @@ export interface RenderSettings {
   saturation: number;
   vignetteEnabled: boolean;
   vignetteIntensity: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RENDER PIPELINE - Flexible, reorderable post-processing system
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface RenderPassSettings {
+  enabled: boolean;
+  [key: string]: unknown;
+}
+
+export interface RenderPasses {
+  shadow: RenderPassSettings & {
+    resolution: number;
+    bias: number;
+    cascades: number;
+  };
+  main: RenderPassSettings;
+  glyph: RenderPassSettings;
+  sky: RenderPassSettings & {
+    zenithColor: [number, number, number];
+    horizonColor: [number, number, number];
+    groundColor: [number, number, number];
+  };
+  grid: RenderPassSettings & {
+    majorSize: number;
+    minorSize: number;
+    fadeDistance: number;
+  };
+}
+
+export interface PostEffect {
+  id: string;
+  name: string;
+  enabled: boolean;
+  [key: string]: unknown;
+}
+
+export type DebugViewMode = 'final' | 'depth' | 'normals' | 'shadow' | 'albedo';
+
+export interface RenderPipelineState {
+  passes: RenderPasses;
+  postEffects: PostEffect[];
+  debugView: DebugViewMode;
+  showStats: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LIGHTING - Full multi-light system
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface DirectionalLight {
+  enabled: boolean;
+  direction: [number, number, number];
+  color: [number, number, number];
+  intensity: number;
+  castShadows: boolean;
+}
+
+export interface AmbientLight {
+  color: [number, number, number];
+  intensity: number;
+  skyContribution: number;
+}
+
+export type LightType = 'point' | 'spot';
+
+export interface SceneLight {
+  id: string;
+  type: LightType;
+  enabled: boolean;
+  position: [number, number, number];
+  color: [number, number, number];
+  intensity: number;
+  range: number;
+  castShadows: boolean;
+  // Spot light specific
+  spotAngle?: number;
+  spotPenumbra?: number;
+}
+
+export interface GlobalIllumination {
+  enabled: boolean;
+  bounces: number;
+  intensity: number;
+}
+
+export interface LightingState {
+  sun: DirectionalLight;
+  ambient: AmbientLight;
+  lights: SceneLight[];
+  gi: GlobalIllumination;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ENVIRONMENT - Sky, fog, and atmosphere
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type SkyboxType = 'gradient' | 'procedural' | 'cubemap' | 'hdri';
+
+export interface GradientSky {
+  zenith: [number, number, number];
+  horizon: [number, number, number];
+  ground: [number, number, number];
+}
+
+export interface SkyboxSettings {
+  type: SkyboxType;
+  gradient: GradientSky;
+  texture: string | null;
+  rotation: number;
+  exposure: number;
+  // Procedural sky
+  sunSize: number;
+  atmosphereDensity: number;
+}
+
+export type FogType = 'linear' | 'exponential' | 'height';
+
+export interface FogSettings {
+  enabled: boolean;
+  type: FogType;
+  color: [number, number, number];
+  density: number;
+  start: number;
+  end: number;
+  heightFalloff: number;
+}
+
+export interface EnvironmentState {
+  skybox: SkyboxSettings;
+  fog: FogSettings;
+  timeOfDay: number; // 0-1, controls sun position and colors
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -393,6 +602,17 @@ export interface EngineState {
   session: SessionState;
   chat: ChatState;
   template: TemplateState;
+
+  // New render pipeline system
+  renderPipeline: RenderPipelineState;
+  lighting: LightingState;
+  environment: EnvironmentState;
+
+  // Normalized entity system (O(1) lookups)
+  entities: EntityMaps;
+
+  // Transient state (no history tracking - for drag, hover, etc.)
+  transient: TransientState;
 
   // Runtime state (not persisted)
   console: {
@@ -604,152 +824,128 @@ create shaders, spawn entities, and more.`,
   // ─────────────────────────────────────────────────────────────────────────
   scene: {
     name: 'Demo Scene',
+    rootNodeId: 'root',
     rootNode: {
       id: 'root',
-      name: 'Root',
+      name: 'Scene',
       type: 'Node',
       children: [
-        // World/Environment group
+        // Floor
         {
-          id: 'world',
-          name: 'World',
+          id: 'floor',
+          name: 'Floor',
           type: 'Node',
-          children: [
-            // Floor - generated from component
+          children: [],
+          components: [
             {
-              id: 'floor',
-              name: 'Floor',
-              type: 'Floor',
-              children: [], // Special tiles could be added here
-              components: [
-                {
-                  id: 'floor_gen',
-                  script: 'builtin:floor_generator',
-                  enabled: true,
-                  properties: {
-                    tileType: 'checkerboard',
-                    size: [21, 21],
-                    tileSize: 1,
-                    primaryColor: [0.15, 0.15, 0.18, 1],
-                    secondaryColor: [0.12, 0.12, 0.14, 1],
-                    elevation: 0,
-                  },
-                },
-              ],
-              transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
-              meta: { isFloor: true },
-            },
-            {
-              id: 'light_main',
-              name: 'Main Light',
-              type: 'Light',
-              children: [],
-              components: [],
-              transform: { position: [5, 8, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
-              visual: {
-                visible: true,
-                glyph: '☀',
-                color: [1, 0.9, 0.7],
-                opacity: 1,
-                emission: [1, 0.9, 0.7],
-                emissionPower: 2,
+              id: 'floor_gen',
+              script: 'builtin:floor_generator',
+              enabled: true,
+              properties: {
+                tileType: 'checkerboard',
+                size: [21, 21],
+                tileSize: 1,
+                primaryColor: [0.15, 0.15, 0.18, 1],
+                secondaryColor: [0.12, 0.12, 0.14, 1],
+                elevation: 0,
               },
-              meta: { lightType: 'point', intensity: 1.5, radius: 20 },
             },
           ],
-          components: [],
+          transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
           meta: {},
         },
-        // Characters group
+        // Main Light
         {
-          id: 'characters',
-          name: 'Characters',
+          id: 'light_main',
+          name: 'Main Light',
           type: 'Node',
-          children: [
-            {
-              id: 'player',
-              name: 'Player',
-              type: 'Node3D',
-              children: [],
-              components: [
-                { id: 'comp_1', script: 'scripts/player_controller.lua', enabled: true, properties: { speed: 5 } },
-                { id: 'comp_2', script: 'scripts/health.lua', enabled: true, properties: { max: 100, current: 100 } },
-              ],
-              transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
-              visual: {
-                visible: true,
-                glyph: '@',
-                color: [0.2, 0.9, 0.4],
-                opacity: 1,
-              },
-              meta: { isPlayer: true },
-            },
-            {
-              id: 'goblin_1',
-              name: 'Goblin',
-              type: 'Node3D',
-              children: [],
-              components: [
-                { id: 'comp_3', script: 'scripts/enemy_ai.lua', enabled: true, properties: { aggroRange: 8 } },
-                { id: 'comp_4', script: 'scripts/health.lua', enabled: true, properties: { max: 25, current: 25 } },
-              ],
-              transform: { position: [3, 0, 2], rotation: [0, 0, 0], scale: [1, 1, 1] },
-              visual: {
-                visible: true,
-                glyph: 'g',
-                color: [0.5, 0.7, 0.3],
-                opacity: 1,
-              },
-              meta: { faction: 'enemy' },
-            },
-          ],
+          children: [],
           components: [],
+          transform: { position: [5, 8, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+          visual: {
+            visible: true,
+            glyph: '☀',
+            color: [1, 0.9, 0.7],
+            opacity: 1,
+            emission: [1, 0.9, 0.7],
+            emissionPower: 2,
+          },
+          meta: { lightType: 'point', intensity: 1.5, radius: 20 },
+        },
+        // Player
+        {
+          id: 'player',
+          name: 'Player',
+          type: 'Node',
+          children: [],
+          components: [
+            { id: 'comp_1', script: 'scripts/player_controller.ts', enabled: true, properties: { speed: 5 } },
+            { id: 'comp_2', script: 'scripts/health.ts', enabled: true, properties: { max: 100, current: 100 } },
+          ],
+          transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+          visual: {
+            visible: true,
+            glyph: '@',
+            color: [0.2, 0.9, 0.4],
+            opacity: 1,
+          },
           meta: {},
         },
-        // Props group
+        // Goblin
         {
-          id: 'props',
-          name: 'Props',
+          id: 'goblin_1',
+          name: 'Goblin',
           type: 'Node',
-          children: [
-            {
-              id: 'torch_1',
-              name: 'Torch',
-              type: 'Light',
-              children: [],
-              components: [
-                { id: 'comp_5', script: 'scripts/flicker.lua', enabled: true, properties: { speed: 8, amount: 0.15 } },
-              ],
-              transform: { position: [-2, 1.5, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
-              visual: {
-                visible: true,
-                glyph: '¥',
-                color: [1, 0.6, 0.3],
-                opacity: 1,
-                emission: [1, 0.6, 0.3],
-                emissionPower: 1.2,
-              },
-              meta: { lightType: 'point', intensity: 1.2, radius: 8 },
-            },
-            {
-              id: 'chest_1',
-              name: 'Treasure Chest',
-              type: 'Node3D',
-              children: [],
-              components: [
-                { id: 'comp_6', script: 'scripts/interactable.lua', enabled: true, properties: { action: 'open' } },
-              ],
-              transform: { position: [4, 0, -1], rotation: [0, 0, 0], scale: [1, 1, 1] },
-              visual: {
-                visible: true,
-                glyph: '▣',
-                color: [0.7, 0.5, 0.2],
-                opacity: 1,
-              },
-              meta: { contains: ['gold', 'potion'] },
-            },
+          children: [],
+          components: [
+            { id: 'comp_3', script: 'scripts/enemy_ai.ts', enabled: true, properties: { aggroRange: 8 } },
+            { id: 'comp_4', script: 'scripts/health.ts', enabled: true, properties: { max: 25, current: 25 } },
           ],
-          components: [],
+          transform: { position: [3, 0, 2], rotation: [0, 0, 0], scale: [1, 1, 1] },
+          visual: {
+            visible: true,
+            glyph: 'g',
+            color: [0.5, 0.7, 0.3],
+            opacity: 1,
+          },
+          meta: {},
+        },
+        // Torch
+        {
+          id: 'torch_1',
+          name: 'Torch',
+          type: 'Node',
+          children: [],
+          components: [
+            { id: 'comp_5', script: 'scripts/flicker.ts', enabled: true, properties: { speed: 8, amount: 0.15 } },
+          ],
+          transform: { position: [-2, 1.5, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+          visual: {
+            visible: true,
+            glyph: '¥',
+            color: [1, 0.6, 0.3],
+            opacity: 1,
+            emission: [1, 0.6, 0.3],
+            emissionPower: 1.2,
+          },
+          meta: { lightType: 'point', intensity: 1.2, radius: 8 },
+        },
+        // Treasure Chest
+        {
+          id: 'chest_1',
+          name: 'Treasure Chest',
+          type: 'Node',
+          children: [],
+          components: [
+            { id: 'comp_6', script: 'scripts/interactable.ts', enabled: true, properties: { action: 'open' } },
+          ],
+          transform: { position: [4, 0, -1], rotation: [0, 0, 0], scale: [1, 1, 1] },
+          visual: {
+            visible: true,
+            glyph: '▣',
+            color: [0.7, 0.5, 0.2],
+            opacity: 1,
+          },
           meta: {},
         },
       ],
@@ -841,6 +1037,288 @@ create shaders, spawn entities, and more.`,
     currentIcon: '🗡',
     availableIds: ['isometric-rpg', 'deckbuilder', 'visual-novel'],
     isCustomized: false,
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Render Pipeline - Flexible post-processing system
+  // ─────────────────────────────────────────────────────────────────────────
+  renderPipeline: {
+    passes: {
+      shadow: { enabled: true, resolution: 1024, bias: 0.005, cascades: 3 },
+      main: { enabled: true },
+      glyph: { enabled: true },
+      sky: {
+        enabled: true,
+        zenithColor: [0.1, 0.1, 0.2],
+        horizonColor: [0.4, 0.5, 0.6],
+        groundColor: [0.2, 0.15, 0.1],
+      },
+      grid: { enabled: true, majorSize: 10, minorSize: 1, fadeDistance: 200 },
+    },
+    postEffects: [
+      { id: 'fog', name: 'Fog', enabled: false, density: 0.05, color: [0.5, 0.5, 0.6], start: 5, end: 50, fogType: 1 },
+      { id: 'bloom', name: 'Bloom', enabled: false, threshold: 0.8, intensity: 1.0, radius: 4 },
+      { id: 'colorGrading', name: 'Color Grading', enabled: false, exposure: 0, contrast: 1.0, saturation: 1.0, tonemapping: 'aces' },
+      { id: 'vignette', name: 'Vignette', enabled: false, intensity: 0.3, smoothness: 0.5, roundness: 0.5 },
+      { id: 'chromaticAberration', name: 'Chromatic Aberration', enabled: false, intensity: 0.01 },
+      { id: 'filmGrain', name: 'Film Grain', enabled: false, intensity: 0.1 },
+      { id: 'pixelate', name: 'Pixelate', enabled: false, pixelSize: 4 },
+      { id: 'outline', name: 'Outline', enabled: false, thickness: 1, color: [0, 0, 0, 1] },
+      { id: 'sharpen', name: 'Sharpen', enabled: false, intensity: 0.5 },
+      { id: 'fxaa', name: 'FXAA', enabled: false, quality: 'high' },
+    ],
+    debugView: 'final',
+    showStats: false,
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Lighting - Multi-light system
+  // ─────────────────────────────────────────────────────────────────────────
+  lighting: {
+    sun: {
+      enabled: true,
+      direction: [-0.5, -1, -0.3],
+      color: [1.0, 0.95, 0.9],
+      intensity: 1.0,
+      castShadows: true,
+    },
+    ambient: {
+      color: [0.3, 0.35, 0.4],
+      intensity: 0.3,
+      skyContribution: 0.2,
+    },
+    lights: [],
+    gi: {
+      enabled: false,
+      bounces: 1,
+      intensity: 0.5,
+    },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Environment - Sky and atmosphere
+  // ─────────────────────────────────────────────────────────────────────────
+  environment: {
+    skybox: {
+      type: 'gradient',
+      gradient: {
+        zenith: [0.1, 0.1, 0.2],
+        horizon: [0.4, 0.5, 0.6],
+        ground: [0.2, 0.15, 0.1],
+      },
+      texture: null,
+      rotation: 0,
+      exposure: 1.0,
+      sunSize: 0.05,
+      atmosphereDensity: 1.0,
+    },
+    fog: {
+      enabled: true,
+      type: 'exponential',
+      color: [0.5, 0.5, 0.6],
+      density: 0.02,
+      start: 10,
+      end: 100,
+      heightFalloff: 0.5,
+    },
+    timeOfDay: 0.5,
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Entities - Normalized entity storage for O(1) lookups
+  // ─────────────────────────────────────────────────────────────────────────
+  entities: {
+    nodes: {
+      root: {
+        id: 'root',
+        name: 'Scene',
+        type: 'Node',
+        parentId: null,
+        childIds: ['floor', 'light_main', 'player', 'goblin_1', 'torch_1', 'chest_1'],
+        componentIds: [],
+        meta: {},
+      },
+      floor: {
+        id: 'floor',
+        name: 'Floor',
+        type: 'Node',
+        parentId: 'root',
+        childIds: [],
+        componentIds: ['floor_gen'],
+        transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        meta: {},
+      },
+      light_main: {
+        id: 'light_main',
+        name: 'Main Light',
+        type: 'Node',
+        parentId: 'root',
+        childIds: [],
+        componentIds: [],
+        transform: { position: [5, 8, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        visual: {
+          visible: true,
+          glyph: '☀',
+          color: [1, 0.9, 0.7],
+          opacity: 1,
+          emission: [1, 0.9, 0.7],
+          emissionPower: 2,
+        },
+        meta: { lightType: 'point', intensity: 1.5, radius: 20 },
+      },
+      player: {
+        id: 'player',
+        name: 'Player',
+        type: 'Node',
+        parentId: 'root',
+        childIds: [],
+        componentIds: ['comp_1', 'comp_2'],
+        transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        visual: {
+          visible: true,
+          glyph: '@',
+          color: [0.2, 0.9, 0.4],
+          opacity: 1,
+        },
+        meta: {},
+      },
+      goblin_1: {
+        id: 'goblin_1',
+        name: 'Goblin',
+        type: 'Node',
+        parentId: 'root',
+        childIds: [],
+        componentIds: ['comp_3', 'comp_4'],
+        transform: { position: [3, 0, 2], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        visual: {
+          visible: true,
+          glyph: 'g',
+          color: [0.5, 0.7, 0.3],
+          opacity: 1,
+        },
+        meta: {},
+      },
+      torch_1: {
+        id: 'torch_1',
+        name: 'Torch',
+        type: 'Node',
+        parentId: 'root',
+        childIds: [],
+        componentIds: ['comp_5'],
+        transform: { position: [-2, 1.5, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        visual: {
+          visible: true,
+          glyph: '¥',
+          color: [1, 0.6, 0.3],
+          opacity: 1,
+          emission: [1, 0.6, 0.3],
+          emissionPower: 1.2,
+        },
+        meta: { lightType: 'point', intensity: 1.2, radius: 8 },
+      },
+      chest_1: {
+        id: 'chest_1',
+        name: 'Treasure Chest',
+        type: 'Node',
+        parentId: 'root',
+        childIds: [],
+        componentIds: ['comp_6'],
+        transform: { position: [4, 0, -1], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        visual: {
+          visible: true,
+          glyph: '▣',
+          color: [0.7, 0.5, 0.2],
+          opacity: 1,
+        },
+        meta: {},
+      },
+    },
+    components: {
+      floor_gen: {
+        id: 'floor_gen',
+        nodeId: 'floor',
+        script: 'builtin:floor_generator',
+        enabled: true,
+        properties: {
+          tileType: 'checkerboard',
+          size: [21, 21],
+          tileSize: 1,
+          primaryColor: [0.15, 0.15, 0.18, 1],
+          secondaryColor: [0.12, 0.12, 0.14, 1],
+          elevation: 0,
+        },
+      },
+      comp_1: {
+        id: 'comp_1',
+        nodeId: 'player',
+        script: 'scripts/player_controller.ts',
+        enabled: true,
+        properties: { speed: 5 },
+      },
+      comp_2: {
+        id: 'comp_2',
+        nodeId: 'player',
+        script: 'scripts/health.ts',
+        enabled: true,
+        properties: { max: 100, current: 100 },
+      },
+      comp_3: {
+        id: 'comp_3',
+        nodeId: 'goblin_1',
+        script: 'scripts/enemy_ai.ts',
+        enabled: true,
+        properties: { aggroRange: 8 },
+      },
+      comp_4: {
+        id: 'comp_4',
+        nodeId: 'goblin_1',
+        script: 'scripts/health.ts',
+        enabled: true,
+        properties: { max: 25, current: 25 },
+      },
+      comp_5: {
+        id: 'comp_5',
+        nodeId: 'torch_1',
+        script: 'scripts/flicker.ts',
+        enabled: true,
+        properties: { speed: 8, amount: 0.15 },
+      },
+      comp_6: {
+        id: 'comp_6',
+        nodeId: 'chest_1',
+        script: 'scripts/interactable.ts',
+        enabled: true,
+        properties: { action: 'open' },
+      },
+    },
+    nodeOrder: ['root', 'floor', 'light_main', 'player', 'goblin_1', 'torch_1', 'chest_1'],
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Transient state - high-frequency updates (no history)
+  // ─────────────────────────────────────────────────────────────────────────
+  transient: {
+    drag: {
+      active: false,
+      nodeId: null,
+      startTransform: null,
+      axis: null,
+    },
+    hover: {
+      nodeId: null,
+      componentId: null,
+      gizmoAxis: null,
+    },
+    input: {
+      keysDown: new Set<string>(),
+      mousePosition: [0, 0] as [number, number],
+      mouseButtons: 0,
+    },
+    cameraOrbit: {
+      active: false,
+      startYaw: 0,
+      startPitch: 0,
+    },
   },
 
   // ─────────────────────────────────────────────────────────────────────────
