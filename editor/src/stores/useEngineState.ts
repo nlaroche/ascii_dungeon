@@ -18,6 +18,9 @@ import {
   DebugViewMode,
   SkyboxType,
   FogType,
+  ShadowType,
+  ShadowSettings,
+  ReflectionSettings,
   // Normalized entity types
   NormalizedNode,
   NormalizedComponent,
@@ -1917,9 +1920,65 @@ export function useRenderPipeline() {
     setPath(['renderPipeline', 'showStats'], !pipeline.showStats, `${pipeline.showStats ? 'Hide' : 'Show'} stats`);
   };
 
+  // Shadow controls
+  const setShadowEnabled = (enabled: boolean) => {
+    setPath(['renderPipeline', 'shadows', 'enabled'], enabled, `${enabled ? 'Enable' : 'Disable'} shadows`);
+  };
+
+  const setShadowType = (type: ShadowType) => {
+    setPath(['renderPipeline', 'shadows', 'type'], type, `Set shadow type: ${type}`);
+  };
+
+  const setShadowResolution = (resolution: number) => {
+    setPath(['renderPipeline', 'shadows', 'resolution'], resolution, `Set shadow resolution: ${resolution}`);
+  };
+
+  const setShadowSoftness = (softness: number) => {
+    setPath(['renderPipeline', 'shadows', 'softness'], softness, 'Set shadow softness');
+  };
+
+  const setShadowBias = (bias: number) => {
+    setPath(['renderPipeline', 'shadows', 'bias'], bias, 'Set shadow bias');
+  };
+
+  const updateShadows = (settings: Partial<ShadowSettings>) => {
+    const updates = Object.entries(settings).map(([key, value]) => ({
+      path: ['renderPipeline', 'shadows', key] as StatePath,
+      value,
+    }));
+    batchUpdate(updates, 'Update shadow settings');
+  };
+
+  // Reflection controls
+  const setReflectionsEnabled = (enabled: boolean) => {
+    setPath(['renderPipeline', 'reflections', 'enabled'], enabled, `${enabled ? 'Enable' : 'Disable'} reflections`);
+  };
+
+  const setReflectionType = (type: ReflectionSettings['type']) => {
+    setPath(['renderPipeline', 'reflections', 'type'], type, `Set reflection type: ${type}`);
+  };
+
+  const setFloorReflectivity = (reflectivity: number) => {
+    setPath(['renderPipeline', 'reflections', 'floorReflectivity'], reflectivity, 'Set floor reflectivity');
+  };
+
+  const setWaterReflectivity = (reflectivity: number) => {
+    setPath(['renderPipeline', 'reflections', 'waterReflectivity'], reflectivity, 'Set water reflectivity');
+  };
+
+  const updateReflections = (settings: Partial<ReflectionSettings>) => {
+    const updates = Object.entries(settings).map(([key, value]) => ({
+      path: ['renderPipeline', 'reflections', key] as StatePath,
+      value,
+    }));
+    batchUpdate(updates, 'Update reflection settings');
+  };
+
   return {
     passes: pipeline.passes,
     postEffects: pipeline.postEffects,
+    shadows: pipeline.shadows,
+    reflections: pipeline.reflections,
     debugView: pipeline.debugView,
     showStats: pipeline.showStats,
     setPassEnabled,
@@ -1930,6 +1989,19 @@ export function useRenderPipeline() {
     reorderPostEffect,
     setDebugView,
     toggleStats,
+    // Shadows
+    setShadowEnabled,
+    setShadowType,
+    setShadowResolution,
+    setShadowSoftness,
+    setShadowBias,
+    updateShadows,
+    // Reflections
+    setReflectionsEnabled,
+    setReflectionType,
+    setFloorReflectivity,
+    setWaterReflectivity,
+    updateReflections,
   };
 }
 

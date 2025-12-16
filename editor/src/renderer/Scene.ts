@@ -4,6 +4,7 @@ import { VoxelInstance, VoxelFlags, INSTANCE_BYTES } from './types'
 import { buildGlyph } from './GlyphBuilder'
 import { getGlyphMesh, clearGlyphMeshCache } from './GlyphMeshBuilder'
 import type { Node, NormalizedNode, EntityMaps } from '../stores/engineState'
+import { useEngineState } from '../stores/useEngineState'
 import type { AABB, PickableInstance } from './Raycaster'
 import { entitySubscriptions, type EntitiesChangeCallback } from '../stores/subscriptions'
 
@@ -402,6 +403,33 @@ export class Scene {
     clearGlyphMeshCache()
   }
 
+  /**
+   * Create a minimal shadow test scene for debugging.
+   * Just a ground plane and a floating cube - nothing else.
+   */
+  createShadowTestScene() {
+    this.clear()
+    this.floorGenerated = true
+
+    // Ground plane: single large flat cube at Y=0
+    // Gray color so shadows are visible
+    const groundColor: [number, number, number, number] = [0.5, 0.5, 0.5, 1.0]
+    this.addVoxel(0, -0.25, 0, groundColor, 20, 0.5, 20, 0, VoxelFlags.NONE)
+
+    // Floating cube: red, at Y=3, should cast shadow on ground
+    const cubeColor: [number, number, number, number] = [0.8, 0.2, 0.2, 1.0]
+    this.addVoxel(0, 3, 0, cubeColor, 2, 2, 2, 0, VoxelFlags.NONE)
+
+    // Second cube offset to the side
+    const cube2Color: [number, number, number, number] = [0.2, 0.8, 0.2, 1.0]
+    this.addVoxel(5, 2, 3, cube2Color, 1.5, 1.5, 1.5, 0, VoxelFlags.NONE)
+
+    console.log('[ShadowTest] Created minimal scene: ground plane + 2 floating cubes')
+    console.log('[ShadowTest] Ground: Y=-0.25, size 20x0.5x20')
+    console.log('[ShadowTest] Red cube: Y=3, size 2x2x2')
+    console.log('[ShadowTest] Green cube: pos (5, 2, 3), size 1.5')
+  }
+
   // Set hovered node for highlight effect
   setHoveredNode(nodeId: string | null) {
     this.hoveredNodeId = nodeId
@@ -622,6 +650,23 @@ export class Scene {
         this.trackInstance(nodeId, [x * tileSize, elevation, z * tileSize], [tileSize, 0.1, tileSize])
       }
     }
+
+    // Add test cubes at various heights to demonstrate shadows
+    const floorY = elevation + 0.05 // Just above floor surface
+    const cubeColor: [number, number, number, number] = [0.5, 0.4, 0.35, 1]
+
+    // Tall pillar to cast long shadow
+    this.addVoxel(-4, floorY + 1.5, -4, cubeColor, 1, 3, 1, 0, VoxelFlags.NONE)
+
+    // Medium blocks scattered around
+    this.addVoxel(4, floorY + 0.75, 3, cubeColor, 1.5, 1.5, 1.5, 0, VoxelFlags.NONE)
+    this.addVoxel(-3, floorY + 0.5, 5, cubeColor, 1, 1, 1, 0, VoxelFlags.NONE)
+    this.addVoxel(6, floorY + 0.4, -3, cubeColor, 0.8, 0.8, 0.8, 0, VoxelFlags.NONE)
+
+    // Small scattered blocks
+    this.addVoxel(-6, floorY + 0.25, 1, cubeColor, 0.5, 0.5, 0.5, 0, VoxelFlags.NONE)
+    this.addVoxel(2, floorY + 0.3, -6, cubeColor, 0.6, 0.6, 0.6, 0, VoxelFlags.NONE)
+    this.addVoxel(0, floorY + 0.6, 0, cubeColor, 1.2, 1.2, 1.2, 0, VoxelFlags.NONE)
   }
 
   // Generate default floor (when no floor node exists)
@@ -635,10 +680,21 @@ export class Scene {
         const isEven = (x + z) % 2 === 0
         const color = isEven ? groundColor : altColor
         this.addVoxel(x, -0.5, z, color, 1, 0.1, 1, 0, VoxelFlags.NONE)
-        // Don't track default floor for picking (or use special ID)
-        // this.trackInstance('__floor__', [x, -0.5, z], [1, 0.1, 1])
       }
     }
+
+    // Add some test cubes at various heights to demonstrate shadows
+    const cubeColor: [number, number, number, number] = [0.4, 0.35, 0.3, 1]
+    // Tall pillar
+    this.addVoxel(-3, 0.5, -3, cubeColor, 1, 2, 1, 0, VoxelFlags.NONE)
+    this.addVoxel(-3, 2.5, -3, cubeColor, 1, 2, 1, 0, VoxelFlags.NONE)
+    // Medium blocks
+    this.addVoxel(3, 0.5, 2, cubeColor, 1.5, 1.5, 1.5, 0, VoxelFlags.NONE)
+    this.addVoxel(-2, 0.25, 4, cubeColor, 1, 0.8, 1, 0, VoxelFlags.NONE)
+    // Small scattered blocks
+    this.addVoxel(5, 0.15, -2, cubeColor, 0.6, 0.6, 0.6, 0, VoxelFlags.NONE)
+    this.addVoxel(-5, 0.2, 0, cubeColor, 0.7, 0.7, 0.7, 0, VoxelFlags.NONE)
+    this.addVoxel(0, 0.4, -5, cubeColor, 1, 1.2, 1, 0, VoxelFlags.NONE)
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -651,6 +707,17 @@ export class Scene {
    */
   connectToStore(onChanged?: () => void) {
     this.onSceneChanged = onChanged || null
+
+    // Do initial build with current entities
+    const state = useEngineState.getState()
+    const initialEntities: EntityMaps = {
+      nodes: state.entities.nodes,
+      components: state.entities.components,
+      nodeOrder: state.entities.nodeOrder,
+    }
+    this.cachedEntities = initialEntities
+    this.cachedSelectedNodes = state.selection.selectedNodeIds
+    this.needsRebuild = true
 
     // Subscribe to entity changes
     this.unsubscribeEntities = entitySubscriptions.subscribeToEntities(

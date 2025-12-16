@@ -2,14 +2,15 @@
 // Render Pipeline Panel - Unified UI for render settings
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { useState, useCallback } from 'react'
+import { useState } from 'react'
 import {
   useTheme,
   useRenderPipeline,
   useLighting,
   useEnvironment,
 } from '../../stores/useEngineState'
-import type { PostEffect, SceneLight, DebugViewMode } from '../../stores/engineState'
+import { Scrubber, ColorScrubber } from '../ui/Scrubber'
+import type { PostEffect, SceneLight, DebugViewMode, ShadowType } from '../../stores/engineState'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Panel
@@ -24,6 +25,8 @@ export function RenderPipelinePanel() {
       style={{ backgroundColor: theme.bgPanel }}
     >
       <DebugViewSection />
+      <ShadowsSection />
+      <ReflectionsSection />
       <PassesSection />
       <PostEffectsSection />
       <LightingSection />
@@ -74,6 +77,219 @@ function DebugViewSection() {
           </button>
         ))}
       </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shadows Section
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ShadowsSection() {
+  const theme = useTheme()
+  const {
+    shadows,
+    setShadowEnabled,
+    setShadowType,
+    setShadowResolution,
+    setShadowSoftness,
+    setShadowBias,
+  } = useRenderPipeline()
+  const [expanded, setExpanded] = useState(true)
+
+  const shadowTypes: ShadowType[] = ['pcf', 'vsm', 'pcss']
+  const resolutions = [512, 1024, 2048, 4096]
+
+  return (
+    <div className="p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center justify-between w-full mb-2"
+      >
+        <span className="uppercase tracking-wider" style={{ color: theme.textMuted }}>
+          {expanded ? '▼' : '▶'} Shadows
+        </span>
+        <input
+          type="checkbox"
+          checked={shadows.enabled}
+          onChange={(e) => {
+            e.stopPropagation()
+            setShadowEnabled(e.target.checked)
+          }}
+          style={{ accentColor: theme.accent }}
+        />
+      </button>
+
+      {expanded && shadows.enabled && (
+        <div className="space-y-2 pl-2">
+          {/* Shadow Type */}
+          <div className="space-y-1">
+            <label style={{ color: theme.textMuted }}>Type</label>
+            <div className="flex gap-1">
+              {shadowTypes.map((type) => (
+                <button
+                  key={type}
+                  onClick={() => setShadowType(type)}
+                  className="px-2 py-1 rounded uppercase"
+                  style={{
+                    backgroundColor: shadows.type === type ? theme.accent : theme.bgHover,
+                    color: shadows.type === type ? theme.bg : theme.text,
+                  }}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Resolution */}
+          <div className="space-y-1">
+            <label style={{ color: theme.textMuted }}>Resolution</label>
+            <select
+              value={shadows.resolution}
+              onChange={(e) => setShadowResolution(parseInt(e.target.value))}
+              className="w-full px-2 py-1 rounded"
+              style={{
+                backgroundColor: theme.bgHover,
+                color: theme.text,
+                border: `1px solid ${theme.border}`,
+              }}
+            >
+              {resolutions.map((res) => (
+                <option key={res} value={res}>{res}x{res}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Softness */}
+          <SliderInput
+            label="Softness"
+            value={shadows.softness}
+            min={0}
+            max={1}
+            step={0.05}
+            onChange={setShadowSoftness}
+          />
+
+          {/* Bias */}
+          <SliderInput
+            label="Bias"
+            value={shadows.bias}
+            min={0}
+            max={0.05}
+            step={0.001}
+            onChange={setShadowBias}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reflections Section
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ReflectionsSection() {
+  const theme = useTheme()
+  const {
+    reflections,
+    setReflectionsEnabled,
+    setReflectionType,
+    setFloorReflectivity,
+    setWaterReflectivity,
+    updateReflections,
+  } = useRenderPipeline()
+  const [expanded, setExpanded] = useState(true)
+
+  const reflectionTypes = ['planar', 'ssr', 'cubemap'] as const
+
+  return (
+    <div className="p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center justify-between w-full mb-2"
+      >
+        <span className="uppercase tracking-wider" style={{ color: theme.textMuted }}>
+          {expanded ? '▼' : '▶'} Reflections
+        </span>
+        <input
+          type="checkbox"
+          checked={reflections.enabled}
+          onChange={(e) => {
+            e.stopPropagation()
+            setReflectionsEnabled(e.target.checked)
+          }}
+          style={{ accentColor: theme.accent }}
+        />
+      </button>
+
+      {expanded && reflections.enabled && (
+        <div className="space-y-2 pl-2">
+          {/* Reflection Type */}
+          <div className="space-y-1">
+            <label style={{ color: theme.textMuted }}>Type</label>
+            <div className="flex gap-1">
+              {reflectionTypes.map((type) => (
+                <button
+                  key={type}
+                  onClick={() => setReflectionType(type)}
+                  className="px-2 py-1 rounded capitalize"
+                  style={{
+                    backgroundColor: reflections.type === type ? theme.accent : theme.bgHover,
+                    color: reflections.type === type ? theme.bg : theme.text,
+                  }}
+                >
+                  {type}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Floor Reflectivity */}
+          <SliderInput
+            label="Floor"
+            value={reflections.floorReflectivity}
+            min={0}
+            max={1}
+            step={0.05}
+            onChange={setFloorReflectivity}
+          />
+
+          {/* Water Reflectivity */}
+          <SliderInput
+            label="Water"
+            value={reflections.waterReflectivity}
+            min={0}
+            max={1}
+            step={0.05}
+            onChange={setWaterReflectivity}
+          />
+
+          {/* SSR Settings (only show when SSR is selected) */}
+          {reflections.type === 'ssr' && (
+            <div className="space-y-2 mt-2 pt-2" style={{ borderTop: `1px solid ${theme.border}` }}>
+              <span className="text-xs" style={{ color: theme.textDim }}>SSR Settings</span>
+              <SliderInput
+                label="Max Steps"
+                value={reflections.ssrMaxSteps}
+                min={16}
+                max={128}
+                step={8}
+                onChange={(v) => updateReflections({ ssrMaxSteps: v })}
+              />
+              <SliderInput
+                label="Thickness"
+                value={reflections.ssrThickness}
+                min={0.1}
+                max={2}
+                step={0.1}
+                onChange={(v) => updateReflections({ ssrThickness: v })}
+              />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -624,7 +840,7 @@ function EnvironmentSection() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Shared Input Components
+// Shared Input Components - Using Scrubber for drag-to-adjust controls
 // ─────────────────────────────────────────────────────────────────────────────
 
 function SliderInput({
@@ -642,27 +858,19 @@ function SliderInput({
   step: number
   onChange: (value: number) => void
 }) {
-  const theme = useTheme()
+  // Calculate precision from step size
+  const precision = step < 0.01 ? 3 : step < 0.1 ? 2 : step < 1 ? 1 : 0
 
   return (
-    <div className="flex items-center gap-2">
-      <span className="w-20 truncate" style={{ color: theme.textMuted }}>
-        {label}
-      </span>
-      <input
-        type="range"
-        value={value}
-        min={min}
-        max={max}
-        step={step}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
-        className="flex-1"
-        style={{ accentColor: theme.accent }}
-      />
-      <span className="w-10 text-right" style={{ color: theme.text }}>
-        {value.toFixed(2)}
-      </span>
-    </div>
+    <Scrubber
+      label={label}
+      value={value}
+      min={min}
+      max={max}
+      step={step}
+      precision={precision}
+      onChange={onChange}
+    />
   )
 }
 
@@ -675,33 +883,12 @@ function ColorInput({
   value: [number, number, number]
   onChange: (value: [number, number, number]) => void
 }) {
-  const theme = useTheme()
-
-  const toHex = (rgb: [number, number, number]) => {
-    return '#' + rgb.map((c) => Math.round(c * 255).toString(16).padStart(2, '0')).join('')
-  }
-
-  const fromHex = (hex: string): [number, number, number] => {
-    const r = parseInt(hex.slice(1, 3), 16) / 255
-    const g = parseInt(hex.slice(3, 5), 16) / 255
-    const b = parseInt(hex.slice(5, 7), 16) / 255
-    return [r, g, b]
-  }
-
   return (
-    <div className="flex items-center gap-2">
-      <span className="w-20 truncate" style={{ color: theme.textMuted }}>
-        {label}
-      </span>
-      <input
-        type="color"
-        value={toHex(value)}
-        onChange={(e) => onChange(fromHex(e.target.value))}
-        className="w-8 h-6 rounded cursor-pointer"
-        style={{ border: `1px solid ${theme.border}` }}
-      />
-      <span style={{ color: theme.text }}>{toHex(value)}</span>
-    </div>
+    <ColorScrubber
+      label={label}
+      value={value}
+      onChange={onChange}
+    />
   )
 }
 

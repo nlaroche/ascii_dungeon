@@ -9,7 +9,7 @@ struct FogParams {
   start: f32,
   end: f32,
   heightFalloff: f32,
-  fogType: u32, // 0=linear, 1=exponential, 2=height
+  fogType: f32, // 0=linear, 1=exponential, 2=height (stored as float, cast to u32)
   near: f32,
   far: f32,
   _pad0: f32,
@@ -47,11 +47,12 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
   let color = textureSample(inputTexture, inputSampler, input.uv).rgb;
 
   // Sample depth using textureLoad - clamp coords to valid range
-  let texSize = textureDimensions(depthTexture);
+  let texSizeU = textureDimensions(depthTexture);
+  let texSize = vec2i(texSizeU);
   let pixelCoord = clamp(
-    vec2i(input.uv * vec2f(texSize)),
+    vec2i(input.uv * vec2f(texSizeU)),
     vec2i(0, 0),
-    vec2i(texSize) - vec2i(1, 1)
+    texSize - vec2i(1, 1)
   );
   let depth = textureLoad(depthTexture, pixelCoord, 0);
 
@@ -60,8 +61,9 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
 
   // Calculate fog factor based on type
   var fogFactor: f32;
+  let fogType = u32(params.fogType);
 
-  switch (params.fogType) {
+  switch (fogType) {
     case 0u: {
       // Linear fog
       fogFactor = saturate((params.end - linearDepth) / (params.end - params.start));

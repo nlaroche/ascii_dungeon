@@ -380,6 +380,29 @@ export interface RenderPassSettings {
   [key: string]: unknown;
 }
 
+export type ShadowType = 'pcf' | 'vsm' | 'pcss';
+
+export interface ShadowSettings {
+  enabled: boolean;
+  type: ShadowType;
+  resolution: number;
+  bias: number;
+  normalBias: number;
+  softness: number;        // 0-1, controls PCF kernel size or VSM blur
+  cascades: number;
+  cascadeSplits: [number, number, number];  // Split distances for CSM
+}
+
+export interface ReflectionSettings {
+  enabled: boolean;
+  type: 'planar' | 'ssr' | 'cubemap';
+  floorReflectivity: number;   // 0-1
+  waterReflectivity: number;   // 0-1
+  ssrMaxSteps: number;
+  ssrThickness: number;
+  ssrRoughnessFade: number;
+}
+
 export interface RenderPasses {
   shadow: RenderPassSettings & {
     resolution: number;
@@ -412,6 +435,8 @@ export type DebugViewMode = 'final' | 'depth' | 'normals' | 'shadow' | 'albedo';
 export interface RenderPipelineState {
   passes: RenderPasses;
   postEffects: PostEffect[];
+  shadows: ShadowSettings;
+  reflections: ReflectionSettings;
   debugView: DebugViewMode;
   showStats: boolean;
 }
@@ -830,7 +855,7 @@ create shaders, spawn entities, and more.`,
       name: 'Scene',
       type: 'Node',
       children: [
-        // Floor
+        // Floor - Dark forest floor matching reference
         {
           id: 'floor',
           name: 'Floor',
@@ -845,8 +870,9 @@ create shaders, spawn entities, and more.`,
                 tileType: 'checkerboard',
                 size: [21, 21],
                 tileSize: 1,
-                primaryColor: [0.15, 0.15, 0.18, 1],
-                secondaryColor: [0.12, 0.12, 0.14, 1],
+                primaryColor: [0.04, 0.08, 0.06, 1],    // Dark tile
+                secondaryColor: [0.06, 0.12, 0.08, 1],  // Slightly lighter tile
+                gridLineColor: [0.1, 0.22, 0.15, 1],    // Subtle grid lines
                 elevation: 0,
               },
             },
@@ -872,7 +898,7 @@ create shaders, spawn entities, and more.`,
           },
           meta: { lightType: 'point', intensity: 1.5, radius: 20 },
         },
-        // Player
+        // Player - Green hero character
         {
           id: 'player',
           name: 'Player',
@@ -882,12 +908,14 @@ create shaders, spawn entities, and more.`,
             { id: 'comp_1', script: 'scripts/player_controller.ts', enabled: true, properties: { speed: 5 } },
             { id: 'comp_2', script: 'scripts/health.ts', enabled: true, properties: { max: 100, current: 100 } },
           ],
-          transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+          transform: { position: [1, 0, 1], rotation: [0, 0, 0], scale: [1, 1, 1] },
           visual: {
             visible: true,
             glyph: '@',
-            color: [0.2, 0.9, 0.4],
+            color: [0.2, 0.9, 0.5],
             opacity: 1,
+            emission: [0.2, 0.9, 0.5],
+            emissionPower: 0.3,
           },
           meta: {},
         },
@@ -945,6 +973,163 @@ create shaders, spawn entities, and more.`,
             glyph: '▣',
             color: [0.7, 0.5, 0.2],
             opacity: 1,
+          },
+          meta: {},
+        },
+        // ─────────────────────────────────────────────────────────────────────
+        // Demo Scene Content - Trees, Crystals, Water, Characters
+        // ─────────────────────────────────────────────────────────────────────
+        // Tree 1
+        {
+          id: 'tree_1',
+          name: 'Tree',
+          type: 'Node',
+          children: [],
+          components: [
+            { id: 'tree_gen_1', script: 'builtin:tree_generator', enabled: true, properties: { height: 3, foliageRadius: 2 } },
+          ],
+          transform: { position: [4, 0, -3.5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+          meta: {},
+        },
+        // Tree 2
+        {
+          id: 'tree_2',
+          name: 'Tree',
+          type: 'Node',
+          children: [],
+          components: [
+            { id: 'tree_gen_2', script: 'builtin:tree_generator', enabled: true, properties: { height: 4, foliageRadius: 2.5 } },
+          ],
+          transform: { position: [-4, 0, -4], rotation: [0, 0, 0], scale: [1, 1, 1] },
+          meta: {},
+        },
+        // Tree 3
+        {
+          id: 'tree_3',
+          name: 'Tree',
+          type: 'Node',
+          children: [],
+          components: [
+            { id: 'tree_gen_3', script: 'builtin:tree_generator', enabled: true, properties: { height: 3.5, foliageRadius: 2 } },
+          ],
+          transform: { position: [-5, 0, 2], rotation: [0, 0, 0], scale: [1, 1, 1] },
+          meta: {},
+        },
+        // Tree 4
+        {
+          id: 'tree_4',
+          name: 'Tree',
+          type: 'Node',
+          children: [],
+          components: [
+            { id: 'tree_gen_4', script: 'builtin:tree_generator', enabled: true, properties: { height: 2.5, foliageRadius: 1.5 } },
+          ],
+          transform: { position: [5, 0, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+          meta: {},
+        },
+        // Crystal - Cyan
+        {
+          id: 'crystal_cyan',
+          name: 'Crystal',
+          type: 'Node',
+          children: [],
+          components: [],
+          transform: { position: [2.5, 0, -4], rotation: [0, 0.3, 0], scale: [1, 1, 1] },
+          visual: {
+            visible: true,
+            glyph: '◆',
+            color: [0.3, 0.85, 0.95],
+            opacity: 1,
+            emission: [0.3, 0.85, 0.95],
+            emissionPower: 0.5,
+          },
+          meta: { lightType: 'point', intensity: 0.8, radius: 4 },
+        },
+        // Crystal - Magenta
+        {
+          id: 'crystal_magenta',
+          name: 'Crystal',
+          type: 'Node',
+          children: [],
+          components: [],
+          transform: { position: [-3, 0, -3], rotation: [0, -0.5, 0], scale: [0.8, 0.8, 0.8] },
+          visual: {
+            visible: true,
+            glyph: '◆',
+            color: [0.9, 0.3, 0.7],
+            opacity: 1,
+            emission: [0.9, 0.3, 0.7],
+            emissionPower: 0.5,
+          },
+          meta: { lightType: 'point', intensity: 0.6, radius: 3 },
+        },
+        // Crystal - Amber
+        {
+          id: 'crystal_amber',
+          name: 'Crystal',
+          type: 'Node',
+          children: [],
+          components: [],
+          transform: { position: [6, 0, 0], rotation: [0, 0.8, 0], scale: [1.2, 1.2, 1.2] },
+          visual: {
+            visible: true,
+            glyph: '◆',
+            color: [1.0, 0.7, 0.2],
+            opacity: 1,
+            emission: [1.0, 0.7, 0.2],
+            emissionPower: 0.6,
+          },
+          meta: { lightType: 'point', intensity: 1.0, radius: 5 },
+        },
+        // Water Pond
+        {
+          id: 'water_pond',
+          name: 'Pond',
+          type: 'Node',
+          children: [],
+          components: [
+            { id: 'water_gen', script: 'builtin:water_generator', enabled: true, properties: { radius: 2, depth: 0.3, reflectivity: 0.6 } },
+          ],
+          transform: { position: [-2, 0, -2], rotation: [0, 0, 0], scale: [1, 1, 1] },
+          meta: {},
+        },
+        // Character - Cyan Mage
+        {
+          id: 'char_cyan',
+          name: 'Mage',
+          type: 'Node',
+          children: [],
+          components: [
+            { id: 'comp_7', script: 'scripts/npc_idle.ts', enabled: true, properties: { bobSpeed: 2, bobAmount: 0.05 } },
+          ],
+          transform: { position: [-1, 0, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+          visual: {
+            visible: true,
+            glyph: '♦',
+            color: [0.3, 0.85, 0.95],
+            opacity: 1,
+            emission: [0.3, 0.85, 0.95],
+            emissionPower: 0.3,
+          },
+          meta: {},
+        },
+        // Character - Magenta Rogue
+        {
+          id: 'char_magenta',
+          name: 'Rogue',
+          type: 'Node',
+          children: [],
+          components: [
+            { id: 'comp_8', script: 'scripts/npc_idle.ts', enabled: true, properties: { bobSpeed: 1.5, bobAmount: 0.03 } },
+          ],
+          transform: { position: [2, 0, 4], rotation: [0, 0, 0], scale: [1, 1, 1] },
+          visual: {
+            visible: true,
+            glyph: '♠',
+            color: [0.9, 0.3, 0.7],
+            opacity: 1,
+            emission: [0.9, 0.3, 0.7],
+            emissionPower: 0.3,
           },
           meta: {},
         },
@@ -1049,17 +1234,18 @@ create shaders, spawn entities, and more.`,
       glyph: { enabled: true },
       sky: {
         enabled: true,
-        zenithColor: [0.1, 0.1, 0.2],
-        horizonColor: [0.4, 0.5, 0.6],
-        groundColor: [0.2, 0.15, 0.1],
+        zenithColor: [0.02, 0.03, 0.06],     // Dark night sky
+        horizonColor: [0.08, 0.12, 0.18],    // Subtle blue-gray horizon
+        groundColor: [0.03, 0.04, 0.03],     // Dark ground reflection
       },
       grid: { enabled: true, majorSize: 10, minorSize: 1, fadeDistance: 200 },
     },
     postEffects: [
-      { id: 'fog', name: 'Fog', enabled: false, density: 0.05, color: [0.5, 0.5, 0.6], start: 5, end: 50, fogType: 1 },
-      { id: 'bloom', name: 'Bloom', enabled: false, threshold: 0.8, intensity: 1.0, radius: 4 },
-      { id: 'colorGrading', name: 'Color Grading', enabled: false, exposure: 0, contrast: 1.0, saturation: 1.0, tonemapping: 'aces' },
-      { id: 'vignette', name: 'Vignette', enabled: false, intensity: 0.3, smoothness: 0.5, roundness: 0.5 },
+      { id: 'ssao', name: 'SSAO', enabled: false, radius: 0.5, bias: 0.025, intensity: 0.8, samples: 16 },
+      { id: 'fog', name: 'Fog', enabled: false, density: 0.03, color: [0.015, 0.02, 0.03], start: 10, end: 80, fogType: 1 },
+      { id: 'bloom', name: 'Bloom', enabled: false, threshold: 0.6, intensity: 0.8, radius: 6 },
+      { id: 'colorGrading', name: 'Color Grading', enabled: false, exposure: 0.1, contrast: 1.05, saturation: 1.0, tonemapping: 'aces' },
+      { id: 'vignette', name: 'Vignette', enabled: false, intensity: 0.25, smoothness: 0.4, roundness: 0.6 },
       { id: 'chromaticAberration', name: 'Chromatic Aberration', enabled: false, intensity: 0.01 },
       { id: 'filmGrain', name: 'Film Grain', enabled: false, intensity: 0.1 },
       { id: 'pixelate', name: 'Pixelate', enabled: false, pixelSize: 4 },
@@ -1067,6 +1253,25 @@ create shaders, spawn entities, and more.`,
       { id: 'sharpen', name: 'Sharpen', enabled: false, intensity: 0.5 },
       { id: 'fxaa', name: 'FXAA', enabled: false, quality: 'high' },
     ],
+    shadows: {
+      enabled: true,
+      type: 'pcf',
+      resolution: 1024,
+      bias: 0.005,
+      normalBias: 0.02,
+      softness: 0.5,           // Medium softness
+      cascades: 1,
+      cascadeSplits: [0.1, 0.3, 0.5],
+    },
+    reflections: {
+      enabled: true,
+      type: 'planar',
+      floorReflectivity: 0.15,
+      waterReflectivity: 0.6,
+      ssrMaxSteps: 64,
+      ssrThickness: 0.5,
+      ssrRoughnessFade: 0.8,
+    },
     debugView: 'final',
     showStats: false,
   },
@@ -1102,9 +1307,9 @@ create shaders, spawn entities, and more.`,
     skybox: {
       type: 'gradient',
       gradient: {
-        zenith: [0.1, 0.1, 0.2],
-        horizon: [0.4, 0.5, 0.6],
-        ground: [0.2, 0.15, 0.1],
+        zenith: [0.02, 0.03, 0.06],     // Dark night sky
+        horizon: [0.08, 0.12, 0.18],    // Subtle blue-gray horizon
+        ground: [0.03, 0.04, 0.03],     // Dark ground reflection
       },
       texture: null,
       rotation: 0,
@@ -1115,13 +1320,13 @@ create shaders, spawn entities, and more.`,
     fog: {
       enabled: true,
       type: 'exponential',
-      color: [0.5, 0.5, 0.6],
-      density: 0.02,
+      color: [0.015, 0.02, 0.03],       // Dark fog matching scene atmosphere
+      density: 0.03,
       start: 10,
-      end: 100,
-      heightFalloff: 0.5,
+      end: 80,
+      heightFalloff: 0.3,
     },
-    timeOfDay: 0.5,
+    timeOfDay: 0.2, // Evening/night
   },
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1134,7 +1339,7 @@ create shaders, spawn entities, and more.`,
         name: 'Scene',
         type: 'Node',
         parentId: null,
-        childIds: ['floor', 'light_main', 'player', 'goblin_1', 'torch_1', 'chest_1'],
+        childIds: ['floor', 'light_main', 'player', 'goblin_1', 'torch_1', 'chest_1', 'tree_1', 'tree_2', 'tree_3', 'tree_4', 'crystal_cyan', 'crystal_magenta', 'crystal_amber', 'water_pond', 'char_cyan', 'char_magenta'],
         componentIds: [],
         meta: {},
       },
@@ -1173,12 +1378,14 @@ create shaders, spawn entities, and more.`,
         parentId: 'root',
         childIds: [],
         componentIds: ['comp_1', 'comp_2'],
-        transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        transform: { position: [1, 0, 1], rotation: [0, 0, 0], scale: [1, 1, 1] },
         visual: {
           visible: true,
           glyph: '@',
-          color: [0.2, 0.9, 0.4],
+          color: [0.2, 0.9, 0.5],
           opacity: 1,
+          emission: [0.2, 0.9, 0.5],
+          emissionPower: 0.3,
         },
         meta: {},
       },
@@ -1232,6 +1439,147 @@ create shaders, spawn entities, and more.`,
         },
         meta: {},
       },
+      // Demo Scene Nodes
+      tree_1: {
+        id: 'tree_1',
+        name: 'Tree',
+        type: 'Node',
+        parentId: 'root',
+        childIds: [],
+        componentIds: ['tree_gen_1'],
+        transform: { position: [4, 0, -3.5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        meta: {},
+      },
+      tree_2: {
+        id: 'tree_2',
+        name: 'Tree',
+        type: 'Node',
+        parentId: 'root',
+        childIds: [],
+        componentIds: ['tree_gen_2'],
+        transform: { position: [-4, 0, -4], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        meta: {},
+      },
+      tree_3: {
+        id: 'tree_3',
+        name: 'Tree',
+        type: 'Node',
+        parentId: 'root',
+        childIds: [],
+        componentIds: ['tree_gen_3'],
+        transform: { position: [-5, 0, 2], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        meta: {},
+      },
+      tree_4: {
+        id: 'tree_4',
+        name: 'Tree',
+        type: 'Node',
+        parentId: 'root',
+        childIds: [],
+        componentIds: ['tree_gen_4'],
+        transform: { position: [5, 0, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        meta: {},
+      },
+      crystal_cyan: {
+        id: 'crystal_cyan',
+        name: 'Crystal',
+        type: 'Node',
+        parentId: 'root',
+        childIds: [],
+        componentIds: [],
+        transform: { position: [2.5, 0, -4], rotation: [0, 0.3, 0], scale: [1, 1, 1] },
+        visual: {
+          visible: true,
+          glyph: '◆',
+          color: [0.3, 0.85, 0.95],
+          opacity: 1,
+          emission: [0.3, 0.85, 0.95],
+          emissionPower: 0.5,
+        },
+        meta: { lightType: 'point', intensity: 0.8, radius: 4 },
+      },
+      crystal_magenta: {
+        id: 'crystal_magenta',
+        name: 'Crystal',
+        type: 'Node',
+        parentId: 'root',
+        childIds: [],
+        componentIds: [],
+        transform: { position: [-3, 0, -3], rotation: [0, -0.5, 0], scale: [0.8, 0.8, 0.8] },
+        visual: {
+          visible: true,
+          glyph: '◆',
+          color: [0.9, 0.3, 0.7],
+          opacity: 1,
+          emission: [0.9, 0.3, 0.7],
+          emissionPower: 0.5,
+        },
+        meta: { lightType: 'point', intensity: 0.6, radius: 3 },
+      },
+      crystal_amber: {
+        id: 'crystal_amber',
+        name: 'Crystal',
+        type: 'Node',
+        parentId: 'root',
+        childIds: [],
+        componentIds: [],
+        transform: { position: [6, 0, 0], rotation: [0, 0.8, 0], scale: [1.2, 1.2, 1.2] },
+        visual: {
+          visible: true,
+          glyph: '◆',
+          color: [1.0, 0.7, 0.2],
+          opacity: 1,
+          emission: [1.0, 0.7, 0.2],
+          emissionPower: 0.6,
+        },
+        meta: { lightType: 'point', intensity: 1.0, radius: 5 },
+      },
+      water_pond: {
+        id: 'water_pond',
+        name: 'Pond',
+        type: 'Node',
+        parentId: 'root',
+        childIds: [],
+        componentIds: ['water_gen'],
+        transform: { position: [-2, 0, -2], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        meta: {},
+      },
+      char_cyan: {
+        id: 'char_cyan',
+        name: 'Mage',
+        type: 'Node',
+        parentId: 'root',
+        childIds: [],
+        componentIds: ['comp_7'],
+        transform: { position: [-1, 0, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        visual: {
+          visible: true,
+          glyph: '♦',
+          color: [0.3, 0.85, 0.95],
+          opacity: 1,
+          emission: [0.3, 0.85, 0.95],
+          emissionPower: 0.3,
+        },
+        meta: {},
+      },
+      char_magenta: {
+        id: 'char_magenta',
+        name: 'Rogue',
+        type: 'Node',
+        parentId: 'root',
+        childIds: [],
+        componentIds: ['comp_8'],
+        transform: { position: [2, 0, 4], rotation: [0, 0, 0], scale: [1, 1, 1] },
+        visual: {
+          visible: true,
+          glyph: '♠',
+          color: [0.9, 0.3, 0.7],
+          opacity: 1,
+          emission: [0.9, 0.3, 0.7],
+          emissionPower: 0.3,
+        },
+        meta: {},
+      },
     },
     components: {
       floor_gen: {
@@ -1243,8 +1591,9 @@ create shaders, spawn entities, and more.`,
           tileType: 'checkerboard',
           size: [21, 21],
           tileSize: 1,
-          primaryColor: [0.15, 0.15, 0.18, 1],
-          secondaryColor: [0.12, 0.12, 0.14, 1],
+          primaryColor: [0.04, 0.08, 0.06, 1],    // Dark tile
+          secondaryColor: [0.06, 0.12, 0.08, 1],  // Slightly lighter tile
+          gridLineColor: [0.1, 0.22, 0.15, 1],    // Subtle grid lines
           elevation: 0,
         },
       },
@@ -1290,8 +1639,58 @@ create shaders, spawn entities, and more.`,
         enabled: true,
         properties: { action: 'open' },
       },
+      // Demo scene components
+      tree_gen_1: {
+        id: 'tree_gen_1',
+        nodeId: 'tree_1',
+        script: 'builtin:tree_generator',
+        enabled: true,
+        properties: { height: 3, foliageRadius: 2 },
+      },
+      tree_gen_2: {
+        id: 'tree_gen_2',
+        nodeId: 'tree_2',
+        script: 'builtin:tree_generator',
+        enabled: true,
+        properties: { height: 4, foliageRadius: 2.5 },
+      },
+      tree_gen_3: {
+        id: 'tree_gen_3',
+        nodeId: 'tree_3',
+        script: 'builtin:tree_generator',
+        enabled: true,
+        properties: { height: 3.5, foliageRadius: 2 },
+      },
+      tree_gen_4: {
+        id: 'tree_gen_4',
+        nodeId: 'tree_4',
+        script: 'builtin:tree_generator',
+        enabled: true,
+        properties: { height: 2.5, foliageRadius: 1.5 },
+      },
+      water_gen: {
+        id: 'water_gen',
+        nodeId: 'water_pond',
+        script: 'builtin:water_generator',
+        enabled: true,
+        properties: { radius: 2, depth: 0.3, reflectivity: 0.6 },
+      },
+      comp_7: {
+        id: 'comp_7',
+        nodeId: 'char_cyan',
+        script: 'scripts/npc_idle.ts',
+        enabled: true,
+        properties: { bobSpeed: 2, bobAmount: 0.05 },
+      },
+      comp_8: {
+        id: 'comp_8',
+        nodeId: 'char_magenta',
+        script: 'scripts/npc_idle.ts',
+        enabled: true,
+        properties: { bobSpeed: 1.5, bobAmount: 0.03 },
+      },
     },
-    nodeOrder: ['root', 'floor', 'light_main', 'player', 'goblin_1', 'torch_1', 'chest_1'],
+    nodeOrder: ['root', 'floor', 'light_main', 'player', 'goblin_1', 'torch_1', 'chest_1', 'tree_1', 'tree_2', 'tree_3', 'tree_4', 'crystal_cyan', 'crystal_magenta', 'crystal_amber', 'water_pond', 'char_cyan', 'char_magenta'],
   },
 
   // ─────────────────────────────────────────────────────────────────────────

@@ -96,23 +96,28 @@ export class Camera {
     return perspective(fovRad, aspect, near, far)
   }
 
-  // For shadow mapping - light's view projection centered on camera target area
+  // For shadow mapping - light's view projection centered on scene
   getLightViewProjection(lightDir: [number, number, number]): Float32Array {
-    const forward = this.getForward()
-    const targetPos: [number, number, number] = [
-      this.position[0] + forward[0] * 10,
-      this.position[1] + forward[1] * 10,
-      this.position[2] + forward[2] * 10,
-    ]
+    // Center shadow map on origin (where most scene content is)
+    const targetPos: [number, number, number] = [0, 0, 0]
 
+    // Position light 50 units away from target
+    const lightDistance = 50
     const lightPos: [number, number, number] = [
-      targetPos[0] - lightDir[0] * 30,
-      targetPos[1] - lightDir[1] * 30,
-      targetPos[2] - lightDir[2] * 30,
+      targetPos[0] - lightDir[0] * lightDistance,
+      targetPos[1] - lightDir[1] * lightDistance,
+      targetPos[2] - lightDir[2] * lightDistance,
     ]
 
     const lightView = lookAt(lightPos, targetPos, [0, 1, 0])
-    const lightProj = orthographic(-30, 30, -30, 30, -100, 100)
+
+    // In view space with lookAt, objects in front of camera have NEGATIVE Z
+    // Light is 50 units away, so objects at target have view-space Z ≈ -50
+    // Objects further from light (behind target) have more negative Z
+    // near = -80 captures objects 80 units in front of light (30 past target)
+    // far = 20 captures objects 20 units behind light (edge cases)
+    // Target at view_z=-50 maps to depth = (-50 - (-80)) / (20 - (-80)) = 30/100 = 0.3
+    const lightProj = orthographic(-20, 20, -20, 20, -80, 20)
 
     return multiplyMatrices(lightProj, lightView)
   }
@@ -212,13 +217,14 @@ function orthographic(
   const lr = 1 / (left - right)
   const bt = 1 / (bottom - top)
   // WebGPU uses z range [0, 1] instead of OpenGL's [-1, 1]
-  const nf = 1 / (near - far)
+  // Z_ndc = (Z_view - near) / (far - near) for proper depth ordering
+  const nf = 1 / (far - near)
 
   return new Float32Array([
     -2 * lr, 0, 0, 0,
     0, -2 * bt, 0, 0,
-    0, 0, nf, 0,  // WebGPU: 1/(near-far) instead of 2/(near-far)
-    (left + right) * lr, (top + bottom) * bt, near * nf, 1,  // WebGPU: near/(near-far) instead of (far+near)/(near-far)
+    0, 0, nf, 0,           // Z scale: 1/(far-near)
+    (left + right) * lr, (top + bottom) * bt, -near * nf, 1,  // Z translate: -near/(far-near)
   ])
 }
 

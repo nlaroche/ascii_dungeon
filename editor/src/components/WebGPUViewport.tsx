@@ -47,6 +47,14 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
   const activeTool = useEngineState((s) => s.tools.active) as GizmoMode
   const toolSettings = useEngineState((s) => s.tools.available)
 
+  // Render pipeline settings for shadows and reflections
+  const shadowSettings = useEngineState((s) => s.renderPipeline.shadows)
+  const reflectionSettings = useEngineState((s) => s.renderPipeline.reflections)
+
+  // Lighting and environment settings
+  const lightingState = useEngineState((s) => s.lighting)
+  const environmentState = useEngineState((s) => s.environment)
+
   // Normalized entities for O(1) lookups (replaces tree traversal)
   const { nodes: normalizedNodes, getNode: getNormalizedNode } = useNormalizedEntities()
 
@@ -188,6 +196,13 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
       case 't':
         setPathRef.current(['tools', 'active'], 'scale', 'Switch to Scale tool')
         break
+    }
+
+    // Press '0' (zero): Shadow test scene (minimal scene for debugging shadows)
+    if (e.key === '0' && sceneRef.current) {
+      e.preventDefault()
+      sceneRef.current.createShadowTestScene()
+      console.log('[Viewport] Shadow test scene activated - press 0 again to refresh')
     }
 
     keysRef.current.add(e.key.toLowerCase())
@@ -351,9 +366,9 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
         const sensitivity = 0.003
         cameraRef.current.rotate(-dx * sensitivity, -dy * sensitivity)
       } else if (e.buttons === 2) {
-        // Pan camera (right/up movement)
+        // Pan camera - drag up to pan down (vertical inverted)
         const panSpeed = 0.02
-        cameraRef.current.move(0, dx * panSpeed, -dy * panSpeed)
+        cameraRef.current.move(0, dx * panSpeed, dy * panSpeed)
       }
       return
     }
@@ -431,8 +446,8 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
     e.preventDefault()
     if (!cameraRef.current) return
 
-    // Scroll to move forward/back
-    const moveAmount = -e.deltaY * 0.02
+    // Scroll to move forward/back (reduced speed)
+    const moveAmount = -e.deltaY * 0.008
     cameraRef.current.move(moveAmount, 0, 0)
   }, [])
 
@@ -507,6 +522,57 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
     if (!sceneRef.current || loading) return
     sceneRef.current.setHoveredNode(hoveredNode)
   }, [hoveredNode, loading])
+
+  // Sync shadow settings to renderer
+  useEffect(() => {
+    if (!rendererRef.current || loading) return
+    rendererRef.current.updateShadowSettings({
+      enabled: shadowSettings.enabled,
+      type: shadowSettings.type,
+      resolution: shadowSettings.resolution,
+      softness: shadowSettings.softness,
+      bias: shadowSettings.bias,
+    })
+  }, [shadowSettings, loading])
+
+  // Sync reflection settings to renderer
+  useEffect(() => {
+    if (!rendererRef.current || loading) return
+    rendererRef.current.updateReflectionSettings({
+      enabled: reflectionSettings.enabled,
+      floorReflectivity: reflectionSettings.floorReflectivity,
+      waterReflectivity: reflectionSettings.waterReflectivity,
+    })
+  }, [reflectionSettings, loading])
+
+  // Sync lighting settings to renderer
+  useEffect(() => {
+    if (!rendererRef.current || loading) return
+    rendererRef.current.updateLightingSettings({
+      sun: {
+        enabled: lightingState.sun.enabled,
+        direction: lightingState.sun.direction as [number, number, number],
+        color: lightingState.sun.color as [number, number, number],
+        intensity: lightingState.sun.intensity,
+      },
+      ambient: {
+        color: lightingState.ambient.color as [number, number, number],
+        intensity: lightingState.ambient.intensity,
+      },
+    })
+  }, [lightingState, loading])
+
+  // Sync environment settings to renderer
+  useEffect(() => {
+    if (!rendererRef.current || loading) return
+    rendererRef.current.updateEnvironmentSettings({
+      sky: {
+        zenithColor: environmentState.skybox.gradient.zenith as [number, number, number],
+        horizonColor: environmentState.skybox.gradient.horizon as [number, number, number],
+        groundColor: environmentState.skybox.gradient.ground as [number, number, number],
+      },
+    })
+  }, [environmentState, loading])
 
   // Sync state to refs for render loop
   useEffect(() => {

@@ -9,6 +9,8 @@ import skyShaderCode from './shaders/sky.wgsl?raw'
 import gridShaderCode from './shaders/grid.wgsl?raw'
 import gizmoShaderCode from './shaders/gizmo.wgsl?raw'
 import glyphShaderCode from './shaders/glyph.wgsl?raw'
+import shadowVSMCode from './shaders/shadowVSM.wgsl?raw'
+import vsmBlurCode from './shaders/vsmBlur.wgsl?raw'
 import { GizmoGeometry, type GizmoMode, type GizmoAxis } from './Gizmo'
 import { PostProcessManager } from './PostProcessManager'
 
@@ -75,9 +77,11 @@ export class WebGPURenderer {
   private instanceBuffer!: GPUBuffer
   private instanceCount = 0
 
-  // Uniforms
+  // Uniforms - expanded for enhanced lighting
+  // Layout: viewProj(16) + lightViewProj(16) + cameraPos(4) + mainLightDir(4) + mainLightColor(4)
+  //         + fillLightDir(4) + fillLightColor(4) + ambientSky(4) + ambientGround(4) = 60 floats
   private uniformBuffer!: GPUBuffer
-  private uniformData = new Float32Array(48) // viewProj(16) + lightViewProj(16) + misc(16)
+  private uniformData = new Float32Array(60)
 
   // Pipelines
   private mainPipeline!: GPURenderPipeline
@@ -121,18 +125,85 @@ export class WebGPURenderer {
 
   // Glyph mesh rendering (smooth polygon glyphs)
   private glyphPipeline!: GPURenderPipeline
+  private glyphShadowPipeline!: GPURenderPipeline
   private glyphVertexBuffer!: GPUBuffer
   private glyphIndexBuffer!: GPUBuffer
   private glyphBindGroup!: GPUBindGroup
+  private glyphShadowBindGroup!: GPUBindGroup
   private glyphIndexCount = 0
 
   // Samplers
   private shadowSampler!: GPUSampler
   private reflectionSampler!: GPUSampler
 
+  // VSM (Variance Shadow Mapping) resources
+  private vsmPipeline!: GPURenderPipeline
+  private vsmBlurPipeline!: GPURenderPipeline
+  private vsmShadowMap!: GPUTexture      // rg32float format (depth, depth²)
+  private vsmBlurTemp!: GPUTexture       // Intermediate blur texture
+  private vsmDepthTexture!: GPUTexture   // Depth texture for VSM pass
+  private vsmBindGroup!: GPUBindGroup
+  private vsmBlurBindGroupH!: GPUBindGroup  // Horizontal blur
+  private vsmBlurBindGroupV!: GPUBindGroup  // Vertical blur
+  private vsmSampler!: GPUSampler        // Non-comparison sampler for VSM
+  private vsmBlurUniformBuffer!: GPUBuffer
+  private mainPipelineVSM!: GPURenderPipeline  // Alternative main pipeline for VSM
+  private mainBindGroupVSM!: GPUBindGroup
+
   // Post-processing
   private postProcessManager!: PostProcessManager
   private postProcessEnabled = true
+
+  // Shadow settings (updated from UI)
+  private shadowSettings = {
+    enabled: true,
+    type: 'pcf' as 'pcf' | 'vsm' | 'pcss',
+    resolution: 1024,
+    softness: 0.5,
+    bias: 0.005,
+  }
+
+  // Reflection settings (updated from UI)
+  private reflectionSettings = {
+    enabled: true,
+    floorReflectivity: 0.15,
+    waterReflectivity: 0.6,
+  }
+
+  // Lighting settings (updated from UI)
+  private lightingSettings = {
+    sun: {
+      enabled: true,
+      direction: [-0.2, -0.95, -0.1] as [number, number, number],  // Nearly vertical
+      color: [1.0, 0.95, 0.9] as [number, number, number],
+      intensity: 1.0,
+    },
+    ambient: {
+      color: [0.18, 0.25, 0.35] as [number, number, number],
+      intensity: 0.4,
+    },
+    fill: {
+      enabled: true,
+      direction: [0.6, -0.3, 0.5] as [number, number, number],
+      color: [0.6, 0.7, 0.9] as [number, number, number],
+      intensity: 0.4,
+    },
+  }
+
+  // Environment settings (updated from UI)
+  private environmentSettings = {
+    sky: {
+      zenithColor: [0.02, 0.03, 0.06] as [number, number, number],
+      horizonColor: [0.08, 0.12, 0.18] as [number, number, number],
+      groundColor: [0.03, 0.04, 0.03] as [number, number, number],
+    },
+  }
+
+  // Sky uniform buffer (for dynamic sky colors)
+  // Layout: zenithColor(4) + horizonColor(4) + groundColor(4) = 12 floats = 48 bytes
+  private skyUniformBuffer!: GPUBuffer
+  private skyUniformData = new Float32Array(12)
+  private skyBindGroup!: GPUBindGroup
 
   private width = 0
   private height = 0
@@ -178,6 +249,12 @@ export class WebGPURenderer {
     // Create grid uniform buffer
     this.gridUniformBuffer = this.device.createBuffer({
       size: this.gridUniformData.byteLength,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    })
+
+    // Create sky uniform buffer
+    this.skyUniformBuffer = this.device.createBuffer({
+      size: this.skyUniformData.byteLength,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     })
 
@@ -248,11 +325,32 @@ export class WebGPURenderer {
       format: 'depth32float',
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
     })
+
+    // VSM shadow map (rg32float for depth moments)
+    this.vsmShadowMap = this.device.createTexture({
+      size: [SHADOW_MAP_SIZE, SHADOW_MAP_SIZE],
+      format: 'rg32float',
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    })
+
+    // VSM blur intermediate texture
+    this.vsmBlurTemp = this.device.createTexture({
+      size: [SHADOW_MAP_SIZE, SHADOW_MAP_SIZE],
+      format: 'rg32float',
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+    })
+
+    // VSM depth texture (for depth testing during VSM shadow pass)
+    this.vsmDepthTexture = this.device.createTexture({
+      size: [SHADOW_MAP_SIZE, SHADOW_MAP_SIZE],
+      format: 'depth32float',
+      usage: GPUTextureUsage.RENDER_ATTACHMENT,
+    })
   }
 
   private createSamplers() {
     this.shadowSampler = this.device.createSampler({
-      compare: 'less',
+      compare: 'greater',  // ref > stored → 1.0: fragment further than shadow map = LIT (inverted depth)
       magFilter: 'linear',
       minFilter: 'linear',
     })
@@ -260,6 +358,14 @@ export class WebGPURenderer {
     this.reflectionSampler = this.device.createSampler({
       magFilter: 'linear',
       minFilter: 'linear',
+    })
+
+    // VSM sampler - non-comparison, linear filtering for soft shadows
+    this.vsmSampler = this.device.createSampler({
+      magFilter: 'linear',
+      minFilter: 'linear',
+      addressModeU: 'clamp-to-edge',
+      addressModeV: 'clamp-to-edge',
     })
   }
 
@@ -342,6 +448,38 @@ export class WebGPURenderer {
       },
       primitive: {
         topology: 'triangle-list',
+        cullMode: 'back',  // Render front faces to shadow map
+      },
+      depthStencil: {
+        format: 'depth32float',
+        depthWriteEnabled: true,
+        depthCompare: 'greater',  // Inverted depth: larger values win (closer to light)
+      },
+    })
+
+    // VSM shadow pipeline (outputs depth moments to color attachment)
+    const vsmModule = this.device.createShaderModule({ code: shadowVSMCode })
+    const vsmBindGroupLayout = this.device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
+        { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
+      ],
+    })
+
+    this.vsmPipeline = this.device.createRenderPipeline({
+      layout: this.device.createPipelineLayout({ bindGroupLayouts: [vsmBindGroupLayout] }),
+      vertex: {
+        module: vsmModule,
+        entryPoint: 'vs_main',
+        buffers: [vertexBufferLayout],
+      },
+      fragment: {
+        module: vsmModule,
+        entryPoint: 'fs_main',
+        targets: [{ format: 'rg32float' }],
+      },
+      primitive: {
+        topology: 'triangle-list',
         cullMode: 'back',
       },
       depthStencil: {
@@ -349,6 +487,38 @@ export class WebGPURenderer {
         depthWriteEnabled: true,
         depthCompare: 'less',
       },
+    })
+
+    // VSM blur pipeline (Gaussian blur)
+    const vsmBlurModule = this.device.createShaderModule({ code: vsmBlurCode })
+    const vsmBlurBindGroupLayout = this.device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+        { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
+        { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'filtering' } },
+      ],
+    })
+
+    this.vsmBlurPipeline = this.device.createRenderPipeline({
+      layout: this.device.createPipelineLayout({ bindGroupLayouts: [vsmBlurBindGroupLayout] }),
+      vertex: {
+        module: vsmBlurModule,
+        entryPoint: 'vs_main',
+      },
+      fragment: {
+        module: vsmBlurModule,
+        entryPoint: 'fs_main',
+        targets: [{ format: 'rg32float' }],
+      },
+      primitive: {
+        topology: 'triangle-list',
+      },
+    })
+
+    // VSM blur uniform buffer
+    this.vsmBlurUniformBuffer = this.device.createBuffer({
+      size: 16, // vec2 direction + vec2 texelSize
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     })
 
     // Water pipeline
@@ -624,6 +794,31 @@ export class WebGPURenderer {
         depthCompare: 'less-equal',
       },
     })
+
+    // Glyph shadow pipeline (depth-only for shadow casting)
+    const glyphShadowBindGroupLayout = this.device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
+      ],
+    })
+
+    this.glyphShadowPipeline = this.device.createRenderPipeline({
+      layout: this.device.createPipelineLayout({ bindGroupLayouts: [glyphShadowBindGroupLayout] }),
+      vertex: {
+        module: glyphModule,
+        entryPoint: 'vs_shadow',
+        buffers: [glyphVertexLayout],
+      },
+      primitive: {
+        topology: 'triangle-list',
+        cullMode: 'back',  // Render front faces to shadow map
+      },
+      depthStencil: {
+        format: 'depth32float',
+        depthWriteEnabled: true,
+        depthCompare: 'greater',  // Inverted depth: larger values win
+      },
+    })
   }
 
   private createBindGroups() {
@@ -666,6 +861,14 @@ export class WebGPURenderer {
       ],
     })
 
+    // Sky bind group
+    this.skyBindGroup = this.device.createBindGroup({
+      layout: this.skyPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.skyUniformBuffer } },
+      ],
+    })
+
     // Gizmo bind group
     this.gizmoBindGroup = this.device.createBindGroup({
       layout: this.gizmoPipeline.getBindGroupLayout(0),
@@ -689,6 +892,42 @@ export class WebGPURenderer {
         { binding: 0, resource: { buffer: this.uniformBuffer } },
         { binding: 1, resource: this.shadowMap.createView() },
         { binding: 2, resource: this.shadowSampler },
+      ],
+    })
+
+    // Glyph shadow bind group (for shadow casting)
+    this.glyphShadowBindGroup = this.device.createBindGroup({
+      layout: this.glyphShadowPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.uniformBuffer } },
+      ],
+    })
+
+    // VSM bind group (uses same layout as shadow bind group)
+    this.vsmBindGroup = this.device.createBindGroup({
+      layout: this.vsmPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.uniformBuffer } },
+        { binding: 1, resource: { buffer: this.instanceBuffer } },
+      ],
+    })
+
+    // VSM blur bind groups (horizontal: vsmShadowMap -> vsmBlurTemp, vertical: vsmBlurTemp -> vsmShadowMap)
+    this.vsmBlurBindGroupH = this.device.createBindGroup({
+      layout: this.vsmBlurPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.vsmBlurUniformBuffer } },
+        { binding: 1, resource: this.vsmShadowMap.createView() },
+        { binding: 2, resource: this.vsmSampler },
+      ],
+    })
+
+    this.vsmBlurBindGroupV = this.device.createBindGroup({
+      layout: this.vsmBlurPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.vsmBlurUniformBuffer } },
+        { binding: 1, resource: this.vsmBlurTemp.createView() },
+        { binding: 2, resource: this.vsmSampler },
       ],
     })
   }
@@ -759,41 +998,99 @@ export class WebGPURenderer {
 
     this.device.queue.writeBuffer(this.instanceBuffer, 0, instanceData.buffer, instanceData.byteOffset, instanceData.byteLength)
 
-    // Update uniforms
+    // Update uniforms with lighting from settings
     const viewProj = this.multiplyMatrices(
       camera.getProjectionMatrix(this.width / this.height),
       camera.getViewMatrix()
     )
-    const lightDir: [number, number, number] = [-0.5, -1, -0.3]
-    const lightViewProj = camera.getLightViewProjection(lightDir)
 
+    // Get lighting from settings
+    const { sun, ambient, fill } = this.lightingSettings
+    const mainLightDir = this.normalize(sun.direction)
+    const lightViewProj = camera.getLightViewProjection(mainLightDir)
+    const fillLightDir = this.normalize(fill.direction)
+
+    // Ambient colors from settings (sky color for top, darker for ground)
+    const ambientSky: [number, number, number, number] = [
+      ambient.color[0] * ambient.intensity,
+      ambient.color[1] * ambient.intensity,
+      ambient.color[2] * ambient.intensity,
+      1.0
+    ]
+    const ambientGround: [number, number, number, number] = [
+      ambient.color[0] * ambient.intensity * 0.6,
+      ambient.color[1] * ambient.intensity * 0.6,
+      ambient.color[2] * ambient.intensity * 0.5,
+      1.0
+    ]
+
+    // viewProj: 0-15
     this.uniformData.set(viewProj, 0)
+    // lightViewProj: 16-31
     this.uniformData.set(lightViewProj, 16)
+    // cameraPos: 32-35 (xyz = position, w = time)
     this.uniformData.set(camera.position, 32)
     this.uniformData[35] = scene.time
-    this.uniformData.set(this.normalize(lightDir), 36)
-    this.uniformData[39] = 0.3 // ambient strength
-    this.uniformData.set([1.0, 0.95, 0.9], 40) // warm sunlight
+    // mainLightDir: 36-39 (xyz = direction, w = intensity)
+    this.uniformData.set(mainLightDir, 36)
+    this.uniformData[39] = sun.enabled ? sun.intensity : 0.0
+    // mainLightColor: 40-43 (w = shadowEnabled flag)
+    const shadowEnabled = this.shadowSettings.enabled ? 1.0 : 0.0
+    this.uniformData.set([sun.color[0], sun.color[1], sun.color[2], shadowEnabled], 40)
+    // fillLightDir: 44-47 (xyz = direction, w = intensity)
+    this.uniformData.set(fillLightDir, 44)
+    this.uniformData[47] = fill.enabled ? fill.intensity : 0.0
+    // fillLightColor: 48-51
+    this.uniformData.set([fill.color[0], fill.color[1], fill.color[2], 1.0], 48)
+    // ambientSky: 52-55
+    this.uniformData.set(ambientSky, 52)
+    // ambientGround: 56-59
+    this.uniformData.set(ambientGround, 56)
+
     this.device.queue.writeBuffer(this.uniformBuffer, 0, this.uniformData)
 
     const commandEncoder = this.device.createCommandEncoder()
 
-    // Shadow pass
-    const shadowPass = commandEncoder.beginRenderPass({
-      colorAttachments: [],
-      depthStencilAttachment: {
-        view: this.shadowMap.createView(),
-        depthClearValue: 1.0,
-        depthLoadOp: 'clear',
-        depthStoreOp: 'store',
-      },
-    })
-    shadowPass.setPipeline(this.shadowPipeline)
-    shadowPass.setBindGroup(0, this.shadowBindGroup)
-    shadowPass.setVertexBuffer(0, this.vertexBuffer)
-    shadowPass.setIndexBuffer(this.indexBuffer, 'uint16')
-    shadowPass.drawIndexed(36, this.instanceCount)
-    shadowPass.end()
+    // Update glyph buffers early so they can be used in shadow pass
+    const hasGlyphs = scene.hasGlyphs()
+    if (hasGlyphs) {
+      const glyphVertexData = scene.getGlyphVertexData()
+      const glyphIndexData = scene.getGlyphIndexData()
+      this.glyphIndexCount = scene.getGlyphIndexCount()
+      this.device.queue.writeBuffer(this.glyphVertexBuffer, 0, glyphVertexData.buffer, glyphVertexData.byteOffset, glyphVertexData.byteLength)
+      this.device.queue.writeBuffer(this.glyphIndexBuffer, 0, glyphIndexData.buffer, glyphIndexData.byteOffset, glyphIndexData.byteLength)
+    }
+
+    // Shadow pass - render both voxels and glyphs to shadow map
+    if (this.shadowSettings.enabled) {
+      const shadowPass = commandEncoder.beginRenderPass({
+        colorAttachments: [],
+        depthStencilAttachment: {
+          view: this.shadowMap.createView(),
+          depthClearValue: 0.0,  // Clear to 0 (inverted depth: larger = closer to light)
+          depthLoadOp: 'clear',
+          depthStoreOp: 'store',
+        },
+      })
+
+      // Render voxel instances to shadow map
+      shadowPass.setPipeline(this.shadowPipeline)
+      shadowPass.setBindGroup(0, this.shadowBindGroup)
+      shadowPass.setVertexBuffer(0, this.vertexBuffer)
+      shadowPass.setIndexBuffer(this.indexBuffer, 'uint16')
+      shadowPass.drawIndexed(36, this.instanceCount)
+
+      // Render glyphs to shadow map (so glyphs cast shadows)
+      if (hasGlyphs && this.glyphIndexCount > 0) {
+        shadowPass.setPipeline(this.glyphShadowPipeline)
+        shadowPass.setBindGroup(0, this.glyphShadowBindGroup)
+        shadowPass.setVertexBuffer(0, this.glyphVertexBuffer)
+        shadowPass.setIndexBuffer(this.glyphIndexBuffer, 'uint32')
+        shadowPass.drawIndexed(this.glyphIndexCount)
+      }
+
+      shadowPass.end()
+    }
 
     // Reflection pass (render scene flipped for water)
     const reflectionPass = commandEncoder.beginRenderPass({
@@ -844,8 +1141,16 @@ export class WebGPURenderer {
       },
     })
 
+    // Update sky uniforms with environment settings
+    const { sky } = this.environmentSettings
+    this.skyUniformData.set([sky.zenithColor[0], sky.zenithColor[1], sky.zenithColor[2], 1.0], 0)
+    this.skyUniformData.set([sky.horizonColor[0], sky.horizonColor[1], sky.horizonColor[2], 1.0], 4)
+    this.skyUniformData.set([sky.groundColor[0], sky.groundColor[1], sky.groundColor[2], 1.0], 8)
+    this.device.queue.writeBuffer(this.skyUniformBuffer, 0, this.skyUniformData)
+
     // Draw sky gradient first
     mainPass.setPipeline(this.skyPipeline)
+    mainPass.setBindGroup(0, this.skyBindGroup)
     mainPass.draw(3) // Fullscreen triangle
 
     // Draw grid
@@ -863,17 +1168,8 @@ export class WebGPURenderer {
     mainPass.setIndexBuffer(this.indexBuffer, 'uint16')
     mainPass.drawIndexed(36, scene.getNonWaterInstanceCount())
 
-    // Draw smooth polygon glyphs
-    if (scene.hasGlyphs()) {
-      const glyphVertexData = scene.getGlyphVertexData()
-      const glyphIndexData = scene.getGlyphIndexData()
-      this.glyphIndexCount = scene.getGlyphIndexCount()
-
-      // Update glyph buffers
-      this.device.queue.writeBuffer(this.glyphVertexBuffer, 0, glyphVertexData.buffer, glyphVertexData.byteOffset, glyphVertexData.byteLength)
-      this.device.queue.writeBuffer(this.glyphIndexBuffer, 0, glyphIndexData.buffer, glyphIndexData.byteOffset, glyphIndexData.byteLength)
-
-      // Draw glyphs
+    // Draw smooth polygon glyphs (buffers already uploaded before shadow pass)
+    if (hasGlyphs && this.glyphIndexCount > 0) {
       mainPass.setPipeline(this.glyphPipeline)
       mainPass.setBindGroup(0, this.glyphBindGroup)
       mainPass.setVertexBuffer(0, this.glyphVertexBuffer)
@@ -1095,6 +1391,7 @@ export class WebGPURenderer {
     this.instanceBuffer?.destroy()
     this.uniformBuffer?.destroy()
     this.gridUniformBuffer?.destroy()
+    this.skyUniformBuffer?.destroy()
     this.gizmoUniformBuffer?.destroy()
     this.gizmoVertexBuffer?.destroy()
     this.gizmoIndexBuffer?.destroy()
@@ -1105,6 +1402,12 @@ export class WebGPURenderer {
     this.shadowMap?.destroy()
     this.reflectionTexture?.destroy()
     this.reflectionDepth?.destroy()
+
+    // VSM resources
+    this.vsmShadowMap?.destroy()
+    this.vsmBlurTemp?.destroy()
+    this.vsmDepthTexture?.destroy()
+    this.vsmBlurUniformBuffer?.destroy()
 
     // Destroy post-processing
     this.postProcessManager?.destroy()
@@ -1122,5 +1425,70 @@ export class WebGPURenderer {
    */
   setPostProcessEnabled(enabled: boolean): void {
     this.postProcessEnabled = enabled
+  }
+
+  /**
+   * Update shadow settings from UI
+   */
+  updateShadowSettings(settings: Partial<typeof this.shadowSettings>): void {
+    Object.assign(this.shadowSettings, settings)
+    // If resolution changed, we'd need to recreate shadow map (deferred for now)
+  }
+
+  /**
+   * Update reflection settings from UI
+   */
+  updateReflectionSettings(settings: Partial<typeof this.reflectionSettings>): void {
+    Object.assign(this.reflectionSettings, settings)
+  }
+
+  /**
+   * Get current shadow settings (for reading in viewport)
+   */
+  getShadowSettings() {
+    return this.shadowSettings
+  }
+
+  /**
+   * Get current reflection settings (for reading in viewport)
+   */
+  getReflectionSettings() {
+    return this.reflectionSettings
+  }
+
+  /**
+   * Update lighting settings from UI
+   */
+  updateLightingSettings(settings: {
+    sun?: Partial<typeof this.lightingSettings.sun>
+    ambient?: Partial<typeof this.lightingSettings.ambient>
+    fill?: Partial<typeof this.lightingSettings.fill>
+  }): void {
+    if (settings.sun) Object.assign(this.lightingSettings.sun, settings.sun)
+    if (settings.ambient) Object.assign(this.lightingSettings.ambient, settings.ambient)
+    if (settings.fill) Object.assign(this.lightingSettings.fill, settings.fill)
+  }
+
+  /**
+   * Update environment settings from UI
+   */
+  updateEnvironmentSettings(settings: {
+    sky?: Partial<typeof this.environmentSettings.sky>
+  }): void {
+    if (settings.sky) Object.assign(this.environmentSettings.sky, settings.sky)
+  }
+
+  /**
+   * Get current lighting settings
+   */
+  getLightingSettings() {
+    return this.lightingSettings
+  }
+
+  /**
+   * Get current environment settings
+   */
+  getEnvironmentSettings() {
+    return this.environmentSettings
   }
 }

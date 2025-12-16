@@ -17,6 +17,7 @@ import fxaaShader from './shaders/postprocess/fxaa.wgsl?raw'
 import pixelateShader from './shaders/postprocess/pixelate.wgsl?raw'
 import sharpenShader from './shaders/postprocess/sharpen.wgsl?raw'
 import outlineShader from './shaders/postprocess/outline.wgsl?raw'
+import ssaoShader from './shaders/postprocess/ssao.wgsl?raw'
 import blitShader from './shaders/postprocess/blit.wgsl?raw'
 
 interface EffectPipeline {
@@ -164,6 +165,22 @@ const EFFECT_CONFIGS: Record<string, EffectConfig> = {
         color[0] ?? 0, color[1] ?? 0, color[2] ?? 0, color[3] ?? 1,
         effect.thickness ?? 1,
         0, 0, 0, // padding
+      ])
+    },
+  },
+  ssao: {
+    shader: ssaoShader,
+    uniformSize: 8, // radius, bias, intensity, samples, near, far, _pad x2
+    needsDepth: true,
+    getUniforms: (effect, _time) => {
+      return new Float32Array([
+        effect.radius ?? 0.5,
+        effect.bias ?? 0.025,
+        effect.intensity ?? 1.0,
+        effect.samples ?? 16,
+        0.1, // near - TODO: get from camera
+        500, // far - TODO: get from camera
+        0, 0, // padding
       ])
     },
   },
@@ -486,6 +503,13 @@ export class PostProcessManager {
     const config = EFFECT_CONFIGS[effect.id]
     if (!effectPipeline || !config) {
       console.warn(`PostProcess: Missing pipeline or config for effect '${effect.id}'`)
+      return
+    }
+
+    // Skip effects that need depth if depth texture isn't available (copy input to output)
+    if (config.needsDepth && !this.depthTextureView) {
+      console.warn(`PostProcess: Effect '${effect.id}' needs depth texture but none is available, skipping`)
+      this.copyToOutput(commandEncoder, inputView, outputView)
       return
     }
 

@@ -3,9 +3,13 @@
 struct Uniforms {
   viewProj: mat4x4f,
   lightViewProj: mat4x4f,
-  cameraPos: vec4f,      // xyz = position, w = time
-  lightDir: vec4f,       // xyz = direction, w = ambient strength
-  lightColor: vec4f,     // xyz = color, w = unused
+  cameraPos: vec4f,        // xyz = position, w = time
+  mainLightDir: vec4f,     // xyz = direction, w = intensity
+  mainLightColor: vec4f,   // xyz = color, w = unused
+  fillLightDir: vec4f,     // xyz = direction, w = intensity
+  fillLightColor: vec4f,   // xyz = color, w = unused
+  ambientSky: vec4f,       // hemisphere ambient - sky color
+  ambientGround: vec4f,    // hemisphere ambient - ground color
 }
 
 struct WaterInstance {
@@ -59,6 +63,7 @@ fn vs_main(input: VertexInput) -> VertexOutput {
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4f {
   let time = uniforms.cameraPos.w;
+  let V = normalize(uniforms.cameraPos.xyz - input.worldPos);
 
   // Animated ripple distortion
   let rippleScale = 8.0;
@@ -72,29 +77,51 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4f {
 
   let distortion = (ripple1 + ripple2 * 0.5) * rippleStrength;
 
+  // Perturb normal based on ripples
+  let normalPerturbX = ripple1 * 0.1;
+  let normalPerturbZ = ripple2 * 0.1;
+  let N = normalize(vec3f(normalPerturbX, 1.0, normalPerturbZ));
+
   // Sample reflection with distortion
   let reflectUV = input.screenUV + vec2f(distortion, distortion * 0.5);
   let reflection = textureSample(reflectionTex, reflectionSampler, reflectUV);
 
-  // Fresnel effect - more reflection at grazing angles
-  let V = normalize(uniforms.cameraPos.xyz - input.worldPos);
-  let fresnel = pow(1.0 - max(dot(V, input.normal), 0.0), 3.0);
-  let reflectAmount = mix(0.3, 0.9, fresnel);
+  // Fresnel effect - more reflection at grazing angles (reference uses 0.6)
+  let fresnel = pow(1.0 - max(dot(V, N), 0.0), 3.0);
+  let reflectAmount = mix(0.15, 0.8, fresnel); // 0.15 base reflectivity matching reference
 
-  // Water base color (slightly blue/teal)
-  let waterColor = input.color.rgb;
+  // Water base color with hemisphere ambient
+  let ambientBlend = N.y * 0.5 + 0.5;
+  let ambientColor = mix(uniforms.ambientGround.rgb, uniforms.ambientSky.rgb, ambientBlend);
+  let waterColor = input.color.rgb * ambientColor * 0.5;
 
   // Blend reflection with water color
   var finalColor = mix(waterColor, reflection.rgb, reflectAmount);
 
-  // Add subtle specular highlight
-  let L = normalize(-uniforms.lightDir.xyz);
-  let H = normalize(V + L);
-  let spec = pow(max(dot(input.normal, H), 0.0), 64.0);
-  finalColor += uniforms.lightColor.rgb * spec * 0.5;
+  // Main light specular highlight
+  let mainL = normalize(-uniforms.mainLightDir.xyz);
+  let mainH = normalize(V + mainL);
+  let mainSpec = pow(max(dot(N, mainH), 0.0), 128.0);
+  finalColor += uniforms.mainLightColor.rgb * mainSpec * uniforms.mainLightDir.w * 0.8;
 
-  // Tone mapping
-  finalColor = finalColor / (finalColor + vec3f(1.0));
+  // Fill light subtle specular
+  let fillL = normalize(-uniforms.fillLightDir.xyz);
+  let fillH = normalize(V + fillL);
+  let fillSpec = pow(max(dot(N, fillH), 0.0), 64.0);
+  finalColor += uniforms.fillLightColor.rgb * fillSpec * uniforms.fillLightDir.w * 0.2;
+
+  // Sky reflection tint
+  finalColor += uniforms.ambientSky.rgb * fresnel * 0.1;
+
+  // ACES tone mapping
+  let a = 2.51;
+  let b = 0.03;
+  let c = 2.43;
+  let d = 0.59;
+  let e = 0.14;
+  finalColor = clamp((finalColor * (a * finalColor + b)) / (finalColor * (c * finalColor + d) + e), vec3f(0.0), vec3f(1.0));
+
+  // Gamma correction
   finalColor = pow(finalColor, vec3f(1.0 / 2.2));
 
   return vec4f(finalColor, 0.85); // Slightly transparent
