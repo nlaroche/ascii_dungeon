@@ -412,6 +412,24 @@ export function useUIScale() {
 }
 
 /**
+ * Hook for editor mode (engine vs template)
+ */
+export function useEditorMode() {
+  const mode = useEngineState((state) => state.ui.editorMode);
+  const setPath = useEngineState((state) => state.setPath);
+
+  const setMode = (newMode: 'engine' | 'template') => {
+    setPath(['ui', 'editorMode'], newMode, `Switch to ${newMode} mode`);
+  };
+
+  const toggleMode = () => {
+    setMode(mode === 'engine' ? 'template' : 'engine');
+  };
+
+  return { mode, setMode, toggleMode, isTemplateMode: mode === 'template' };
+}
+
+/**
  * Hook for active tool
  */
 export function useActiveTool() {
@@ -464,43 +482,94 @@ export function useSelection() {
 
   return {
     selection,
-    selectEntity: (id: string) =>
-      setPath(['selection', 'entities'], [id], `Select ${id}`),
-    selectEntities: (ids: string[]) =>
-      setPath(['selection', 'entities'], ids, `Select ${ids.length} entities`),
+    selectNode: (id: string) =>
+      setPath(['selection', 'nodes'], [id], `Select node`),
+    selectNodes: (ids: string[]) =>
+      setPath(['selection', 'nodes'], ids, `Select ${ids.length} nodes`),
     clearSelection: () =>
-      setPath(['selection', 'entities'], [], 'Clear selection'),
+      setPath(['selection', 'nodes'], [], 'Clear selection'),
+    isSelected: (id: string) => selection.nodes.includes(id),
   };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Node Tree Utilities
+// ─────────────────────────────────────────────────────────────────────────────
+
+import type { Node } from './engineState';
+
 /**
- * Hook for scene entities
+ * Find a node by ID in the tree (recursive)
  */
-export function useEntities() {
-  const entities = useEngineState((state) => state.scene.entities);
+export function findNode(root: Node, id: string): Node | null {
+  if (root.id === id) return root;
+  for (const child of root.children) {
+    const found = findNode(child, id);
+    if (found) return found;
+  }
+  return null;
+}
+
+/**
+ * Find the path to a node (array of indices)
+ */
+export function findNodePath(root: Node, id: string, path: number[] = []): number[] | null {
+  if (root.id === id) return path;
+  for (let i = 0; i < root.children.length; i++) {
+    const result = findNodePath(root.children[i], id, [...path, i]);
+    if (result) return result;
+  }
+  return null;
+}
+
+/**
+ * Get all nodes flattened (for iteration)
+ */
+export function flattenNodes(root: Node): Node[] {
+  const nodes: Node[] = [root];
+  for (const child of root.children) {
+    nodes.push(...flattenNodes(child));
+  }
+  return nodes;
+}
+
+/**
+ * Hook for scene nodes
+ */
+export function useNodes() {
+  const rootNode = useEngineState((state) => state.scene.rootNode);
   const setPath = useEngineState((state) => state.setPath);
 
-  const addEntity = (entity: EngineState['scene']['entities'][0]) => {
-    setPath(['scene', 'entities'], [...entities, entity], `Add ${entity.name}`);
+  const getNode = (id: string): Node | null => {
+    return findNode(rootNode, id);
   };
 
-  const removeEntity = (id: string) => {
-    setPath(
-      ['scene', 'entities'],
-      entities.filter((e) => e.id !== id),
-      `Remove entity ${id}`
-    );
+  const getAllNodes = (): Node[] => {
+    return flattenNodes(rootNode);
   };
 
-  const updateEntity = (id: string, updates: Partial<EngineState['scene']['entities'][0]>) => {
-    const idx = entities.findIndex((e) => e.id === id);
-    if (idx !== -1) {
-      const updated = { ...entities[idx], ...updates };
-      setPath(['scene', 'entities', idx], updated, `Update ${id}`);
+  const getNodePath = (id: string): number[] | null => {
+    return findNodePath(rootNode, id);
+  };
+
+  const updateNode = (id: string, updates: Partial<Node>) => {
+    const path = findNodePath(rootNode, id);
+    if (!path) return;
+
+    // Build the full state path
+    const statePath: (string | number)[] = ['scene', 'rootNode'];
+    for (const idx of path) {
+      statePath.push('children', idx);
+    }
+
+    const node = getNode(id);
+    if (node) {
+      const updated = { ...node, ...updates };
+      setPath(statePath, updated, `Update ${node.name}`);
     }
   };
 
-  return { entities, addEntity, removeEntity, updateEntity };
+  return { rootNode, getNode, getAllNodes, updateNode, setPath, getNodePath };
 }
 
 /**

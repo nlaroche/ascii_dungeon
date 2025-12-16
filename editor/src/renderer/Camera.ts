@@ -116,6 +116,60 @@ export class Camera {
 
     return multiplyMatrices(lightProj, lightView)
   }
+
+  // Get inverse view matrix for ray casting
+  getInverseViewMatrix(): Float32Array {
+    return invertMatrix4x4(this.getViewMatrix())
+  }
+
+  // Get inverse projection matrix for ray casting
+  getInverseProjectionMatrix(aspect: number): Float32Array {
+    return invertMatrix4x4(this.getProjectionMatrix(aspect))
+  }
+
+  // Convert screen position (NDC: -1 to 1) to world ray
+  screenToWorldRay(ndcX: number, ndcY: number, aspect: number): { origin: [number, number, number], direction: [number, number, number] } {
+    const invProj = this.getInverseProjectionMatrix(aspect)
+    const invView = this.getInverseViewMatrix()
+
+    // Near plane point in clip space (z=0 for WebGPU's [0,1] range)
+    const nearClip: [number, number, number, number] = [ndcX, ndcY, 0, 1]
+    // Far plane point in clip space (z=1)
+    const farClip: [number, number, number, number] = [ndcX, ndcY, 1, 1]
+
+    // Transform to view space
+    const nearView = multiplyMatrixVector(invProj, nearClip)
+    const farView = multiplyMatrixVector(invProj, farClip)
+
+    // Perspective divide
+    const nearViewDiv: [number, number, number, number] = [
+      nearView[0] / nearView[3],
+      nearView[1] / nearView[3],
+      nearView[2] / nearView[3],
+      1
+    ]
+    const farViewDiv: [number, number, number, number] = [
+      farView[0] / farView[3],
+      farView[1] / farView[3],
+      farView[2] / farView[3],
+      1
+    ]
+
+    // Transform to world space
+    const nearWorld = multiplyMatrixVector(invView, nearViewDiv)
+    const farWorld = multiplyMatrixVector(invView, farViewDiv)
+
+    // Ray direction
+    const dir = normalize(subtract(
+      [farWorld[0], farWorld[1], farWorld[2]],
+      [nearWorld[0], nearWorld[1], nearWorld[2]]
+    ))
+
+    return {
+      origin: [...this.position],
+      direction: dir
+    }
+  }
 }
 
 // Perspective projection matrix
@@ -202,4 +256,68 @@ function normalize(v: [number, number, number]): [number, number, number] {
   const len = Math.sqrt(v[0] * v[0] + v[1] * v[1] + v[2] * v[2])
   if (len === 0) return [0, 0, 0]
   return [v[0] / len, v[1] / len, v[2] / len]
+}
+
+// Multiply matrix by vector (column-major matrix, column vector)
+function multiplyMatrixVector(m: Float32Array, v: [number, number, number, number]): [number, number, number, number] {
+  return [
+    m[0] * v[0] + m[4] * v[1] + m[8] * v[2] + m[12] * v[3],
+    m[1] * v[0] + m[5] * v[1] + m[9] * v[2] + m[13] * v[3],
+    m[2] * v[0] + m[6] * v[1] + m[10] * v[2] + m[14] * v[3],
+    m[3] * v[0] + m[7] * v[1] + m[11] * v[2] + m[15] * v[3],
+  ]
+}
+
+// 4x4 matrix inversion (column-major)
+function invertMatrix4x4(m: Float32Array): Float32Array {
+  const inv = new Float32Array(16)
+
+  inv[0] = m[5] * m[10] * m[15] - m[5] * m[11] * m[14] - m[9] * m[6] * m[15] +
+           m[9] * m[7] * m[14] + m[13] * m[6] * m[11] - m[13] * m[7] * m[10]
+  inv[4] = -m[4] * m[10] * m[15] + m[4] * m[11] * m[14] + m[8] * m[6] * m[15] -
+           m[8] * m[7] * m[14] - m[12] * m[6] * m[11] + m[12] * m[7] * m[10]
+  inv[8] = m[4] * m[9] * m[15] - m[4] * m[11] * m[13] - m[8] * m[5] * m[15] +
+           m[8] * m[7] * m[13] + m[12] * m[5] * m[11] - m[12] * m[7] * m[9]
+  inv[12] = -m[4] * m[9] * m[14] + m[4] * m[10] * m[13] + m[8] * m[5] * m[14] -
+            m[8] * m[6] * m[13] - m[12] * m[5] * m[10] + m[12] * m[6] * m[9]
+
+  inv[1] = -m[1] * m[10] * m[15] + m[1] * m[11] * m[14] + m[9] * m[2] * m[15] -
+           m[9] * m[3] * m[14] - m[13] * m[2] * m[11] + m[13] * m[3] * m[10]
+  inv[5] = m[0] * m[10] * m[15] - m[0] * m[11] * m[14] - m[8] * m[2] * m[15] +
+           m[8] * m[3] * m[14] + m[12] * m[2] * m[11] - m[12] * m[3] * m[10]
+  inv[9] = -m[0] * m[9] * m[15] + m[0] * m[11] * m[13] + m[8] * m[1] * m[15] -
+           m[8] * m[3] * m[13] - m[12] * m[1] * m[11] + m[12] * m[3] * m[9]
+  inv[13] = m[0] * m[9] * m[14] - m[0] * m[10] * m[13] - m[8] * m[1] * m[14] +
+            m[8] * m[2] * m[13] + m[12] * m[1] * m[10] - m[12] * m[2] * m[9]
+
+  inv[2] = m[1] * m[6] * m[15] - m[1] * m[7] * m[14] - m[5] * m[2] * m[15] +
+           m[5] * m[3] * m[14] + m[13] * m[2] * m[7] - m[13] * m[3] * m[6]
+  inv[6] = -m[0] * m[6] * m[15] + m[0] * m[7] * m[14] + m[4] * m[2] * m[15] -
+           m[4] * m[3] * m[14] - m[12] * m[2] * m[7] + m[12] * m[3] * m[6]
+  inv[10] = m[0] * m[5] * m[15] - m[0] * m[7] * m[13] - m[4] * m[1] * m[15] +
+            m[4] * m[3] * m[13] + m[12] * m[1] * m[7] - m[12] * m[3] * m[5]
+  inv[14] = -m[0] * m[5] * m[14] + m[0] * m[6] * m[13] + m[4] * m[1] * m[14] -
+            m[4] * m[2] * m[13] - m[12] * m[1] * m[6] + m[12] * m[2] * m[5]
+
+  inv[3] = -m[1] * m[6] * m[11] + m[1] * m[7] * m[10] + m[5] * m[2] * m[11] -
+           m[5] * m[3] * m[10] - m[9] * m[2] * m[7] + m[9] * m[3] * m[6]
+  inv[7] = m[0] * m[6] * m[11] - m[0] * m[7] * m[10] - m[4] * m[2] * m[11] +
+           m[4] * m[3] * m[10] + m[8] * m[2] * m[7] - m[8] * m[3] * m[6]
+  inv[11] = -m[0] * m[5] * m[11] + m[0] * m[7] * m[9] + m[4] * m[1] * m[11] -
+            m[4] * m[3] * m[9] - m[8] * m[1] * m[7] + m[8] * m[3] * m[5]
+  inv[15] = m[0] * m[5] * m[10] - m[0] * m[6] * m[9] - m[4] * m[1] * m[10] +
+            m[4] * m[2] * m[9] + m[8] * m[1] * m[6] - m[8] * m[2] * m[5]
+
+  let det = m[0] * inv[0] + m[1] * inv[4] + m[2] * inv[8] + m[3] * inv[12]
+  if (det === 0) {
+    console.warn('Matrix inversion failed: determinant is 0')
+    return new Float32Array(16) // Return identity-ish fallback
+  }
+
+  det = 1.0 / det
+  for (let i = 0; i < 16; i++) {
+    inv[i] *= det
+  }
+
+  return inv
 }

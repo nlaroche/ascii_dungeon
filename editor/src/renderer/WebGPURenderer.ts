@@ -7,6 +7,9 @@ import voxelShaderCode from './shaders/voxel.wgsl?raw'
 import waterShaderCode from './shaders/water.wgsl?raw'
 import skyShaderCode from './shaders/sky.wgsl?raw'
 import gridShaderCode from './shaders/grid.wgsl?raw'
+import gizmoShaderCode from './shaders/gizmo.wgsl?raw'
+import glyphShaderCode from './shaders/glyph.wgsl?raw'
+import { GizmoGeometry, type GizmoMode, type GizmoAxis } from './Gizmo'
 
 // Cube geometry data
 const CUBE_VERTICES = new Float32Array([
@@ -54,6 +57,9 @@ const CUBE_INDICES = new Uint16Array([
 
 const SHADOW_MAP_SIZE = 1024
 const MAX_INSTANCES = 10000
+const MAX_GLYPH_VERTICES = 50000  // Max vertices for all glyph meshes
+const MAX_GLYPH_INDICES = 100000  // Max indices for all glyph meshes
+const GLYPH_VERTEX_SIZE = 11 * 4  // 11 floats: pos(3) + normal(3) + color(4) + emission(1)
 
 export class WebGPURenderer {
   private device!: GPUDevice
@@ -94,6 +100,30 @@ export class WebGPURenderer {
   // Grid uniform buffer (viewProj + cameraPos)
   private gridUniformBuffer!: GPUBuffer
   private gridUniformData = new Float32Array(20) // viewProj(16) + cameraPos(4)
+
+  // Gizmo rendering
+  private _gizmoDebugLogged = false
+  private gizmoPipeline!: GPURenderPipeline
+  private gizmoUniformBuffer!: GPUBuffer
+  private gizmoUniformData = new Float32Array(20) // viewProj(16) + position(3) + scale(1)
+  private gizmoVertexBuffer!: GPUBuffer
+  private gizmoIndexBuffer!: GPUBuffer
+  private gizmoBindGroup!: GPUBindGroup
+  private gizmoGeometryCache: Map<string, { vertices: GPUBuffer; indices: GPUBuffer; indexCount: number }> = new Map()
+
+  // Wireframe rendering for selection bounds
+  private wireframePipeline!: GPURenderPipeline
+  private wireframeVertexBuffer!: GPUBuffer
+  private wireframeIndexBuffer!: GPUBuffer
+  private wireframeUniformBuffer!: GPUBuffer
+  private wireframeBindGroup!: GPUBindGroup
+
+  // Glyph mesh rendering (smooth polygon glyphs)
+  private glyphPipeline!: GPURenderPipeline
+  private glyphVertexBuffer!: GPUBuffer
+  private glyphIndexBuffer!: GPUBuffer
+  private glyphBindGroup!: GPUBindGroup
+  private glyphIndexCount = 0
 
   // Samplers
   private shadowSampler!: GPUSampler
@@ -154,6 +184,12 @@ export class WebGPURenderer {
 
     // Create pipelines
     await this.createPipelines()
+
+    // Create gizmo pipeline
+    await this.createGizmoPipeline()
+
+    // Create glyph pipeline
+    await this.createGlyphPipeline()
 
     // Create bind groups
     this.createBindGroups()
@@ -397,6 +433,189 @@ export class WebGPURenderer {
     })
   }
 
+  private async createGizmoPipeline() {
+    const gizmoModule = this.device.createShaderModule({ code: gizmoShaderCode })
+
+    // Check for shader compilation errors
+    const info = await gizmoModule.getCompilationInfo()
+    if (info.messages.length > 0) {
+      console.log('Gizmo shader compilation messages:')
+      info.messages.forEach(msg => {
+        console.log(`  [${msg.type}] ${msg.message} at line ${msg.lineNum}`)
+      })
+    }
+
+    // Create uniform buffer for gizmo
+    this.gizmoUniformBuffer = this.device.createBuffer({
+      size: this.gizmoUniformData.byteLength,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    })
+
+    // Create max-sized vertex and index buffers for gizmo geometry
+    const MAX_GIZMO_VERTICES = 2048
+    const MAX_GIZMO_INDICES = 4096
+
+    this.gizmoVertexBuffer = this.device.createBuffer({
+      size: MAX_GIZMO_VERTICES * 7 * 4, // 7 floats per vertex
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    })
+
+    this.gizmoIndexBuffer = this.device.createBuffer({
+      size: MAX_GIZMO_INDICES * 2, // 2 bytes per index
+      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+    })
+
+    // Vertex layout for gizmo (position + color)
+    const gizmoVertexLayout: GPUVertexBufferLayout = {
+      arrayStride: 7 * 4, // 7 floats: position(3) + color(4)
+      attributes: [
+        { shaderLocation: 0, offset: 0, format: 'float32x3' },  // position
+        { shaderLocation: 1, offset: 12, format: 'float32x4' }, // color
+      ],
+    }
+
+    // Gizmo pipeline
+    this.gizmoPipeline = this.device.createRenderPipeline({
+      layout: 'auto',
+      vertex: {
+        module: gizmoModule,
+        entryPoint: 'vs_main',
+        buffers: [gizmoVertexLayout],
+      },
+      fragment: {
+        module: gizmoModule,
+        entryPoint: 'fs_main',
+        targets: [{ format: this.format }],
+      },
+      primitive: {
+        topology: 'triangle-list',
+        cullMode: 'none', // Don't cull gizmo faces
+      },
+      depthStencil: {
+        format: 'depth24plus',
+        depthWriteEnabled: false,
+        depthCompare: 'less-equal',
+      },
+    })
+
+    // Wireframe uniform buffer (viewProj + model + color)
+    this.wireframeUniformBuffer = this.device.createBuffer({
+      size: (16 + 16 + 4) * 4, // viewProj(16) + modelMatrix(16) + color(4)
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+    })
+
+    // Create wireframe vertex/index buffers
+    const wireBox = GizmoGeometry.createWireframeBox()
+    this.wireframeVertexBuffer = this.device.createBuffer({
+      size: wireBox.vertices.byteLength,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    })
+    this.device.queue.writeBuffer(this.wireframeVertexBuffer, 0, wireBox.vertices)
+
+    this.wireframeIndexBuffer = this.device.createBuffer({
+      size: wireBox.indices.byteLength,
+      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+    })
+    this.device.queue.writeBuffer(this.wireframeIndexBuffer, 0, wireBox.indices)
+
+    // Wireframe pipeline (line-list)
+    this.wireframePipeline = this.device.createRenderPipeline({
+      layout: 'auto',
+      vertex: {
+        module: gizmoModule,
+        entryPoint: 'vs_wireframe',
+        buffers: [{
+          arrayStride: 12, // 3 floats: position
+          attributes: [
+            { shaderLocation: 0, offset: 0, format: 'float32x3' },
+          ],
+        }],
+      },
+      fragment: {
+        module: gizmoModule,
+        entryPoint: 'fs_wireframe',
+        targets: [{ format: this.format }],
+      },
+      primitive: {
+        topology: 'line-list',
+      },
+      depthStencil: {
+        format: 'depth24plus',
+        depthWriteEnabled: false,
+        depthCompare: 'less-equal',
+      },
+    })
+  }
+
+  private async createGlyphPipeline() {
+    const glyphModule = this.device.createShaderModule({ code: glyphShaderCode })
+
+    // Check for shader compilation errors
+    const info = await glyphModule.getCompilationInfo()
+    if (info.messages.length > 0) {
+      console.log('Glyph shader compilation messages:')
+      info.messages.forEach(msg => {
+        console.log(`  [${msg.type}] ${msg.message} at line ${msg.lineNum}`)
+      })
+    }
+
+    // Create glyph vertex buffer (dynamic, updated each frame)
+    this.glyphVertexBuffer = this.device.createBuffer({
+      size: MAX_GLYPH_VERTICES * GLYPH_VERTEX_SIZE,
+      usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
+    })
+
+    // Create glyph index buffer (dynamic, updated each frame)
+    this.glyphIndexBuffer = this.device.createBuffer({
+      size: MAX_GLYPH_INDICES * 4, // 4 bytes per index (uint32)
+      usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
+    })
+
+    // Vertex layout for glyphs: pos(3) + normal(3) + color(4) + emission(1) = 11 floats
+    const glyphVertexLayout: GPUVertexBufferLayout = {
+      arrayStride: GLYPH_VERTEX_SIZE, // 11 floats = 44 bytes
+      attributes: [
+        { shaderLocation: 0, offset: 0, format: 'float32x3' },    // position
+        { shaderLocation: 1, offset: 12, format: 'float32x3' },   // normal
+        { shaderLocation: 2, offset: 24, format: 'float32x4' },   // color
+        { shaderLocation: 3, offset: 40, format: 'float32' },     // emission
+      ],
+    }
+
+    // Bind group layout for glyph pipeline
+    const glyphBindGroupLayout = this.device.createBindGroupLayout({
+      entries: [
+        { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
+        { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'depth' } },
+        { binding: 2, visibility: GPUShaderStage.FRAGMENT, sampler: { type: 'comparison' } },
+      ],
+    })
+
+    // Glyph render pipeline
+    this.glyphPipeline = this.device.createRenderPipeline({
+      layout: this.device.createPipelineLayout({ bindGroupLayouts: [glyphBindGroupLayout] }),
+      vertex: {
+        module: glyphModule,
+        entryPoint: 'vs_main',
+        buffers: [glyphVertexLayout],
+      },
+      fragment: {
+        module: glyphModule,
+        entryPoint: 'fs_main',
+        targets: [{ format: this.format }],
+      },
+      primitive: {
+        topology: 'triangle-list',
+        cullMode: 'back',
+      },
+      depthStencil: {
+        format: 'depth24plus',
+        depthWriteEnabled: true,
+        depthCompare: 'less-equal',
+      },
+    })
+  }
+
   private createBindGroups() {
     // Main bind group
     this.mainBindGroup = this.device.createBindGroup({
@@ -434,6 +653,32 @@ export class WebGPURenderer {
       layout: this.gridPipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.gridUniformBuffer } },
+      ],
+    })
+
+    // Gizmo bind group
+    this.gizmoBindGroup = this.device.createBindGroup({
+      layout: this.gizmoPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.gizmoUniformBuffer } },
+      ],
+    })
+
+    // Wireframe bind group (uses binding 0 for its own uniforms)
+    this.wireframeBindGroup = this.device.createBindGroup({
+      layout: this.wireframePipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.wireframeUniformBuffer } },
+      ],
+    })
+
+    // Glyph bind group
+    this.glyphBindGroup = this.device.createBindGroup({
+      layout: this.glyphPipeline.getBindGroupLayout(0),
+      entries: [
+        { binding: 0, resource: { buffer: this.uniformBuffer } },
+        { binding: 1, resource: this.shadowMap.createView() },
+        { binding: 2, resource: this.shadowSampler },
       ],
     })
   }
@@ -588,12 +833,30 @@ export class WebGPURenderer {
     mainPass.setBindGroup(0, this.gridBindGroup)
     mainPass.draw(6) // Two triangles for the quad
 
-    // Draw non-water instances
+    // Draw non-water instances (voxel cubes)
     mainPass.setPipeline(this.mainPipeline)
     mainPass.setBindGroup(0, this.mainBindGroup)
     mainPass.setVertexBuffer(0, this.vertexBuffer)
     mainPass.setIndexBuffer(this.indexBuffer, 'uint16')
     mainPass.drawIndexed(36, scene.getNonWaterInstanceCount())
+
+    // Draw smooth polygon glyphs
+    if (scene.hasGlyphs()) {
+      const glyphVertexData = scene.getGlyphVertexData()
+      const glyphIndexData = scene.getGlyphIndexData()
+      this.glyphIndexCount = scene.getGlyphIndexCount()
+
+      // Update glyph buffers
+      this.device.queue.writeBuffer(this.glyphVertexBuffer, 0, glyphVertexData.buffer, glyphVertexData.byteOffset, glyphVertexData.byteLength)
+      this.device.queue.writeBuffer(this.glyphIndexBuffer, 0, glyphIndexData.buffer, glyphIndexData.byteOffset, glyphIndexData.byteLength)
+
+      // Draw glyphs
+      mainPass.setPipeline(this.glyphPipeline)
+      mainPass.setBindGroup(0, this.glyphBindGroup)
+      mainPass.setVertexBuffer(0, this.glyphVertexBuffer)
+      mainPass.setIndexBuffer(this.glyphIndexBuffer, 'uint32')
+      mainPass.drawIndexed(this.glyphIndexCount)
+    }
 
     // Draw water instances
     if (scene.getWaterInstanceCount() > 0) {
@@ -604,6 +867,177 @@ export class WebGPURenderer {
 
     mainPass.end()
 
+    this.device.queue.submit([commandEncoder.finish()])
+  }
+
+  // Render gizmo for a selected node
+  renderGizmo(
+    camera: Camera,
+    mode: GizmoMode,
+    position: [number, number, number],
+    hoveredAxis: GizmoAxis
+  ) {
+    if (!this.initialized) return
+    if (mode === 'select') {
+      // In select mode, we now show move gizmo from the viewport
+      // This check should not be hit if viewport correctly maps select -> move
+      console.warn('[Gizmo] renderGizmo called with select mode, skipping')
+      return
+    }
+
+    const viewProj = this.multiplyMatrices(
+      camera.getProjectionMatrix(this.width / this.height),
+      camera.getViewMatrix()
+    )
+
+    // Calculate screen-constant scale based on distance from camera
+    const dx = position[0] - camera.position[0]
+    const dy = position[1] - camera.position[1]
+    const dz = position[2] - camera.position[2]
+    const distance = Math.sqrt(dx * dx + dy * dy + dz * dz)
+    const gizmoScale = distance * 0.15 // Constant screen size
+
+    // Get gizmo geometry for current mode and hover state
+    const geometries = GizmoGeometry.createGizmoGeometry(mode, hoveredAxis)
+
+    // Combine all axis geometries
+    let totalVertices: number[] = []
+    let totalIndices: number[] = []
+    let vertexOffset = 0
+
+    geometries.forEach((geom) => {
+      for (let i = 0; i < geom.vertices.length; i++) {
+        totalVertices.push(geom.vertices[i])
+      }
+      for (let i = 0; i < geom.indices.length; i++) {
+        totalIndices.push(geom.indices[i] + vertexOffset)
+      }
+      vertexOffset += geom.vertices.length / 7
+    })
+
+    if (totalIndices.length === 0) {
+      console.warn('[Gizmo] No geometry generated for mode:', mode)
+      return
+    }
+
+    // Debug: log once when gizmo is rendered
+    if (!this._gizmoDebugLogged) {
+      console.log('[Gizmo] Rendering gizmo:', {
+        mode,
+        position,
+        scale: gizmoScale,
+        vertices: totalVertices.length / 7,
+        indices: totalIndices.length
+      })
+      this._gizmoDebugLogged = true
+    }
+
+    // Update buffers
+    const vertexData = new Float32Array(totalVertices)
+    const indexData = new Uint16Array(totalIndices)
+
+    this.device.queue.writeBuffer(this.gizmoVertexBuffer, 0, vertexData)
+    this.device.queue.writeBuffer(this.gizmoIndexBuffer, 0, indexData)
+
+    // Update uniforms
+    this.gizmoUniformData.set(viewProj, 0)
+    this.gizmoUniformData[16] = position[0]
+    this.gizmoUniformData[17] = position[1]
+    this.gizmoUniformData[18] = position[2]
+    this.gizmoUniformData[19] = gizmoScale
+    this.device.queue.writeBuffer(this.gizmoUniformBuffer, 0, this.gizmoUniformData)
+
+    // Render
+    const commandEncoder = this.device.createCommandEncoder()
+    const pass = commandEncoder.beginRenderPass({
+      colorAttachments: [{
+        view: this.context.getCurrentTexture().createView(),
+        loadOp: 'load', // Don't clear, draw on top
+        storeOp: 'store',
+      }],
+      depthStencilAttachment: {
+        view: this.depthTexture.createView(),
+        depthLoadOp: 'load',
+        depthStoreOp: 'store',
+      },
+    })
+
+    pass.setPipeline(this.gizmoPipeline)
+    pass.setBindGroup(0, this.gizmoBindGroup)
+    pass.setVertexBuffer(0, this.gizmoVertexBuffer)
+    pass.setIndexBuffer(this.gizmoIndexBuffer, 'uint16')
+    pass.drawIndexed(indexData.length)
+    pass.end()
+
+    this.device.queue.submit([commandEncoder.finish()])
+  }
+
+  // Render wireframe bounds for selected objects
+  renderSelectionBounds(
+    camera: Camera,
+    bounds: Array<{
+      position: [number, number, number]
+      scale: [number, number, number]
+      color?: [number, number, number, number]
+    }>
+  ) {
+    if (!this.initialized || bounds.length === 0) return
+
+    // Always refresh wireframe geometry to avoid any caching issues
+    const wireBox = GizmoGeometry.createWireframeBox()
+    this.device.queue.writeBuffer(this.wireframeVertexBuffer, 0, wireBox.vertices)
+    this.device.queue.writeBuffer(this.wireframeIndexBuffer, 0, wireBox.indices)
+
+    const viewProj = this.multiplyMatrices(
+      camera.getProjectionMatrix(this.width / this.height),
+      camera.getViewMatrix()
+    )
+
+    const commandEncoder = this.device.createCommandEncoder()
+    const pass = commandEncoder.beginRenderPass({
+      colorAttachments: [{
+        view: this.context.getCurrentTexture().createView(),
+        loadOp: 'load',
+        storeOp: 'store',
+      }],
+      depthStencilAttachment: {
+        view: this.depthTexture.createView(),
+        depthLoadOp: 'load',
+        depthStoreOp: 'store',
+      },
+    })
+
+    pass.setPipeline(this.wireframePipeline)
+    pass.setVertexBuffer(0, this.wireframeVertexBuffer)
+    pass.setIndexBuffer(this.wireframeIndexBuffer, 'uint16')
+
+    // Render each bound
+    for (const bound of bounds) {
+      const color = bound.color || [0.2, 0.8, 1.0, 1.0]
+
+      // Build model matrix (scale and translate)
+      const modelMatrix = new Float32Array(16)
+      // Column-major identity with scale and translation
+      modelMatrix[0] = bound.scale[0]
+      modelMatrix[5] = bound.scale[1]
+      modelMatrix[10] = bound.scale[2]
+      modelMatrix[12] = bound.position[0]
+      modelMatrix[13] = bound.position[1]
+      modelMatrix[14] = bound.position[2]
+      modelMatrix[15] = 1
+
+      // Update wireframe uniform buffer
+      const uniformData = new Float32Array(36) // viewProj(16) + model(16) + color(4)
+      uniformData.set(viewProj, 0)
+      uniformData.set(modelMatrix, 16)
+      uniformData.set(color, 32)
+      this.device.queue.writeBuffer(this.wireframeUniformBuffer, 0, uniformData)
+
+      pass.setBindGroup(0, this.wireframeBindGroup)
+      pass.drawIndexed(24) // 12 edges * 2 vertices
+    }
+
+    pass.end()
     this.device.queue.submit([commandEncoder.finish()])
   }
 
@@ -632,9 +1066,22 @@ export class WebGPURenderer {
     this.instanceBuffer?.destroy()
     this.uniformBuffer?.destroy()
     this.gridUniformBuffer?.destroy()
+    this.gizmoUniformBuffer?.destroy()
+    this.gizmoVertexBuffer?.destroy()
+    this.gizmoIndexBuffer?.destroy()
+    this.wireframeUniformBuffer?.destroy()
+    this.wireframeVertexBuffer?.destroy()
+    this.wireframeIndexBuffer?.destroy()
     this.depthTexture?.destroy()
     this.shadowMap?.destroy()
     this.reflectionTexture?.destroy()
     this.reflectionDepth?.destroy()
+
+    // Clear geometry cache
+    this.gizmoGeometryCache.forEach(({ vertices, indices }) => {
+      vertices.destroy()
+      indices.destroy()
+    })
+    this.gizmoGeometryCache.clear()
   }
 }

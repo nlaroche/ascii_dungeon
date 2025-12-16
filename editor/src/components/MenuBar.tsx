@@ -7,6 +7,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { useTheme, useTemplate, useEngineState, useUIScale } from '../stores/useEngineState';
 import { useProject, RecentProject } from '../hooks/useProject';
 import { AVAILABLE_TEMPLATES, getTemplate } from '../lib/templates';
+import { ModeSwitch } from './ModeSwitch';
 
 // UI Scale presets
 const UI_SCALE_PRESETS = [
@@ -26,6 +27,9 @@ const PANEL_DEFINITIONS: Record<string, { icon: string; label: string; category:
   // Core panels
   files: { icon: '○', label: 'Files', category: 'Explorer' },
   entities: { icon: '◉', label: 'Entities', category: 'Explorer' },
+  items: { icon: '◇', label: 'Items', category: 'Explorer' },
+  triggers: { icon: '▢', label: 'Triggers', category: 'Explorer' },
+  lights: { icon: '☀', label: 'Lights', category: 'Explorer' },
   assets: { icon: '◈', label: 'Assets', category: 'Explorer' },
   templates: { icon: '◇', label: 'Templates', category: 'Explorer' },
   components: { icon: '▣', label: 'Components', category: 'Explorer' },
@@ -264,6 +268,11 @@ export function MenuBar({ openPanels = [], onOpenPanel }: MenuBarProps) {
 
       {/* Right side - branding and template */}
       <div className="flex items-center gap-2 pr-2">
+        {/* Mode switch */}
+        <ModeSwitch />
+
+        <span style={{ color: theme.border }}>│</span>
+
         {/* Template indicator */}
         <div className="flex items-center gap-1.5 text-xs">
           <span style={{ color: theme.accent }}>{currentTemplate?.icon || '◇'}</span>

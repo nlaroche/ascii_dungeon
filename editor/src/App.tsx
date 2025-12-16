@@ -5,7 +5,7 @@
 
 import { useEffect, useCallback, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
-import { useEngineState, useTheme, useSelection, useEntities, useChat, useTemplate, useUIScale } from './stores/useEngineState';
+import { useEngineState, useTheme, useSelection, useNodes, useChat, useTemplate, useUIScale } from './stores/useEngineState';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { ThemeProvider } from './components/ui';
@@ -20,6 +20,10 @@ import { LuaCodeEditor } from './components/editor/LuaCodeEditor';
 import { useProject } from './hooks/useProject';
 import { FileEntry } from './lib/filesystem';
 import { getTemplate, TemplateDefinition } from './lib/templates';
+import { NodeTree } from './components/NodeTree';
+import { TypeInspector } from './components/TypeInspector';
+import { EntityCollection, ItemCollection, TypeCollectionPanel } from './components/TypeCollectionPanel';
+import { EntitiesPanel, ModeAwarePropertiesPanel } from './components/ModeAwarePanels';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main App
@@ -36,6 +40,7 @@ function App() {
 function AppContent() {
   const theme = useTheme();
   const { scale: uiScale } = useUIScale();
+  // Editor mode is handled by mode-aware components that subscribe directly
   const undo = useEngineState((s) => s.undo);
   const redo = useEngineState((s) => s.redo);
   const canUndo = useEngineState((s) => s.canUndo);
@@ -82,14 +87,29 @@ function AppContent() {
     }
   }, [dockApi]);
 
-  // Render tab content based on tab ID
+  // Render tab content based on tab ID and editor mode
   const renderTabContent = useCallback((tabId: string) => {
     switch (tabId) {
       // Core panels
       case 'files':
         return <FileTree />;
+
       case 'entities':
-        return <EntityList />;
+        // Mode-aware: shows NodeTree in Engine mode, EntityCollection in Template mode
+        return <EntitiesPanel />;
+
+      case 'items':
+        // Template Mode only: show items collection
+        return <ItemCollection />;
+
+      case 'triggers':
+        // Template Mode only: show triggers collection
+        return <TypeCollectionPanel typeName="Trigger" />;
+
+      case 'lights':
+        // Template Mode only: show lights collection
+        return <TypeCollectionPanel typeName="Light" />;
+
       case 'assets':
         return <AssetBrowser />;
       case 'templates':
@@ -109,8 +129,11 @@ function AppContent() {
         return <CodeEditor />;
       case 'chat':
         return <AIChat />;
+
       case 'properties':
-        return <PropertiesPanel />;
+        // Mode-aware: shows full properties in Engine mode, TypeInspector in Template mode
+        return <ModeAwarePropertiesPanel />;
+
       case 'console':
         return <ConsolePanel />;
 
@@ -143,7 +166,7 @@ function AppContent() {
         }
         return <div className="p-4 text-zinc-500">Unknown tab: {tabId}</div>;
     }
-  }, [currentTemplateId, handleSelectTemplate]);
+  }, [currentTemplateId, handleSelectTemplate, handlePanelSaved]);
 
   return (
     <div
@@ -1154,17 +1177,17 @@ function AIChat() {
 function PropertiesPanel() {
   const theme = useTheme();
   const { selection } = useSelection();
-  const { entities } = useEntities();
+  const { getNode } = useNodes();
 
-  const selectedEntity = entities.find((e) => selection.entities.includes(e.id));
+  const selectedNode = selection.nodes.length > 0 ? getNode(selection.nodes[0]) : null;
 
   // No selection state
-  if (!selectedEntity) {
+  if (!selectedNode) {
     return (
       <div className="h-full flex items-center justify-center p-4" style={{ color: theme.textDim }}>
         <div className="text-center">
           <div className="text-3xl mb-2">⚙</div>
-          <div className="text-xs">Select an object to inspect</div>
+          <div className="text-xs">Select a node to inspect</div>
         </div>
       </div>
     );
@@ -1172,59 +1195,91 @@ function PropertiesPanel() {
 
   return (
     <div className="h-full overflow-y-auto text-xs">
-      {/* Entity Header */}
+      {/* Node Header */}
       <div
         className="px-3 py-2 flex items-center gap-2"
         style={{ borderBottom: `1px solid ${theme.border}`, backgroundColor: theme.bgHover }}
       >
-        <span className="text-lg">{selectedEntity.glyph}</span>
+        <span className="text-lg" style={{
+          color: selectedNode.visual?.color
+            ? `rgb(${selectedNode.visual.color.map(c => c * 255).join(',')})`
+            : theme.text
+        }}>
+          {selectedNode.visual?.glyph || '○'}
+        </span>
         <div>
-          <div style={{ color: theme.text }}>{selectedEntity.name}</div>
-          <div style={{ color: theme.textDim }}>{selectedEntity.type}</div>
+          <div style={{ color: theme.text }}>{selectedNode.name}</div>
+          <div style={{ color: theme.textDim }}>{selectedNode.type}</div>
         </div>
       </div>
 
-      {/* Transform */}
-      <div className="p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
-        <div className="text-xs uppercase tracking-wider mb-2" style={{ color: theme.textMuted }}>
-          Transform
+      {/* Transform (if present) */}
+      {selectedNode.transform && (
+        <div className="p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
+          <div className="text-xs uppercase tracking-wider mb-2" style={{ color: theme.textMuted }}>
+            Transform
+          </div>
+          <div className="space-y-1.5">
+            <PropertyRow label="Position" value={selectedNode.transform.position.map((n) => n.toFixed(1)).join(', ')} />
+            <PropertyRow label="Rotation" value={selectedNode.transform.rotation.map((n) => n.toFixed(1)).join(', ')} />
+            <PropertyRow label="Scale" value={selectedNode.transform.scale.map((n) => n.toFixed(1)).join(', ')} />
+          </div>
         </div>
-        <div className="space-y-1.5">
-          <PropertyRow label="Position" value={selectedEntity.position.map((n) => n.toFixed(1)).join(', ')} />
-          <PropertyRow
-            label="Color"
-            value={
-              <div
-                className="w-4 h-4 rounded border"
-                style={{
-                  backgroundColor: `rgb(${selectedEntity.color.map((c) => c * 255).join(',')})`,
-                  borderColor: theme.border,
-                }}
-              />
-            }
-          />
+      )}
+
+      {/* Visual (if present) */}
+      {selectedNode.visual && (
+        <div className="p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
+          <div className="text-xs uppercase tracking-wider mb-2" style={{ color: theme.textMuted }}>
+            Visual
+          </div>
+          <div className="space-y-1.5">
+            {selectedNode.visual.glyph && (
+              <PropertyRow label="Glyph" value={selectedNode.visual.glyph} />
+            )}
+            <PropertyRow
+              label="Color"
+              value={
+                <div
+                  className="w-4 h-4 rounded border"
+                  style={{
+                    backgroundColor: `rgb(${selectedNode.visual.color.map((c) => c * 255).join(',')})`,
+                    borderColor: theme.border,
+                  }}
+                />
+              }
+            />
+            <PropertyRow label="Visible" value={selectedNode.visual.visible ? 'Yes' : 'No'} />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Components */}
       <div className="p-3">
         <div className="text-xs uppercase tracking-wider mb-2" style={{ color: theme.textMuted }}>
-          Components ({selectedEntity.components.length})
+          Components ({selectedNode.components.length})
         </div>
-        {selectedEntity.components.length === 0 ? (
+        {selectedNode.components.length === 0 ? (
           <div style={{ color: theme.textDim }}>No components</div>
         ) : (
           <div className="space-y-2">
-            {selectedEntity.components.map((comp) => (
+            {selectedNode.components.map((comp) => (
               <div
-                key={comp}
+                key={comp.id}
                 className="px-2 py-1.5 rounded"
-                style={{ backgroundColor: theme.bgHover }}
+                style={{ backgroundColor: theme.bgHover, opacity: comp.enabled ? 1 : 0.5 }}
               >
-                <span style={{ color: theme.accent }}>{comp}</span>
-                {selectedEntity.componentData[comp] && (
+                <div className="flex items-center justify-between">
+                  <span style={{ color: theme.accent }}>
+                    {comp.script.split('/').pop()?.replace('.lua', '')}
+                  </span>
+                  <span style={{ color: theme.textDim }}>
+                    {comp.enabled ? '●' : '○'}
+                  </span>
+                </div>
+                {Object.keys(comp.properties).length > 0 && (
                   <div className="mt-1 space-y-0.5" style={{ color: theme.textMuted }}>
-                    {Object.entries(selectedEntity.componentData[comp]).map(([k, v]) => (
+                    {Object.entries(comp.properties).map(([k, v]) => (
                       <div key={k} className="flex justify-between">
                         <span>{k}</span>
                         <span style={{ color: theme.text }}>{JSON.stringify(v)}</span>
@@ -1237,6 +1292,23 @@ function PropertiesPanel() {
           </div>
         )}
       </div>
+
+      {/* Meta (custom data) */}
+      {Object.keys(selectedNode.meta).length > 0 && (
+        <div className="p-3" style={{ borderTop: `1px solid ${theme.border}` }}>
+          <div className="text-xs uppercase tracking-wider mb-2" style={{ color: theme.textMuted }}>
+            Meta
+          </div>
+          <div className="space-y-0.5" style={{ color: theme.textMuted }}>
+            {Object.entries(selectedNode.meta).map(([k, v]) => (
+              <div key={k} className="flex justify-between">
+                <span>{k}</span>
+                <span style={{ color: theme.text }}>{JSON.stringify(v)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

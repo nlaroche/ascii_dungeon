@@ -3,9 +3,20 @@
 
 import { useRef, useCallback, useEffect, ReactNode, useMemo } from 'react';
 import DockLayout, { LayoutData, TabData, TabGroup, PanelData, BoxData } from 'rc-dock';
-import { useEngineState } from '../stores/useEngineState';
+import { useEngineState, useEditorMode } from '../stores/useEngineState';
 import { getCustomPanels, CustomPanel } from '../lib/lua/panels';
 import '../styles/dock.css';
+
+// Mode-aware tab title for entities/nodes tab
+function EntitiesTabTitle() {
+  const { isTemplateMode } = useEditorMode();
+  return (
+    <span className="dock-tab-title">
+      <span className="dock-tab-icon">{isTemplateMode ? '◉' : '○'}</span>
+      <span>{isTemplateMode ? 'Entities' : 'Nodes'}</span>
+    </span>
+  );
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // Types
@@ -31,6 +42,9 @@ const TAB_DEFINITIONS: Record<string, { icon: string; label: string }> = {
   // Core panels
   files: { icon: '○', label: 'Files' },
   entities: { icon: '◉', label: 'Entities' },
+  items: { icon: '◇', label: 'Items' },
+  triggers: { icon: '▢', label: 'Triggers' },
+  lights: { icon: '☀', label: 'Lights' },
   assets: { icon: '◈', label: 'Assets' },
   templates: { icon: '◇', label: 'Templates' },
   components: { icon: '▣', label: 'Components' },
@@ -38,7 +52,7 @@ const TAB_DEFINITIONS: Record<string, { icon: string; label: string }> = {
   scene: { icon: '▦', label: 'Scene' },
   code: { icon: '{ }', label: 'Code' },
   chat: { icon: '◆', label: 'AI Chat' },
-  notes: { icon: '📝', label: 'Note taking' },
+  notes: { icon: '✎', label: 'Note taking' },
   properties: { icon: '⚙', label: 'Properties' },
   console: { icon: '❯', label: 'Console' },
 
@@ -311,14 +325,20 @@ export function DockableLayout({ renderContent, onLayoutChange, onDockReady }: D
   const loadTab = useCallback((tab: TabData): TabData => {
     const tabId = tab.id as string;
     const def = allTabDefs[tabId] || { icon: '○', label: tabId };
+
+    // Use mode-aware title for entities tab
+    const title = tabId === 'entities' ? (
+      <EntitiesTabTitle />
+    ) : (
+      <span className="dock-tab-title">
+        <span className="dock-tab-icon">{def.icon}</span>
+        <span>{def.label}</span>
+      </span>
+    );
+
     return {
       ...tab,
-      title: (
-        <span className="dock-tab-title">
-          <span className="dock-tab-icon">{def.icon}</span>
-          <span>{def.label}</span>
-        </span>
-      ),
+      title,
       content: (
         <div className="h-full w-full overflow-auto">
           {renderContent(tabId)}

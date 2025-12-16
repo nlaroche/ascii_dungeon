@@ -60,12 +60,15 @@ export interface Layout {
   children: LayoutSlot[];
 }
 
+export type EditorMode = 'engine' | 'template';
+
 export interface UIState {
   layout: Layout;
   panels: Record<string, Panel>;
   theme: Theme;
   shortcuts: Record<string, string>;
   scale: number; // UI zoom level (0.75 = 75%, 1.0 = 100%, 1.25 = 125%, etc.)
+  editorMode: EditorMode; // Engine Mode (raw nodes) vs Template Mode (type-based views)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -148,63 +151,79 @@ export interface CameraState {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SCENE TYPES
+// NODE SYSTEM - Everything is a Node (Godot-inspired)
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface Entity {
+/**
+ * A component is a Lua script attached to a node.
+ * Components define behavior and can expose editor-editable properties.
+ */
+export interface NodeComponent {
   id: string;
-  type: string;
-  name: string;
+  script: string;           // Lua script path or inline code reference
+  enabled: boolean;
+  properties: Record<string, unknown>;  // Script-defined properties
+}
+
+/**
+ * Transform for positioned nodes (optional - not all nodes need it)
+ */
+export interface Transform {
   position: [number, number, number];
   rotation: [number, number, number];
   scale: [number, number, number];
-  glyph: string;
-  color: [number, number, number];
-  components: string[];
-  componentData: Record<string, Record<string, unknown>>;
 }
 
-export interface Light {
+/**
+ * Visual representation (optional - for rendering)
+ */
+export interface NodeVisual {
+  visible: boolean;
+  glyph?: string;           // Single character
+  sprite?: string;          // Multi-char sprite ID
+  color: [number, number, number];
+  opacity: number;
+  emission?: [number, number, number];
+  emissionPower?: number;
+}
+
+/**
+ * The core Node - everything in a scene is a node.
+ * Scenes are nodes. Entities are nodes. UI elements are nodes.
+ */
+export interface Node {
   id: string;
-  type: 'point' | 'directional' | 'spot' | 'ambient';
-  position: [number, number, number];
-  color: [number, number, number];
-  intensity: number;
-  radius: number;
-  castShadows: boolean;
-  flicker: boolean;
-  flickerSpeed: number;
-  flickerAmount: number;
+  name: string;
+  type: string;             // Categorization: 'Node', 'Node2D', 'Node3D', 'Light', 'Camera', etc.
+  children: Node[];
+  components: NodeComponent[];
+
+  // Optional features - nodes only have what they need
+  transform?: Transform;
+  visual?: NodeVisual;
+
+  // Expandable custom data
+  meta: Record<string, unknown>;
 }
 
-export interface MapCell {
-  glyph: string;
-  material: string;
-  height: number;
-  walkable: boolean;
-  blocksSight: boolean;
+/**
+ * Scene is just a root node with metadata
+ */
+export interface SceneState {
+  name: string;
+  path?: string;            // File path if saved
+  rootNode: Node;
 }
 
-export interface MapState {
-  width: number;
-  height: number;
-  cellSize: number;
-  cells: MapCell[][];
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// LEGACY TYPES (keeping for gradual migration)
+// ─────────────────────────────────────────────────────────────────────────────
 
 export interface Material {
   color: [number, number, number];
   roughness: number;
   metallic: number;
   emission: [number, number, number];
-}
-
-export interface SceneState {
-  name: string;
-  entities: Entity[];
-  lights: Light[];
-  map: MapState;
-  materials: Record<string, Material>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -238,9 +257,8 @@ export interface ProjectState {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface SelectionState {
-  entities: string[];
+  nodes: string[];         // Selected node IDs
   files: string[];
-  cells: Array<{ x: number; y: number }>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -462,6 +480,7 @@ export const INITIAL_ENGINE_STATE: EngineState = {
       'f6': 'stopGame',
     },
     scale: 1.0, // Default 100% UI scale
+    editorMode: 'engine', // Start in Engine Mode
   },
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -581,93 +600,161 @@ create shaders, spawn entities, and more.`,
   },
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Scene
+  // Scene - Node-based hierarchy (everything is a node)
   // ─────────────────────────────────────────────────────────────────────────
   scene: {
-    name: 'Untitled Scene',
-    entities: [
-      {
-        id: 'player',
-        type: 'player',
-        name: 'Player',
-        position: [5, 0, 5],
-        rotation: [0, 0, 0],
-        scale: [1, 1, 1],
-        glyph: '@',
-        color: [0.2, 0.9, 0.4],
-        components: ['Transform', 'Controller', 'Health'],
-        componentData: {
-          Health: { current: 100, max: 100 },
-          Controller: { speed: 5, jumpForce: 10 },
+    name: 'Demo Scene',
+    rootNode: {
+      id: 'root',
+      name: 'Root',
+      type: 'Node',
+      children: [
+        // World/Environment group
+        {
+          id: 'world',
+          name: 'World',
+          type: 'Node',
+          children: [
+            // Floor - generated from component
+            {
+              id: 'floor',
+              name: 'Floor',
+              type: 'Floor',
+              children: [], // Special tiles could be added here
+              components: [
+                {
+                  id: 'floor_gen',
+                  script: 'builtin:floor_generator',
+                  enabled: true,
+                  properties: {
+                    tileType: 'checkerboard',
+                    size: [21, 21],
+                    tileSize: 1,
+                    primaryColor: [0.15, 0.15, 0.18, 1],
+                    secondaryColor: [0.12, 0.12, 0.14, 1],
+                    elevation: 0,
+                  },
+                },
+              ],
+              transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+              meta: { isFloor: true },
+            },
+            {
+              id: 'light_main',
+              name: 'Main Light',
+              type: 'Light',
+              children: [],
+              components: [],
+              transform: { position: [5, 8, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
+              visual: {
+                visible: true,
+                glyph: '☀',
+                color: [1, 0.9, 0.7],
+                opacity: 1,
+                emission: [1, 0.9, 0.7],
+                emissionPower: 2,
+              },
+              meta: { lightType: 'point', intensity: 1.5, radius: 20 },
+            },
+          ],
+          components: [],
+          meta: {},
         },
-      },
-      {
-        id: 'goblin_1',
-        type: 'enemy',
-        name: 'Goblin',
-        position: [10, 0, 5],
-        rotation: [0, 0, 0],
-        scale: [1, 1, 1],
-        glyph: 'g',
-        color: [0.5, 0.7, 0.3],
-        components: ['Transform', 'AI', 'Health'],
-        componentData: {
-          Health: { current: 25, max: 25 },
-          AI: { state: 'patrol', aggroRange: 8 },
+        // Characters group
+        {
+          id: 'characters',
+          name: 'Characters',
+          type: 'Node',
+          children: [
+            {
+              id: 'player',
+              name: 'Player',
+              type: 'Node3D',
+              children: [],
+              components: [
+                { id: 'comp_1', script: 'scripts/player_controller.lua', enabled: true, properties: { speed: 5 } },
+                { id: 'comp_2', script: 'scripts/health.lua', enabled: true, properties: { max: 100, current: 100 } },
+              ],
+              transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+              visual: {
+                visible: true,
+                glyph: '@',
+                color: [0.2, 0.9, 0.4],
+                opacity: 1,
+              },
+              meta: { isPlayer: true },
+            },
+            {
+              id: 'goblin_1',
+              name: 'Goblin',
+              type: 'Node3D',
+              children: [],
+              components: [
+                { id: 'comp_3', script: 'scripts/enemy_ai.lua', enabled: true, properties: { aggroRange: 8 } },
+                { id: 'comp_4', script: 'scripts/health.lua', enabled: true, properties: { max: 25, current: 25 } },
+              ],
+              transform: { position: [3, 0, 2], rotation: [0, 0, 0], scale: [1, 1, 1] },
+              visual: {
+                visible: true,
+                glyph: 'g',
+                color: [0.5, 0.7, 0.3],
+                opacity: 1,
+              },
+              meta: { faction: 'enemy' },
+            },
+          ],
+          components: [],
+          meta: {},
         },
-      },
-    ],
-    lights: [
-      {
-        id: 'torch_1',
-        type: 'point',
-        position: [8, 3, 10],
-        color: [1, 0.6, 0.3],
-        intensity: 1.2,
-        radius: 15,
-        castShadows: true,
-        flicker: true,
-        flickerSpeed: 8,
-        flickerAmount: 0.15,
-      },
-      {
-        id: 'ambient',
-        type: 'ambient',
-        position: [0, 0, 0],
-        color: [0.4, 0.4, 0.5],
-        intensity: 0.1,
-        radius: 0,
-        castShadows: false,
-        flicker: false,
-        flickerSpeed: 0,
-        flickerAmount: 0,
-      },
-    ],
-    map: {
-      width: 40,
-      height: 30,
-      cellSize: 1,
-      cells: [],
-    },
-    materials: {
-      stone: {
-        color: [0.35, 0.32, 0.3],
-        roughness: 0.9,
-        metallic: 0,
-        emission: [0, 0, 0],
-      },
-      floor: {
-        color: [0.25, 0.25, 0.28],
-        roughness: 0.7,
-        metallic: 0,
-        emission: [0, 0, 0],
-      },
-      grass: {
-        color: [0.3, 0.5, 0.25],
-        roughness: 0.85,
-        metallic: 0,
-        emission: [0, 0, 0],
-      },
+        // Props group
+        {
+          id: 'props',
+          name: 'Props',
+          type: 'Node',
+          children: [
+            {
+              id: 'torch_1',
+              name: 'Torch',
+              type: 'Light',
+              children: [],
+              components: [
+                { id: 'comp_5', script: 'scripts/flicker.lua', enabled: true, properties: { speed: 8, amount: 0.15 } },
+              ],
+              transform: { position: [-2, 1.5, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
+              visual: {
+                visible: true,
+                glyph: '¥',
+                color: [1, 0.6, 0.3],
+                opacity: 1,
+                emission: [1, 0.6, 0.3],
+                emissionPower: 1.2,
+              },
+              meta: { lightType: 'point', intensity: 1.2, radius: 8 },
+            },
+            {
+              id: 'chest_1',
+              name: 'Treasure Chest',
+              type: 'Node3D',
+              children: [],
+              components: [
+                { id: 'comp_6', script: 'scripts/interactable.lua', enabled: true, properties: { action: 'open' } },
+              ],
+              transform: { position: [4, 0, -1], rotation: [0, 0, 0], scale: [1, 1, 1] },
+              visual: {
+                visible: true,
+                glyph: '▣',
+                color: [0.7, 0.5, 0.2],
+                opacity: 1,
+              },
+              meta: { contains: ['gold', 'potion'] },
+            },
+          ],
+          components: [],
+          meta: {},
+        },
+      ],
+      components: [],
+      meta: {},
     },
   },
 
@@ -691,9 +778,8 @@ create shaders, spawn entities, and more.`,
   // Selection
   // ─────────────────────────────────────────────────────────────────────────
   selection: {
-    entities: [],
+    nodes: [],
     files: [],
-    cells: [],
   },
 
   // ─────────────────────────────────────────────────────────────────────────
