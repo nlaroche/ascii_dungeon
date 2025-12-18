@@ -181,7 +181,7 @@ export class SceneSystem extends EngineSystem {
     const childIndex = path[path.length - 1]
 
     // Get parent
-    let basePath = ['scene', 'rootNode']
+    let basePath: (string | number)[] = ['scene', 'rootNode']
     for (const index of parentPath) {
       basePath = [...basePath, 'children', index]
     }

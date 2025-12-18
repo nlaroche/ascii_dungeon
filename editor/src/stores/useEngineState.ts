@@ -263,6 +263,173 @@ export function syncTreeToEntities(rootNode: Node): EntityMaps {
   return { nodes, components, nodeOrder };
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Auto-Size Calculation for Parent Nodes
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface Rect2DBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Get Rect2D bounds from a node (from its Rect2D component)
+ */
+function getNodeRect2D(node: Node): Rect2DBounds | null {
+  const rect2D = node.components.find(c => c.script === 'Rect2D');
+  if (!rect2D) return null;
+
+  return {
+    x: (rect2D.properties?.x as number) || 0,
+    y: (rect2D.properties?.y as number) || 0,
+    width: (rect2D.properties?.width as number) || 1,
+    height: (rect2D.properties?.height as number) || 1,
+  };
+}
+
+/**
+ * Calculate the bounding box that encompasses all children of a node
+ * Returns null if no children have Rect2D components
+ */
+function calculateChildrenBounds(node: Node): Rect2DBounds | null {
+  if (node.children.length === 0) return null;
+
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  let hasChildBounds = false;
+
+  for (const child of node.children) {
+    // Skip hidden children
+    if (child.meta?.visible === false) continue;
+
+    const childRect = getNodeRect2D(child);
+    if (childRect) {
+      hasChildBounds = true;
+      minX = Math.min(minX, childRect.x);
+      minY = Math.min(minY, childRect.y);
+      maxX = Math.max(maxX, childRect.x + childRect.width);
+      maxY = Math.max(maxY, childRect.y + childRect.height);
+    }
+  }
+
+  if (!hasChildBounds) return null;
+
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY,
+  };
+}
+
+/**
+ * Recalculate auto-sized nodes in the tree.
+ * Nodes with autoSize: true in their Rect2D will have their SIZE
+ * updated to encompass all children plus padding.
+ * POSITION (x, y) is NOT affected by autoSize - user can move the node freely.
+ * Returns a new tree with updated nodes (immutable).
+ */
+export function recalculateAutoSizeNodes(node: Node): Node {
+  // First, recursively process children (bottom-up calculation)
+  const updatedChildren = node.children.map(child => recalculateAutoSizeNodes(child));
+
+  // Create updated node with processed children
+  let updatedNode = { ...node, children: updatedChildren };
+
+  // Check if this node has autoSize enabled
+  const rect2DIdx = updatedNode.components.findIndex(c => c.script === 'Rect2D');
+  if (rect2DIdx === -1) return updatedNode;
+
+  const rect2D = updatedNode.components[rect2DIdx];
+  const autoSize = rect2D.properties?.autoSize as boolean;
+
+  if (!autoSize) return updatedNode;
+
+  // Calculate children bounds (in local coordinates relative to this node)
+  const childrenBounds = calculateChildrenBounds(updatedNode);
+  if (!childrenBounds) return updatedNode;
+
+  // Get padding
+  const paddingX = (rect2D.properties?.paddingX as number) || 0;
+  const paddingY = (rect2D.properties?.paddingY as number) || 0;
+
+  // Calculate new SIZE based on children bounds
+  // Position is NOT changed - only width and height are auto-calculated
+  // Size must encompass all children, including those at negative positions
+  const minChildX = childrenBounds.x;
+  const minChildY = childrenBounds.y;
+  const maxChildX = childrenBounds.x + childrenBounds.width;
+  const maxChildY = childrenBounds.y + childrenBounds.height;
+
+  // Width/height must cover from min(0, minChild) to max(0, maxChild)
+  // This ensures children at negative positions are included
+  const newWidth = Math.max(0, maxChildX) - Math.min(0, minChildX) + paddingX * 2;
+  const newHeight = Math.max(0, maxChildY) - Math.min(0, minChildY) + paddingY * 2;
+
+  // Only update if size actually changed
+  const currentWidth = (rect2D.properties?.width as number) || 1;
+  const currentHeight = (rect2D.properties?.height as number) || 1;
+
+  if (newWidth === currentWidth && newHeight === currentHeight) {
+    return updatedNode;
+  }
+
+  // Update the Rect2D component with new SIZE only
+  // Position (x, y) remains unchanged - user can move the node freely
+  const updatedComponents = [...updatedNode.components];
+  updatedComponents[rect2DIdx] = {
+    ...rect2D,
+    properties: {
+      ...rect2D.properties,
+      width: newWidth,
+      height: newHeight,
+    },
+  };
+
+  // Also update the GlyphMap/GlyphImage cells to match new size if present
+  const glyphMapIdx = updatedComponents.findIndex(c => c.script === 'GlyphMap' || c.script === 'GlyphImage');
+  if (glyphMapIdx !== -1) {
+    const glyphMap = updatedComponents[glyphMapIdx];
+    const oldCells = (glyphMap.properties?.cells as string) || '';
+    const lines = oldCells.split('\n');
+
+    // Resize cells array to match new dimensions
+    const newLines: string[] = [];
+    for (let row = 0; row < newHeight; row++) {
+      if (row < lines.length) {
+        // Existing row - pad or trim to width
+        let line = lines[row];
+        if (line.length < newWidth) {
+          line = line + '.'.repeat(newWidth - line.length);
+        } else if (line.length > newWidth) {
+          line = line.substring(0, newWidth);
+        }
+        newLines.push(line);
+      } else {
+        // New row - fill with dots
+        newLines.push('.'.repeat(newWidth));
+      }
+    }
+
+    updatedComponents[glyphMapIdx] = {
+      ...glyphMap,
+      properties: {
+        ...glyphMap.properties,
+        cells: newLines.join('\n'),
+      },
+    };
+  }
+
+  return {
+    ...updatedNode,
+    components: updatedComponents,
+  };
+}
+
 /**
  * Build tree node from normalized entities (for backwards compatibility)
  */
@@ -914,14 +1081,34 @@ export const useEngineState = create<EngineStateStore>()(
 // Automatically sync entities when tree changes
 // ─────────────────────────────────────────────────────────────────────────────
 
-// Subscribe to rootNode changes and sync entities
+// Subscribe to rootNode changes, recalculate auto-sized nodes, and sync entities
 useEngineState.subscribe(
   (state) => state.scene.rootNode,
   (rootNode, prevRootNode) => {
     if (rootNode !== prevRootNode) {
       // Defer sync to avoid recursive updates during setPath
       queueMicrotask(() => {
-        useEngineState.getState().syncEntitiesFromTree();
+        const state = useEngineState.getState();
+
+        // Recalculate auto-sized nodes (parents that resize based on children)
+        const recalculatedRoot = recalculateAutoSizeNodes(rootNode);
+
+        // If auto-size calculation changed the tree, update it
+        // Use a simple JSON comparison to detect changes
+        if (JSON.stringify(recalculatedRoot) !== JSON.stringify(rootNode)) {
+          // Update the root node without triggering infinite recursion
+          // We set directly to avoid another subscription trigger
+          useEngineState.setState((s) => ({
+            ...s,
+            scene: {
+              ...s.scene,
+              rootNode: recalculatedRoot,
+            },
+          }));
+        }
+
+        // Sync entities from tree
+        state.syncEntitiesFromTree();
       });
     }
   }
@@ -937,6 +1124,15 @@ useEngineState.subscribe(
     }
   }
 );
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Initial Entity Sync
+// Sync entities from tree on module load to ensure consistency
+// ─────────────────────────────────────────────────────────────────────────────
+queueMicrotask(() => {
+  console.log('[useEngineState] Initial entity sync from rootNode...');
+  useEngineState.getState().syncEntitiesFromTree();
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Convenience hooks
@@ -1048,7 +1244,7 @@ export function useSelection() {
 // Node Tree Utilities
 // ─────────────────────────────────────────────────────────────────────────────
 
-import type { Node } from './engineState';
+// Note: Node type is already imported at the top of the file
 
 /**
  * Find a node by ID in the tree (recursive)
@@ -1390,15 +1586,22 @@ export function useNodes() {
   // Check if clipboard has nodes
   const hasClipboard = (): boolean => nodeClipboard.length > 0;
 
-  // Create a new empty node
+  // Create a new empty node with Rect2D component
   const createNode = (parentId: string, name: string = 'New Node'): Node => {
+    const nodeId = `node_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
     const newNode: Node = {
-      id: `node_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`,
+      id: nodeId,
       name,
       type: 'Node',
       children: [],
-      components: [],
-      transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
+      components: [
+        {
+          id: `${nodeId}_rect2d`,
+          script: 'Rect2D',
+          enabled: true,
+          properties: { x: 0, y: 0, width: 1, height: 1 }
+        }
+      ],
       meta: {},
     };
     addNode(parentId, newNode);
@@ -1408,6 +1611,24 @@ export function useNodes() {
   // Rename a node
   const renameNode = (id: string, newName: string): void => {
     updateNode(id, { name: newName });
+  };
+
+  // Toggle node visibility - uses meta.visible for all nodes
+  const toggleVisibility = (id: string): void => {
+    const node = getNode(id);
+    if (!node) return;
+
+    // Get current visibility - check meta.visible (default to true if not set)
+    const currentVisible = node.meta?.visible !== false;
+
+    // Update the meta.visible property
+    const nodePath = getNodePath(id);
+    if (!nodePath) return;
+
+    const pathPrefix = ['scene', 'rootNode', ...nodePath.flatMap((i) => ['children', i])];
+
+    // Use meta.visible for all node types
+    setPath([...pathPrefix, 'meta', 'visible'], !currentVisible, `${currentVisible ? 'Hide' : 'Show'} ${node.name}`);
   };
 
   return {
@@ -1437,6 +1658,7 @@ export function useNodes() {
     hasClipboard,
     createNode,
     renameNode,
+    toggleVisibility,
     setPath,
   };
 }
@@ -2179,5 +2401,38 @@ export function useEnvironment() {
     setFogDensity,
     setFogRange,
     setTimeOfDay,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// useAscii - ASCII rendering settings hook
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function useAscii() {
+  const ascii = useEngineState((state) => state.ascii);
+  const setPath = useEngineState((state) => state.setPath);
+
+  const setPalette = (palette: string) => {
+    setPath(['ascii', 'palette'], palette, `Set palette: ${palette}`);
+  };
+
+  const setFontSize = (size: number) => {
+    setPath(['ascii', 'fontSize'], Math.max(8, Math.min(32, size)), 'Set font size');
+  };
+
+  const setAnimate = (animate: boolean) => {
+    setPath(['ascii', 'animate'], animate, `${animate ? 'Enable' : 'Disable'} animation`);
+  };
+
+  const setAnimationSpeed = (speed: number) => {
+    setPath(['ascii', 'animationSpeed'], Math.max(0.1, Math.min(3, speed)), 'Set animation speed');
+  };
+
+  return {
+    ...ascii,
+    setPalette,
+    setFontSize,
+    setAnimate,
+    setAnimationSpeed,
   };
 }

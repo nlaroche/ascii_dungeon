@@ -20,6 +20,7 @@ export {
   useRenderPipeline,
   useLighting,
   useEnvironment,
+  useAscii,
   // Helper functions
   generateId,
   syncTreeToEntities,
@@ -62,6 +63,7 @@ export type {
   Conversation,
   HistoryEntry,
   Diff,
+  AsciiSettings,
 } from './engineState';
 
 export { INITIAL_ENGINE_STATE } from './engineState';

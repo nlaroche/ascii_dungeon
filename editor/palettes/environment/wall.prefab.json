@@ -1,0 +1,37 @@
+{
+  "name": "Wall",
+  "description": "A solid wall block",
+  "tags": ["terrain", "solid", "blocking"],
+  "template": {
+    "id": "template_wall",
+    "name": "Wall",
+    "type": "Node2D",
+    "children": [],
+    "components": [
+      {
+        "id": "comp_rect",
+        "script": "Rect2D",
+        "enabled": true,
+        "properties": {
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1
+        }
+      },
+      {
+        "id": "comp_glyph",
+        "script": "Glyph",
+        "enabled": true,
+        "properties": {
+          "char": "#",
+          "fg": [0.5, 0.4, 0.35],
+          "bg": [0.2, 0.15, 0.1]
+        }
+      }
+    ],
+    "meta": {
+      "visible": true
+    }
+  }
+}

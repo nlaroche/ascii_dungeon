@@ -2,14 +2,21 @@
 // Built-in Components - Export all standard engine components
 // ═══════════════════════════════════════════════════════════════════════════
 
-export { TransformComponent } from './TransformComponent'
-export { VisualComponent } from './VisualComponent'
-export { HealthComponent } from './HealthComponent'
-export { LightComponent } from './LightComponent'
-export { FloorGeneratorComponent } from './FloorGeneratorComponent'
+// Core rendering
+export { AsciiComponent } from './AsciiComponent'
+export { GlyphComponent } from './GlyphComponent'
+export { TerrainComponent } from './TerrainComponent'
+
+// Animation
+export { AnimatorComponent } from './AnimatorComponent'
+
+// Physics/Collision
+export { ColliderComponent } from './ColliderComponent'
+export type { ColliderType } from './ColliderComponent'
+
+// Behavior
 export { InteractableComponent } from './InteractableComponent'
-export { AIComponent } from './AIComponent'
-export { PlayerControllerComponent } from './PlayerControllerComponent'
+export type { InteractionType } from './InteractableComponent'
 
 // Re-export decorators for convenience
 export {

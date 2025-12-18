@@ -1,0 +1,37 @@
+{
+  "name": "Goblin",
+  "description": "A hostile goblin enemy",
+  "tags": ["enemy", "hostile", "monster"],
+  "template": {
+    "id": "template_goblin",
+    "name": "Goblin",
+    "type": "Node2D",
+    "children": [],
+    "components": [
+      {
+        "id": "comp_rect",
+        "script": "Rect2D",
+        "enabled": true,
+        "properties": {
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1
+        }
+      },
+      {
+        "id": "comp_glyph",
+        "script": "Glyph",
+        "enabled": true,
+        "properties": {
+          "char": "g",
+          "fg": [0.5, 0.7, 0.3],
+          "bg": [0, 0, 0]
+        }
+      }
+    ],
+    "meta": {
+      "visible": true
+    }
+  }
+}

@@ -350,7 +350,7 @@ function MenuDropdown({ items, onClose }: MenuDropdownProps) {
                 }
               }}
               disabled={item.disabled}
-              className="w-full h-7 px-3 text-left flex items-center justify-between transition-colors rounded text-xs"
+              className="w-full h-7 px-3 text-left flex items-center justify-between transition-colors rounded text-xs whitespace-nowrap"
               style={{
                 backgroundColor: 'transparent',
                 color: item.disabled ? theme.textDim : theme.text,
@@ -404,7 +404,7 @@ function MenuDropdown({ items, onClose }: MenuDropdownProps) {
                         }
                       }}
                       disabled={subitem.disabled}
-                      className="w-full h-7 px-3 text-left flex items-center transition-colors rounded text-xs"
+                      className="w-full h-7 px-3 text-left flex items-center transition-colors rounded text-xs whitespace-nowrap"
                       style={{
                         backgroundColor: 'transparent',
                         color: subitem.disabled ? theme.textDim : theme.text,

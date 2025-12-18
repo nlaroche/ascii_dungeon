@@ -40,7 +40,7 @@ export function serializeComponent(component: Component): SerializedComponent {
 
   // Get all properties defined with decorators
   for (const [key, _options] of metadata.properties) {
-    properties[key] = (component as Record<string, unknown>)[key]
+    properties[key] = (component as unknown as Record<string, unknown>)[key]
   }
 
   return {
@@ -66,7 +66,7 @@ export function deserializeComponent(data: SerializedComponent): Component | nul
   // Apply properties
   for (const [key, value] of Object.entries(data.properties)) {
     if (key in instance) {
-      (instance as Record<string, unknown>)[key] = value
+      (instance as unknown as Record<string, unknown>)[key] = value
     }
   }
 
@@ -171,7 +171,7 @@ export function addComponentToNode(
   if (initialProps) {
     for (const [key, value] of Object.entries(initialProps)) {
       if (key in instance) {
-        (instance as Record<string, unknown>)[key] = value
+        (instance as unknown as Record<string, unknown>)[key] = value
       }
     }
   }

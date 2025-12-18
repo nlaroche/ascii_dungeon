@@ -5,8 +5,9 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use std::process::Stdio;
 use std::path::PathBuf;
+use std::collections::HashMap;
 use tokio::process::Command;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -768,6 +769,172 @@ impl Default for FileWatcherState {
     }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// FLOATING PANEL WINDOWS
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// State for tracking floating panel windows
+pub struct FloatingWindowsState {
+    /// Map of tab_id -> window_label
+    windows: HashMap<String, String>,
+}
+
+impl Default for FloatingWindowsState {
+    fn default() -> Self {
+        Self {
+            windows: HashMap::new(),
+        }
+    }
+}
+
+/// Result of creating a floating window
+#[derive(Debug, Clone, Serialize)]
+pub struct FloatingWindowResult {
+    pub window_label: String,
+    pub tab_id: String,
+}
+
+/// Create a new floating window for a panel
+#[tauri::command]
+pub async fn create_floating_window(
+    app: AppHandle,
+    floating_state: State<'_, Mutex<FloatingWindowsState>>,
+    tab_id: String,
+    title: String,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> Result<FloatingWindowResult, String> {
+    let window_label = format!("float_{}", tab_id);
+
+    println!("[FloatingWindow] Creating window '{}' for tab '{}' at ({}, {}) size {}x{}",
+             window_label, tab_id, x, y, width, height);
+
+    // Check if window already exists
+    if app.get_webview_window(&window_label).is_some() {
+        return Err(format!("Floating window for tab '{}' already exists", tab_id));
+    }
+
+    // Build the URL with tab_id as query param so the window knows what to render
+    let url = format!("index.html?floating_panel={}", tab_id);
+
+    // Create the window
+    let window = WebviewWindowBuilder::new(
+        &app,
+        &window_label,
+        WebviewUrl::App(url.into()),
+    )
+    .title(&title)
+    .inner_size(width as f64, height as f64)
+    .position(x as f64, y as f64)
+    .decorations(true)
+    .resizable(true)
+    .visible(true)
+    .build()
+    .map_err(|e| format!("Failed to create floating window: {}", e))?;
+
+    // Track the window
+    {
+        let mut state = floating_state.lock().map_err(|e| e.to_string())?;
+        state.windows.insert(tab_id.clone(), window_label.clone());
+    }
+
+    // Listen for window close to emit redock event
+    let app_for_close = app.clone();
+    let tab_id_for_close = tab_id.clone();
+    let window_label_for_close = window_label.clone();
+    window.on_window_event(move |event| {
+        if let tauri::WindowEvent::CloseRequested { .. } = event {
+            println!("[FloatingWindow] Window '{}' close requested, emitting redock", window_label_for_close);
+            // Emit redock event to main window
+            let _ = app_for_close.emit("floating-panel-redock", serde_json::json!({
+                "tab_id": tab_id_for_close,
+                "x": 0,
+                "y": 0,
+            }));
+        }
+    });
+
+    println!("[FloatingWindow] Window '{}' created successfully", window_label);
+
+    Ok(FloatingWindowResult {
+        window_label,
+        tab_id,
+    })
+}
+
+/// Close a floating window and optionally get data to re-dock it
+#[tauri::command]
+pub async fn close_floating_window(
+    app: AppHandle,
+    floating_state: State<'_, Mutex<FloatingWindowsState>>,
+    tab_id: String,
+) -> Result<(), String> {
+    let window_label = format!("float_{}", tab_id);
+
+    println!("[FloatingWindow] Closing window '{}' for tab '{}'", window_label, tab_id);
+
+    // Remove from tracking
+    {
+        let mut state = floating_state.lock().map_err(|e| e.to_string())?;
+        state.windows.remove(&tab_id);
+    }
+
+    // Close the window if it exists
+    if let Some(window) = app.get_webview_window(&window_label) {
+        window.close().map_err(|e| format!("Failed to close window: {}", e))?;
+    }
+
+    Ok(())
+}
+
+/// Get current position and size of a floating window (for re-docking)
+#[tauri::command]
+pub async fn get_floating_window_bounds(
+    app: AppHandle,
+    tab_id: String,
+) -> Result<(i32, i32, u32, u32), String> {
+    let window_label = format!("float_{}", tab_id);
+
+    let window = app.get_webview_window(&window_label)
+        .ok_or_else(|| format!("Floating window '{}' not found", window_label))?;
+
+    let position = window.outer_position()
+        .map_err(|e| format!("Failed to get window position: {}", e))?;
+    let size = window.outer_size()
+        .map_err(|e| format!("Failed to get window size: {}", e))?;
+
+    Ok((position.x, position.y, size.width, size.height))
+}
+
+/// List all floating windows
+#[tauri::command]
+pub async fn list_floating_windows(
+    floating_state: State<'_, Mutex<FloatingWindowsState>>,
+) -> Result<Vec<String>, String> {
+    let state = floating_state.lock().map_err(|e| e.to_string())?;
+    Ok(state.windows.keys().cloned().collect())
+}
+
+/// Notify main window that a floating panel wants to re-dock
+#[tauri::command]
+pub async fn request_redock(
+    app: AppHandle,
+    tab_id: String,
+    x: i32,
+    y: i32,
+) -> Result<(), String> {
+    // Emit event to main window so it can handle the re-dock
+    app.emit("floating-panel-redock", json!({
+        "tab_id": tab_id,
+        "x": x,
+        "y": y,
+    })).map_err(|e| format!("Failed to emit redock event: {}", e))?;
+
+    Ok(())
+}
+
 /// Start watching a directory for file changes
 #[tauri::command]
 pub async fn start_file_watcher(
@@ -846,5 +1013,249 @@ pub async fn stop_file_watcher(
     state.watched_path = None;
 
     println!("[FileWatcher] Watcher stopped");
+    Ok(())
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PALETTE / PREFAB FILE SYSTEM
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Category metadata (from _category.json files)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CategoryMeta {
+    pub name: String,
+    #[serde(default)]
+    pub icon: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// A scanned category with its contents
+#[derive(Debug, Clone, Serialize)]
+pub struct ScannedCategory {
+    pub id: String,
+    pub path: String,
+    pub name: String,
+    pub icon: Option<String>,
+    pub children: Vec<String>,  // Child category IDs
+    pub prefabs: Vec<String>,   // Prefab file paths (relative to palette root)
+}
+
+/// Result of scanning a palette folder
+#[derive(Debug, Clone, Serialize)]
+pub struct PaletteScanResult {
+    pub categories: Vec<ScannedCategory>,
+    pub root_categories: Vec<String>,
+}
+
+/// Scan a palette folder recursively and return its structure
+#[tauri::command]
+pub async fn scan_palette_folder(path: String) -> Result<PaletteScanResult, String> {
+    let palette_path = PathBuf::from(&path);
+
+    if !palette_path.exists() {
+        return Err(format!("Palette folder does not exist: {}", path));
+    }
+
+    if !palette_path.is_dir() {
+        return Err(format!("Path is not a directory: {}", path));
+    }
+
+    println!("[Palette] Scanning folder: {}", path);
+
+    let mut categories: Vec<ScannedCategory> = Vec::new();
+    let mut root_categories: Vec<String> = Vec::new();
+
+    // Recursively scan directories
+    fn scan_dir(
+        dir_path: &PathBuf,
+        palette_root: &PathBuf,
+        parent_id: Option<&str>,
+        categories: &mut Vec<ScannedCategory>,
+    ) -> Result<String, String> {
+        let relative_path = dir_path.strip_prefix(palette_root)
+            .map_err(|e| e.to_string())?;
+
+        // Create category ID from relative path
+        let category_id = if relative_path.as_os_str().is_empty() {
+            "root".to_string()
+        } else {
+            relative_path.to_string_lossy().replace("\\", "/").replace("/", "_")
+        };
+
+        // Try to read _category.json for metadata
+        let meta_path = dir_path.join("_category.json");
+        let (name, icon) = if meta_path.exists() {
+            match std::fs::read_to_string(&meta_path) {
+                Ok(content) => {
+                    match serde_json::from_str::<CategoryMeta>(&content) {
+                        Ok(meta) => (meta.name, meta.icon),
+                        Err(_) => (dir_path.file_name()
+                            .map(|n| n.to_string_lossy().to_string())
+                            .unwrap_or_else(|| category_id.clone()), None),
+                    }
+                }
+                Err(_) => (dir_path.file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| category_id.clone()), None),
+            }
+        } else {
+            (dir_path.file_name()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| category_id.clone()), None)
+        };
+
+        let mut children: Vec<String> = Vec::new();
+        let mut prefabs: Vec<String> = Vec::new();
+
+        // Scan directory contents
+        let entries = std::fs::read_dir(dir_path)
+            .map_err(|e| format!("Failed to read directory: {}", e))?;
+
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let entry_path = entry.path();
+            let file_name = entry.file_name().to_string_lossy().to_string();
+
+            // Skip hidden files and _category.json
+            if file_name.starts_with('.') || file_name.starts_with('_') {
+                continue;
+            }
+
+            if entry_path.is_dir() {
+                // Recursively scan subdirectory
+                let child_id = scan_dir(&entry_path, palette_root, Some(&category_id), categories)?;
+                children.push(child_id);
+            } else if file_name.ends_with(".prefab.json") {
+                // Found a prefab file
+                let prefab_path = entry_path.strip_prefix(palette_root)
+                    .map_err(|e| e.to_string())?
+                    .to_string_lossy()
+                    .replace("\\", "/");
+                prefabs.push(prefab_path);
+            }
+        }
+
+        // Add this category
+        categories.push(ScannedCategory {
+            id: category_id.clone(),
+            path: dir_path.to_string_lossy().to_string(),
+            name,
+            icon,
+            children,
+            prefabs,
+        });
+
+        Ok(category_id)
+    }
+
+    // Scan top-level directories (not the root itself)
+    let entries = std::fs::read_dir(&palette_path)
+        .map_err(|e| format!("Failed to read palette folder: {}", e))?;
+
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let entry_path = entry.path();
+        let file_name = entry.file_name().to_string_lossy().to_string();
+
+        // Skip hidden files
+        if file_name.starts_with('.') || file_name.starts_with('_') {
+            continue;
+        }
+
+        if entry_path.is_dir() {
+            let category_id = scan_dir(&entry_path, &palette_path, None, &mut categories)?;
+            root_categories.push(category_id);
+        }
+    }
+
+    println!("[Palette] Found {} categories, {} root categories",
+             categories.len(), root_categories.len());
+
+    Ok(PaletteScanResult {
+        categories,
+        root_categories,
+    })
+}
+
+/// Read a prefab file
+#[tauri::command]
+pub async fn read_prefab_file(path: String) -> Result<Value, String> {
+    let prefab_path = PathBuf::from(&path);
+
+    if !prefab_path.exists() {
+        return Err(format!("Prefab file does not exist: {}", path));
+    }
+
+    let content = std::fs::read_to_string(&prefab_path)
+        .map_err(|e| format!("Failed to read prefab file: {}", e))?;
+
+    let prefab: Value = serde_json::from_str(&content)
+        .map_err(|e| format!("Failed to parse prefab JSON: {}", e))?;
+
+    Ok(prefab)
+}
+
+/// Write a prefab file
+#[tauri::command]
+pub async fn write_prefab_file(path: String, prefab: Value) -> Result<(), String> {
+    let prefab_path = PathBuf::from(&path);
+
+    // Ensure parent directory exists
+    if let Some(parent) = prefab_path.parent() {
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+
+    let content = serde_json::to_string_pretty(&prefab)
+        .map_err(|e| format!("Failed to serialize prefab: {}", e))?;
+
+    std::fs::write(&prefab_path, content)
+        .map_err(|e| format!("Failed to write prefab file: {}", e))?;
+
+    println!("[Palette] Wrote prefab file: {}", path);
+    Ok(())
+}
+
+/// Delete a prefab file
+#[tauri::command]
+pub async fn delete_prefab_file(path: String) -> Result<(), String> {
+    let prefab_path = PathBuf::from(&path);
+
+    if !prefab_path.exists() {
+        return Err(format!("Prefab file does not exist: {}", path));
+    }
+
+    std::fs::remove_file(&prefab_path)
+        .map_err(|e| format!("Failed to delete prefab file: {}", e))?;
+
+    println!("[Palette] Deleted prefab file: {}", path);
+    Ok(())
+}
+
+/// Create a new category folder
+#[tauri::command]
+pub async fn create_category_folder(path: String, name: String, icon: Option<String>) -> Result<(), String> {
+    let folder_path = PathBuf::from(&path);
+
+    // Create the folder
+    std::fs::create_dir_all(&folder_path)
+        .map_err(|e| format!("Failed to create folder: {}", e))?;
+
+    // Create _category.json with metadata
+    let meta = CategoryMeta {
+        name,
+        icon,
+        description: None,
+    };
+
+    let meta_path = folder_path.join("_category.json");
+    let content = serde_json::to_string_pretty(&meta)
+        .map_err(|e| format!("Failed to serialize category metadata: {}", e))?;
+
+    std::fs::write(&meta_path, content)
+        .map_err(|e| format!("Failed to write category metadata: {}", e))?;
+
+    println!("[Palette] Created category folder: {}", path);
     Ok(())
 }

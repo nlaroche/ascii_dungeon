@@ -1,0 +1,37 @@
+{
+  "name": "House 1",
+  "tags": [],
+  "template": {
+    "children": [],
+    "components": [
+      {
+        "enabled": true,
+        "id": "house1_rect",
+        "properties": {
+          "autoSize": false,
+          "height": 5,
+          "paddingX": 0,
+          "paddingY": 0,
+          "pivotX": 0,
+          "pivotY": 0,
+          "width": 7,
+          "x": 3,
+          "y": 3
+        },
+        "script": "Rect2D"
+      },
+      {
+        "enabled": true,
+        "id": "house1_glyphmap",
+        "properties": {
+          "cells": "#######\n#.....#\n#.....#\n#..+..#\n#######"
+        },
+        "script": "GlyphMap"
+      }
+    ],
+    "id": "prefab_template_house1",
+    "meta": {},
+    "name": "House 1",
+    "type": "GlyphMapNode"
+  }
+}

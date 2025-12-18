@@ -549,8 +549,12 @@ export class Scene {
         this.generateFloorTiles(node.id, floorComp.properties as FloorConfig)
       }
 
+      // Check for tilemap with meta.cells (ASCII grid)
+      if (node.type === 'tilemap' && node.meta?.cells) {
+        this.renderTilemap(node.id, node.meta as unknown as TilemapMeta, worldTransform)
+      }
       // Only render nodes that have both transform and visual properties
-      if (node.transform && node.visual && node.visual.visible) {
+      else if (node.transform && node.visual && node.visual.visible) {
         const [px, py, pz] = worldTransform.position
         const [sx, sy, sz] = worldTransform.scale
         const [r, g, b] = node.visual.color
@@ -606,11 +610,7 @@ export class Scene {
       processNode(child, identityTransform)
     }
 
-    // If no floor node with component exists, add default floor
-    const hasFloorNode = this.hasFloorGenerated()
-    if (!hasFloorNode) {
-      this.generateDefaultFloor()
-    }
+    // No default floor - everything comes from nodes
   }
 
   // Check if floor has been generated
@@ -646,55 +646,26 @@ export class Scene {
         }
 
         this.addVoxel(x * tileSize, elevation, z * tileSize, color, tileSize, 0.1, tileSize, 0, VoxelFlags.NONE)
-        // Floor tiles tracked but with lower priority (floor nodeId or special marker)
         this.trackInstance(nodeId, [x * tileSize, elevation, z * tileSize], [tileSize, 0.1, tileSize])
       }
     }
-
-    // Add test cubes at various heights to demonstrate shadows
-    const floorY = elevation + 0.05 // Just above floor surface
-    const cubeColor: [number, number, number, number] = [0.5, 0.4, 0.35, 1]
-
-    // Tall pillar to cast long shadow
-    this.addVoxel(-4, floorY + 1.5, -4, cubeColor, 1, 3, 1, 0, VoxelFlags.NONE)
-
-    // Medium blocks scattered around
-    this.addVoxel(4, floorY + 0.75, 3, cubeColor, 1.5, 1.5, 1.5, 0, VoxelFlags.NONE)
-    this.addVoxel(-3, floorY + 0.5, 5, cubeColor, 1, 1, 1, 0, VoxelFlags.NONE)
-    this.addVoxel(6, floorY + 0.4, -3, cubeColor, 0.8, 0.8, 0.8, 0, VoxelFlags.NONE)
-
-    // Small scattered blocks
-    this.addVoxel(-6, floorY + 0.25, 1, cubeColor, 0.5, 0.5, 0.5, 0, VoxelFlags.NONE)
-    this.addVoxel(2, floorY + 0.3, -6, cubeColor, 0.6, 0.6, 0.6, 0, VoxelFlags.NONE)
-    this.addVoxel(0, floorY + 0.6, 0, cubeColor, 1.2, 1.2, 1.2, 0, VoxelFlags.NONE)
   }
 
   // Generate default floor (when no floor node exists)
+  // Just a simple ground plane - no test objects
   private generateDefaultFloor() {
     this.floorGenerated = true
-    const groundColor: [number, number, number, number] = [0.15, 0.15, 0.18, 1]
-    const altColor: [number, number, number, number] = [0.17, 0.17, 0.20, 1]
+    const groundColor: [number, number, number, number] = [0.12, 0.12, 0.14, 1]
+    const altColor: [number, number, number, number] = [0.14, 0.14, 0.16, 1]
 
-    for (let x = -10; x <= 10; x++) {
-      for (let z = -10; z <= 10; z++) {
+    // Darker floor for ASCII dungeon style
+    for (let x = -15; x <= 15; x++) {
+      for (let z = -15; z <= 15; z++) {
         const isEven = (x + z) % 2 === 0
         const color = isEven ? groundColor : altColor
         this.addVoxel(x, -0.5, z, color, 1, 0.1, 1, 0, VoxelFlags.NONE)
       }
     }
-
-    // Add some test cubes at various heights to demonstrate shadows
-    const cubeColor: [number, number, number, number] = [0.4, 0.35, 0.3, 1]
-    // Tall pillar
-    this.addVoxel(-3, 0.5, -3, cubeColor, 1, 2, 1, 0, VoxelFlags.NONE)
-    this.addVoxel(-3, 2.5, -3, cubeColor, 1, 2, 1, 0, VoxelFlags.NONE)
-    // Medium blocks
-    this.addVoxel(3, 0.5, 2, cubeColor, 1.5, 1.5, 1.5, 0, VoxelFlags.NONE)
-    this.addVoxel(-2, 0.25, 4, cubeColor, 1, 0.8, 1, 0, VoxelFlags.NONE)
-    // Small scattered blocks
-    this.addVoxel(5, 0.15, -2, cubeColor, 0.6, 0.6, 0.6, 0, VoxelFlags.NONE)
-    this.addVoxel(-5, 0.2, 0, cubeColor, 0.7, 0.7, 0.7, 0, VoxelFlags.NONE)
-    this.addVoxel(0, 0.4, -5, cubeColor, 1, 1.2, 1, 0, VoxelFlags.NONE)
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -716,7 +687,7 @@ export class Scene {
       nodeOrder: state.entities.nodeOrder,
     }
     this.cachedEntities = initialEntities
-    this.cachedSelectedNodes = state.selection.selectedNodeIds
+    this.cachedSelectedNodes = state.selection.nodes
     this.needsRebuild = true
 
     // Subscribe to entity changes
@@ -786,6 +757,7 @@ export class Scene {
    */
   buildFromEntities(entities: EntityMaps, selectedNodes: string[] = []) {
     this.clear()
+    console.log(`[Scene] Building from ${entities.nodeOrder.length} nodes:`, entities.nodeOrder)
 
     // Process nodes in depth-first order (parents before children)
     // This ensures transforms are computed correctly
@@ -872,8 +844,15 @@ export class Scene {
         this.generateFloorTiles(nodeId, floorComp.properties as FloorConfig)
       }
 
-      // Only render nodes with transform and visual
-      if (node.transform && node.visual && node.visual.visible) {
+      // Check for tilemap with meta.cells (ASCII grid)
+      if (node.type === 'tilemap' && node.meta?.cells) {
+        console.log(`[Scene] Found tilemap node: ${nodeId}, type=${node.type}, has cells=${!!node.meta?.cells}`)
+        this.renderTilemap(nodeId, node.meta as unknown as TilemapMeta, worldTransform)
+      } else if (node.type === 'tilemap') {
+        console.log(`[Scene] Tilemap node ${nodeId} missing cells:`, node.meta)
+      }
+      // Render nodes with transform and visual (glyphs, entities)
+      else if (node.transform && node.visual && node.visual.visible) {
         const [px, py, pz] = worldTransform.position
         const [sx, sy, sz] = worldTransform.scale
         const [r, g, b] = node.visual.color
@@ -909,9 +888,60 @@ export class Scene {
       }
     }
 
-    // Add default floor if needed
-    if (!this.hasFloorGenerated()) {
-      this.generateDefaultFloor()
+    // No default floor - everything comes from nodes
+  }
+
+  // Render a tilemap node (ASCII grid stored in meta.cells)
+  private renderTilemap(
+    nodeId: string,
+    meta: TilemapMeta,
+    worldTransform: { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] }
+  ) {
+    const cells = meta.cells as string
+    const palette = meta.palette as Record<string, [number, number, number]> || {}
+    const lines = cells.split('\n')
+
+    console.log(`[TileMap] Rendering tilemap '${nodeId}': ${lines.length} rows, ${lines[0]?.length || 0} cols`)
+
+    const [ox, oy, oz] = worldTransform.position
+    const [sx, sy, sz] = worldTransform.scale
+
+    // Default colors for common characters
+    const defaultColors: Record<string, [number, number, number]> = {
+      '#': [0.5, 0.4, 0.35],   // Wall
+      '.': [0.3, 0.3, 0.3],    // Floor
+      '+': [0.6, 0.5, 0.3],    // Door
+      ' ': [0.1, 0.1, 0.1],    // Empty
+    }
+
+    // Tilemap glyphs are rotated -90 degrees around X to lie flat on ground
+    // This makes them visible from both top-down (2D) and isometric (3D) views
+    const tilemapRotation: [number, number, number] = [
+      -90 + worldTransform.rotation[0],
+      worldTransform.rotation[1],
+      worldTransform.rotation[2]
+    ]
+
+    for (let row = 0; row < lines.length; row++) {
+      const line = lines[row]
+      for (let col = 0; col < line.length; col++) {
+        const char = line[col]
+        if (char === ' ') continue  // Skip empty spaces
+
+        // Get color from palette or defaults
+        const color = palette[char] || defaultColors[char] || [0.5, 0.5, 0.5]
+
+        // Calculate world position (x = column, z = row)
+        const px = ox + col * sx
+        const py = oy
+        const pz = oz + row * sz
+
+        // Render glyph lying flat on ground
+        this.addGlyph(char, px, py, pz, [...color, 1], sx, sz, sy, tilemapRotation, 0)
+
+        // Track for picking - bounds are now horizontal
+        this.trackInstance(nodeId, [px, py, pz], [sx, 0.1, sz])
+      }
     }
   }
 
@@ -931,4 +961,10 @@ interface FloorConfig {
   primaryColor?: [number, number, number, number]
   secondaryColor?: [number, number, number, number]
   elevation?: number
+}
+
+// Tilemap node metadata
+interface TilemapMeta {
+  cells: string  // Multi-line ASCII art string
+  palette?: Record<string, [number, number, number]>  // Character → RGB color mapping
 }

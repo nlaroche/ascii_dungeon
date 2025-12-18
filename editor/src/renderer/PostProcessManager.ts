@@ -30,9 +30,19 @@ interface EffectPipeline {
 interface EffectConfig {
   shader: string
   uniformSize: number // in floats (must be multiple of 4 for alignment)
-  getUniforms: (effect: PostEffect, time: number) => Float32Array
+  getUniforms: (effect: EffectProps, time: number) => Float32Array
   needsDepth?: boolean
 }
+
+// Helper type for effect properties - all numbers/arrays with unknown fallback
+type EffectProps = Record<string, number | number[] | string | boolean | undefined>
+
+// Helper to get number from effect property
+const num = (val: unknown, def: number): number =>
+  typeof val === 'number' ? val : def
+
+const arr3 = (val: unknown, def: [number, number, number]): [number, number, number] =>
+  Array.isArray(val) && val.length >= 3 ? [val[0], val[1], val[2]] : def
 
 // Effect configurations
 const EFFECT_CONFIGS: Record<string, EffectConfig> = {
@@ -41,9 +51,9 @@ const EFFECT_CONFIGS: Record<string, EffectConfig> = {
     uniformSize: 4, // threshold, intensity, radius, _pad
     getUniforms: (effect, _time) => {
       return new Float32Array([
-        effect.threshold ?? 0.8,
-        effect.intensity ?? 1.0,
-        effect.radius ?? 4,
+        num(effect.threshold, 0.8),
+        num(effect.intensity, 1.0),
+        num(effect.radius, 4),
         0, // padding
       ])
     },
@@ -56,12 +66,12 @@ const EFFECT_CONFIGS: Record<string, EffectConfig> = {
       const tonemapMap: Record<string, number> = { none: 0, reinhard: 1, aces: 2, filmic: 3 }
       const tonemapping = typeof effect.tonemapping === 'string'
         ? (tonemapMap[effect.tonemapping] ?? 1)
-        : (effect.tonemapping ?? 1)
+        : num(effect.tonemapping, 1)
       return new Float32Array([
-        effect.exposure ?? 1.0,
-        effect.contrast ?? 1.0,
-        effect.saturation ?? 1.0,
-        effect.gamma ?? 2.2,
+        num(effect.exposure, 1.0),
+        num(effect.contrast, 1.0),
+        num(effect.saturation, 1.0),
+        num(effect.gamma, 2.2),
         tonemapping,
         0, 0, 0, // padding
       ])
@@ -72,9 +82,9 @@ const EFFECT_CONFIGS: Record<string, EffectConfig> = {
     uniformSize: 4, // intensity, smoothness, roundness, _pad
     getUniforms: (effect, _time) => {
       return new Float32Array([
-        effect.intensity ?? 0.5,
-        effect.smoothness ?? 0.5,
-        effect.roundness ?? 0.5,
+        num(effect.intensity, 0.5),
+        num(effect.smoothness, 0.5),
+        num(effect.roundness, 0.5),
         0, // padding
       ])
     },
@@ -84,14 +94,14 @@ const EFFECT_CONFIGS: Record<string, EffectConfig> = {
     uniformSize: 12, // color(3), density, start, end, heightFalloff, fogType, near, far, _pad x2
     needsDepth: true,
     getUniforms: (effect, _time) => {
-      const color = effect.color ?? [0.5, 0.5, 0.6]
+      const color = arr3(effect.color, [0.5, 0.5, 0.6])
       return new Float32Array([
         color[0], color[1], color[2],
-        effect.density ?? 0.02,
-        effect.start ?? 10,
-        effect.end ?? 100,
-        effect.heightFalloff ?? 0.5,
-        effect.fogType ?? 1, // 0=linear, 1=exp, 2=exp2
+        num(effect.density, 0.02),
+        num(effect.start, 10),
+        num(effect.end, 100),
+        num(effect.heightFalloff, 0.5),
+        num(effect.fogType, 1), // 0=linear, 1=exp, 2=exp2
         0.1, // near - TODO: get from camera
         500, // far - TODO: get from camera
         0, 0, // padding
@@ -103,9 +113,9 @@ const EFFECT_CONFIGS: Record<string, EffectConfig> = {
     uniformSize: 4, // intensity, time, luminanceInfluence, _pad
     getUniforms: (effect, time) => {
       return new Float32Array([
-        effect.intensity ?? 0.1,
+        num(effect.intensity, 0.1),
         time,
-        effect.luminanceInfluence ?? 0.5,
+        num(effect.luminanceInfluence, 0.5),
         0, // padding
       ])
     },
@@ -115,7 +125,7 @@ const EFFECT_CONFIGS: Record<string, EffectConfig> = {
     uniformSize: 4, // intensity, _pad x3
     getUniforms: (effect, _time) => {
       return new Float32Array([
-        effect.intensity ?? 0.01,
+        num(effect.intensity, 0.01),
         0, 0, 0, // padding
       ])
     },
@@ -128,7 +138,7 @@ const EFFECT_CONFIGS: Record<string, EffectConfig> = {
       const qualityMap: Record<string, number> = { low: 0, medium: 1, high: 2 }
       const quality = typeof effect.quality === 'string'
         ? (qualityMap[effect.quality] ?? 1)
-        : (effect.quality ?? 1)
+        : num(effect.quality, 1)
       return new Float32Array([
         quality,
         0, 0, 0, // padding
@@ -140,7 +150,7 @@ const EFFECT_CONFIGS: Record<string, EffectConfig> = {
     uniformSize: 4, // pixelSize, _pad x3
     getUniforms: (effect, _time) => {
       return new Float32Array([
-        effect.pixelSize ?? 4,
+        num(effect.pixelSize, 4),
         0, 0, 0, // padding
       ])
     },
@@ -150,7 +160,7 @@ const EFFECT_CONFIGS: Record<string, EffectConfig> = {
     uniformSize: 4, // intensity, _pad x3
     getUniforms: (effect, _time) => {
       return new Float32Array([
-        effect.intensity ?? 0.5,
+        num(effect.intensity, 0.5),
         0, 0, 0, // padding
       ])
     },
@@ -159,11 +169,12 @@ const EFFECT_CONFIGS: Record<string, EffectConfig> = {
     shader: outlineShader,
     uniformSize: 8, // color (4), thickness, _pad x3
     getUniforms: (effect, _time) => {
-      const color = effect.color ?? [0, 0, 0, 1]
+      const color = Array.isArray(effect.color) && effect.color.length >= 4
+        ? effect.color : [0, 0, 0, 1]
       return new Float32Array([
         // vec4f comes first for proper 16-byte alignment
-        color[0] ?? 0, color[1] ?? 0, color[2] ?? 0, color[3] ?? 1,
-        effect.thickness ?? 1,
+        num(color[0], 0), num(color[1], 0), num(color[2], 0), num(color[3], 1),
+        num(effect.thickness, 1),
         0, 0, 0, // padding
       ])
     },
@@ -174,10 +185,10 @@ const EFFECT_CONFIGS: Record<string, EffectConfig> = {
     needsDepth: true,
     getUniforms: (effect, _time) => {
       return new Float32Array([
-        effect.radius ?? 0.5,
-        effect.bias ?? 0.025,
-        effect.intensity ?? 1.0,
-        effect.samples ?? 16,
+        num(effect.radius, 0.5),
+        num(effect.bias, 0.025),
+        num(effect.intensity, 1.0),
+        num(effect.samples, 16),
         0.1, // near - TODO: get from camera
         500, // far - TODO: get from camera
         0, 0, // padding
@@ -514,8 +525,8 @@ export class PostProcessManager {
     }
 
     // Update uniform buffer
-    const uniforms = config.getUniforms(effect, time)
-    this.device.queue.writeBuffer(effectPipeline.uniformBuffer, 0, uniforms)
+    const uniforms = config.getUniforms(effect as unknown as EffectProps, time)
+    this.device.queue.writeBuffer(effectPipeline.uniformBuffer, 0, uniforms as unknown as BufferSource)
 
     // Create bind group entries
     const entries: GPUBindGroupEntry[] = [

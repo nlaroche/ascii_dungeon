@@ -5,7 +5,7 @@
 
 import { useEffect, useCallback, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
-import { useEngineState, useTheme, useSelection, useNodes, useChat, useTemplate, useUIScale } from './stores/useEngineState';
+import { useEngineState, useTheme, useChat, useTemplate, useUIScale } from './stores/useEngineState';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { ThemeProvider } from './components/ui';
@@ -13,29 +13,152 @@ import { DockableLayout, DockAPI } from './components/DockLayout';
 import { WebGPUViewport } from './components/WebGPUViewport';
 import { MenuBar } from './components/MenuBar';
 import { TemplateBrowser } from './components/TemplateBrowser';
-import { ComponentBrowser } from './components/ComponentBrowser';
-import { CustomPanelView } from './components/CustomPanel';
 import { NodeEditor } from './components/nodes/NodeEditor';
-import { LuaCodeEditor } from './components/editor/LuaCodeEditor';
 import { useProject } from './hooks/useProject';
 import { FileEntry } from './lib/filesystem';
 import { getTemplate, TemplateDefinition } from './lib/templates';
-import { NodeTree } from './components/NodeTree';
-import { TypeInspector } from './components/TypeInspector';
-import { EntityCollection, ItemCollection, TypeCollectionPanel } from './components/TypeCollectionPanel';
+import { ItemCollection, TypeCollectionPanel } from './components/TypeCollectionPanel';
 import { EntitiesPanel, ModeAwarePropertiesPanel } from './components/ModeAwarePanels';
 import { RenderPipelinePanel } from './components/render';
+import { PalettePanel } from './components/PalettePanel';
+import { DragOverlay } from './components/DragOverlay';
+import { getFloatingPanelId, isFloatingPanelWindow, isTauri } from './stores/useFloatingWindows';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main App
 // ─────────────────────────────────────────────────────────────────────────────
 
 function App() {
+  // Check if this is a floating panel window
+  const floatingPanelId = getFloatingPanelId()
+
+  if (floatingPanelId) {
+    // This is a floating panel window - render only the panel content
+    return (
+      <ThemeProvider>
+        <FloatingPanelApp tabId={floatingPanelId} />
+      </ThemeProvider>
+    )
+  }
+
+  // Main application window
   return (
     <ThemeProvider>
       <AppContent />
     </ThemeProvider>
   );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Floating Panel App - Rendered in child windows
+// ─────────────────────────────────────────────────────────────────────────────
+
+function FloatingPanelApp({ tabId }: { tabId: string }) {
+  const theme = useTheme()
+
+  // Render content for the specific panel
+  const content = useFloatingPanelContent(tabId)
+
+  // Handle re-dock button
+  const handleRedock = async () => {
+    if (!isTauri()) return
+    try {
+      // Get current window position
+      const [x, y] = await invoke<[number, number, number, number]>('get_floating_window_bounds', { tabId })
+      // Request redock at current position
+      await invoke('request_redock', { tabId, x, y })
+      // Close this window
+      await invoke('close_floating_window', { tabId })
+    } catch (error) {
+      console.error('[FloatingPanel] Failed to redock:', error)
+    }
+  }
+
+  return (
+    <div
+      className="h-screen flex flex-col text-sm overflow-hidden"
+      style={{
+        backgroundColor: theme.bg,
+        color: theme.text,
+        fontFamily: 'ui-monospace, "SF Mono", Menlo, Monaco, "Cascadia Mono", monospace',
+      }}
+    >
+      {/* Minimal header with redock button */}
+      <div
+        className="h-7 flex items-center justify-between px-2 shrink-0 select-none"
+        style={{ backgroundColor: theme.bgHover, borderBottom: `1px solid ${theme.border}` }}
+        data-tauri-drag-region
+      >
+        <span className="text-xs" style={{ color: theme.textMuted }}>{tabId}</span>
+        <button
+          onClick={handleRedock}
+          className="px-2 py-0.5 rounded text-xs transition-colors"
+          style={{ backgroundColor: theme.bgPanel, color: theme.textMuted }}
+          title="Re-dock this panel"
+        >
+          Dock
+        </button>
+      </div>
+
+      {/* Panel content */}
+      <div className="flex-1 overflow-auto">
+        {content}
+      </div>
+    </div>
+  )
+}
+
+// Hook to get the content renderer for a floating panel
+function useFloatingPanelContent(tabId: string) {
+  const { currentId: currentTemplateId } = useTemplate()
+
+  const handleSelectTemplate = useCallback((template: TemplateDefinition) => {
+    // Template selection from floating window - needs to communicate back to main
+    console.log('[FloatingPanel] Template selected:', template.id)
+  }, [])
+
+  // This mirrors the renderTabContent logic from AppContent
+  switch (tabId) {
+    case 'files':
+      return <FileTree />
+    case 'entities':
+      return <EntitiesPanel />
+    case 'items':
+      return <ItemCollection />
+    case 'triggers':
+      return <TypeCollectionPanel typeName="Trigger" />
+    case 'lights':
+      return <TypeCollectionPanel typeName="Light" />
+    case 'assets':
+      return <AssetBrowser />
+    case 'palette':
+      return <PalettePanel />
+    case 'templates':
+      return (
+        <TemplateBrowser
+          currentTemplateId={currentTemplateId || undefined}
+          onSelectTemplate={handleSelectTemplate}
+        />
+      )
+    case 'components':
+      return <TemplatePlaceholder icon="▣" title="Components" description="Browse and manage TypeScript components" />
+    case 'node-editor':
+      return <NodeEditor />
+    case 'scene':
+      return <SceneView />
+    case 'code':
+      return <CodeEditor />
+    case 'chat':
+      return <AIChat />
+    case 'properties':
+      return <ModeAwarePropertiesPanel />
+    case 'console':
+      return <ConsolePanel />
+    case 'render':
+      return <RenderPipelinePanel />
+    default:
+      return <div className="p-4 text-zinc-500">Unknown panel: {tabId}</div>
+  }
 }
 
 function AppContent() {
@@ -80,13 +203,6 @@ function AppContent() {
   // Dock API for adding custom panel tabs
   const [dockApi, setDockApi] = useState<DockAPI | null>(null);
 
-  const handlePanelSaved = useCallback((panelId: string) => {
-    console.log('[App] Panel saved:', panelId);
-    // Add the new panel as a floating tab
-    if (dockApi) {
-      dockApi.addTab(panelId);
-    }
-  }, [dockApi]);
 
   // Render tab content based on tab ID and editor mode
   const renderTabContent = useCallback((tabId: string) => {
@@ -113,6 +229,8 @@ function AppContent() {
 
       case 'assets':
         return <AssetBrowser />;
+      case 'palette':
+        return <PalettePanel />;
       case 'templates':
         return (
           <TemplateBrowser
@@ -121,7 +239,7 @@ function AppContent() {
           />
         );
       case 'components':
-        return <ComponentBrowser onPanelSaved={handlePanelSaved} />;
+        return <TemplatePlaceholder icon="▣" title="Components" description="Browse and manage TypeScript components" />;
       case 'node-editor':
         return <NodeEditor />;
       case 'scene':
@@ -164,13 +282,9 @@ function AppContent() {
         return <TemplatePlaceholder icon="👁" title="Preview" description="Preview your visual novel in action" />;
 
       default:
-        // Check if it's a custom panel
-        if (tabId.startsWith('custom-')) {
-          return <CustomPanelView panelId={tabId} />;
-        }
         return <div className="p-4 text-zinc-500">Unknown tab: {tabId}</div>;
     }
-  }, [currentTemplateId, handleSelectTemplate, handlePanelSaved]);
+  }, [currentTemplateId, handleSelectTemplate]);
 
   return (
     <div
@@ -207,6 +321,9 @@ function AppContent() {
           <StatusBar />
         </div>
       </div>
+
+      {/* Drag overlay - follows cursor when dragging prefabs */}
+      <DragOverlay />
     </div>
   );
 }
@@ -352,52 +469,6 @@ function FileTree() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Entity List
-// ─────────────────────────────────────────────────────────────────────────────
-
-function EntityList() {
-  const theme = useTheme();
-  const { entities } = useEntities();
-  const { selection, selectEntity } = useSelection();
-
-  const getEntityColor = (type: string) => {
-    switch (type) {
-      case 'player': return theme.success;
-      case 'enemy': return theme.error;
-      default: return theme.warning;
-    }
-  };
-
-  return (
-    <div className="h-full overflow-y-auto">
-      {entities.map((entity) => (
-        <div
-          key={entity.id}
-          onClick={() => selectEntity(entity.id)}
-          className="px-3 py-2 cursor-pointer transition-colors"
-          style={{
-            backgroundColor: selection.entities.includes(entity.id) ? theme.bgHover : 'transparent',
-            borderBottom: `1px solid ${theme.border}50`,
-          }}
-        >
-          <div className="flex items-center justify-between">
-            <span style={{ color: getEntityColor(entity.type) }} className="font-medium">
-              {entity.glyph} {entity.name}
-            </span>
-            <span className="text-xs" style={{ color: theme.textDim }}>
-              {entity.type}
-            </span>
-          </div>
-          <div className="text-xs mt-0.5" style={{ color: theme.textMuted }}>
-            pos: {entity.position.map((n) => n.toFixed(0)).join(', ')}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Asset Browser
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -420,8 +491,57 @@ function AssetBrowser() {
 
 function SceneView() {
   const theme = useTheme();
-  const tools = useEngineState((s) => s.tools);
   const setPath = useEngineState((s) => s.setPath);
+
+  // 2D editor state
+  const tool2D = useEngineState((s) => s.editor2D?.tool || 'pointer');
+  const showGrid = useEngineState((s) => s.editor2D?.showGrid ?? true);
+  const zoom = useEngineState((s) => s.editor2D?.zoom ?? 100);
+
+  // Force 2D mode on mount
+  useEffect(() => {
+    setPath(['camera', 'mode'], '2d', 'Initialize 2D mode');
+  }, [setPath]);
+
+  // Tool definitions with colors
+  const tools = [
+    { id: 'pointer', label: 'Pointer', icon: '↖', color: '#4fc3f7' },  // Light blue
+    { id: 'select', label: 'Select', icon: '▢', color: '#81c784' },    // Green
+    { id: 'draw', label: 'Draw', icon: '✎', color: '#ffb74d' },        // Orange
+    { id: 'erase', label: 'Erase', icon: '⌫', color: '#e57373' },      // Red
+  ];
+
+  const currentTool = tools.find(t => t.id === tool2D);
+
+  // Get hovered node name from state
+  const hoveredNodeId = useEngineState((s) => s.editor2D?.hoveredNode);
+  const selectedGlyph = useEngineState((s) => s.editor2D?.selectedGlyph || '@');
+  const nodes = useEngineState((s) => s.scene.rootNode?.children || []);
+
+  const findNodeName = (id: string | null): string | null => {
+    if (!id) return null;
+    const findInNodes = (nodeList: typeof nodes): string | null => {
+      for (const node of nodeList) {
+        if (node.id === id) return node.name;
+        if (node.children) {
+          const found = findInNodes(node.children);
+          if (found) return found;
+        }
+      }
+      return null;
+    };
+    return findInNodes(nodes);
+  };
+
+  const hoveredNodeName = findNodeName(hoveredNodeId || null);
+
+  // Context info based on tool
+  const getContextInfo = () => {
+    if (tool2D === 'draw') return `Drawing: ${selectedGlyph}`;
+    if (tool2D === 'erase') return 'Erasing';
+    if (hoveredNodeName) return hoveredNodeName;
+    return null;
+  };
 
   return (
     <div className="h-full flex flex-col">
@@ -430,30 +550,114 @@ function SceneView() {
         className="h-10 flex items-center gap-2 px-3 shrink-0"
         style={{ borderBottom: `1px solid ${theme.border}` }}
       >
+        {/* Tool selector */}
         <div
-          className="flex items-center gap-1 rounded p-0.5"
+          className="flex items-center gap-0.5 rounded p-0.5"
           style={{ backgroundColor: theme.bgHover }}
         >
-          {Object.values(tools.available)
-            .filter((t) => ['select', 'paint', 'erase', 'spawn'].includes(t.id))
-            .map((tool) => (
+          {tools.map((tool) => {
+            const isActive = tool2D === tool.id;
+            return (
               <button
                 key={tool.id}
-                onClick={() => setPath(['tools', 'active'], tool.id, `Select ${tool.name} tool`)}
-                className="px-2 py-1 rounded text-xs transition-colors"
+                onClick={() => setPath(['editor2D', 'tool'], tool.id, `Switch to ${tool.label} tool`)}
+                className="px-2 py-1 rounded text-sm transition-all"
                 style={{
-                  backgroundColor: tools.active === tool.id ? theme.accent : 'transparent',
-                  color: tools.active === tool.id ? theme.bg : theme.textMuted,
+                  backgroundColor: isActive ? `${tool.color}20` : 'transparent',
+                  color: isActive ? tool.color : theme.textMuted,
+                  border: `1px solid ${isActive ? tool.color : 'transparent'}`,
+                  textShadow: isActive ? `0 0 8px ${tool.color}60` : 'none',
                 }}
-                title={`${tool.name} (${tool.shortcut})`}
+                title={tool.label}
               >
                 {tool.icon}
               </button>
-            ))}
+            );
+          })}
+        </div>
+
+        {/* Current tool name and context */}
+        <div className="flex items-center gap-2 text-xs">
+          <span style={{ color: currentTool?.color, fontWeight: 500 }}>
+            {currentTool?.label}
+          </span>
+          {getContextInfo() && (
+            <>
+              <span style={{ color: theme.textDim }}>·</span>
+              <span style={{ color: theme.textMuted }}>{getContextInfo()}</span>
+            </>
+          )}
+        </div>
+
+        <div className="w-px h-5" style={{ backgroundColor: theme.border }} />
+
+        {/* Grid toggle */}
+        <button
+          onClick={() => setPath(['editor2D', 'showGrid'], !showGrid, showGrid ? 'Hide grid' : 'Show grid')}
+          className="px-2 py-1 rounded text-xs transition-colors flex items-center gap-1"
+          style={{
+            backgroundColor: showGrid ? theme.bgHover : 'transparent',
+            color: showGrid ? theme.text : theme.textDim,
+          }}
+          title="Toggle grid visibility"
+        >
+          <span style={{ fontSize: '10px' }}>▦</span>
+          Grid
+        </button>
+
+        <div className="flex-1" />
+
+        {/* Zoom controls */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setPath(['editor2D', 'zoom'], Math.max(25, zoom - 25), 'Zoom out')}
+            className="w-6 h-6 rounded text-xs transition-colors flex items-center justify-center"
+            style={{ backgroundColor: theme.bgHover, color: theme.textMuted }}
+            title="Zoom out"
+          >
+            −
+          </button>
+          <input
+            type="range"
+            min="25"
+            max="400"
+            step="25"
+            value={zoom}
+            onChange={(e) => setPath(['editor2D', 'zoom'], parseInt(e.target.value), 'Set zoom')}
+            className="w-20 h-1 rounded appearance-none cursor-pointer"
+            style={{ backgroundColor: theme.border }}
+          />
+          <button
+            onClick={() => setPath(['editor2D', 'zoom'], Math.min(400, zoom + 25), 'Zoom in')}
+            className="w-6 h-6 rounded text-xs transition-colors flex items-center justify-center"
+            style={{ backgroundColor: theme.bgHover, color: theme.textMuted }}
+            title="Zoom in"
+          >
+            +
+          </button>
+          <button
+            onClick={() => setPath(['editor2D', 'zoom'], 100, 'Reset zoom to 100%')}
+            className="px-2 py-1 rounded text-xs transition-colors min-w-[45px]"
+            style={{
+              backgroundColor: zoom === 100 ? theme.accent : theme.bgHover,
+              color: zoom === 100 ? theme.bg : theme.textMuted,
+            }}
+            title="Reset zoom to 100%"
+          >
+            {zoom}%
+          </button>
+          <button
+            onClick={() => setPath(['editor2D', 'recenterTimestamp'], Date.now(), 'Recenter view')}
+            className="px-2 py-1 rounded text-xs transition-colors"
+            style={{ backgroundColor: theme.bgHover, color: theme.textMuted }}
+            title="Recenter on content (Home)"
+          >
+            ⌂
+          </button>
         </div>
       </div>
 
-      {/* WebGPU Viewport */}
+      {/* WebGPU Viewport - 2D only */}
       <div className="flex-1 relative min-h-0">
         <WebGPUViewport className="absolute inset-0" />
       </div>
@@ -537,52 +741,10 @@ function CodeEditor() {
     }
   };
 
-  const isLuaFile = selectedFile?.endsWith('.lua');
   const fileName = selectedFile?.split('/').pop();
   const dirName = selectedFile?.split('/').slice(-2, -1)[0];
 
-  // If it's a Lua file, use our fancy LuaCodeEditor with preview
-  if (selectedFile && isLuaFile) {
-    return (
-      <div className="h-full flex flex-col">
-        {/* File header */}
-        <div
-          className="h-8 flex items-center justify-between px-3 shrink-0"
-          style={{ borderBottom: `1px solid ${theme.border}` }}
-        >
-          <div className="flex items-center gap-2 text-xs">
-            <span style={{ color: theme.textDim }}>{dirName}/</span>
-            <span style={{ color: theme.text }}>{fileName}</span>
-            {isDirty && <span style={{ color: theme.warning }}>●</span>}
-          </div>
-          <button
-            onClick={handleSave}
-            disabled={!isDirty}
-            className="px-2 py-0.5 rounded text-xs"
-            style={{
-              backgroundColor: isDirty ? theme.accent : theme.bgHover,
-              color: isDirty ? theme.bg : theme.textDim,
-            }}
-          >
-            Save
-          </button>
-        </div>
-
-        {/* LuaCodeEditor with smart preview */}
-        <div className="flex-1 min-h-0">
-          <LuaCodeEditor
-            value={fileContent}
-            onChange={handleChange}
-            showPreview="auto"
-            previewPosition="right"
-            onRun={handleSave}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  // For non-Lua files, use basic Monaco
+  // Use basic Monaco for all files
   return (
     <div className="h-full flex flex-col">
       {/* File header */}
@@ -1170,159 +1332,6 @@ function AIChat() {
           </button>
         </div>
       </div>
-    </div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Properties Panel
-// ─────────────────────────────────────────────────────────────────────────────
-
-function PropertiesPanel() {
-  const theme = useTheme();
-  const { selection } = useSelection();
-  const { getNode } = useNodes();
-
-  const selectedNode = selection.nodes.length > 0 ? getNode(selection.nodes[0]) : null;
-
-  // No selection state
-  if (!selectedNode) {
-    return (
-      <div className="h-full flex items-center justify-center p-4" style={{ color: theme.textDim }}>
-        <div className="text-center">
-          <div className="text-3xl mb-2">⚙</div>
-          <div className="text-xs">Select a node to inspect</div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="h-full overflow-y-auto text-xs">
-      {/* Node Header */}
-      <div
-        className="px-3 py-2 flex items-center gap-2"
-        style={{ borderBottom: `1px solid ${theme.border}`, backgroundColor: theme.bgHover }}
-      >
-        <span className="text-lg" style={{
-          color: selectedNode.visual?.color
-            ? `rgb(${selectedNode.visual.color.map(c => c * 255).join(',')})`
-            : theme.text
-        }}>
-          {selectedNode.visual?.glyph || '○'}
-        </span>
-        <div>
-          <div style={{ color: theme.text }}>{selectedNode.name}</div>
-          <div style={{ color: theme.textDim }}>{selectedNode.type}</div>
-        </div>
-      </div>
-
-      {/* Transform (if present) */}
-      {selectedNode.transform && (
-        <div className="p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
-          <div className="text-xs uppercase tracking-wider mb-2" style={{ color: theme.textMuted }}>
-            Transform
-          </div>
-          <div className="space-y-1.5">
-            <PropertyRow label="Position" value={selectedNode.transform.position.map((n) => n.toFixed(1)).join(', ')} />
-            <PropertyRow label="Rotation" value={selectedNode.transform.rotation.map((n) => n.toFixed(1)).join(', ')} />
-            <PropertyRow label="Scale" value={selectedNode.transform.scale.map((n) => n.toFixed(1)).join(', ')} />
-          </div>
-        </div>
-      )}
-
-      {/* Visual (if present) */}
-      {selectedNode.visual && (
-        <div className="p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
-          <div className="text-xs uppercase tracking-wider mb-2" style={{ color: theme.textMuted }}>
-            Visual
-          </div>
-          <div className="space-y-1.5">
-            {selectedNode.visual.glyph && (
-              <PropertyRow label="Glyph" value={selectedNode.visual.glyph} />
-            )}
-            <PropertyRow
-              label="Color"
-              value={
-                <div
-                  className="w-4 h-4 rounded border"
-                  style={{
-                    backgroundColor: `rgb(${selectedNode.visual.color.map((c) => c * 255).join(',')})`,
-                    borderColor: theme.border,
-                  }}
-                />
-              }
-            />
-            <PropertyRow label="Visible" value={selectedNode.visual.visible ? 'Yes' : 'No'} />
-          </div>
-        </div>
-      )}
-
-      {/* Components */}
-      <div className="p-3">
-        <div className="text-xs uppercase tracking-wider mb-2" style={{ color: theme.textMuted }}>
-          Components ({selectedNode.components.length})
-        </div>
-        {selectedNode.components.length === 0 ? (
-          <div style={{ color: theme.textDim }}>No components</div>
-        ) : (
-          <div className="space-y-2">
-            {selectedNode.components.map((comp) => (
-              <div
-                key={comp.id}
-                className="px-2 py-1.5 rounded"
-                style={{ backgroundColor: theme.bgHover, opacity: comp.enabled ? 1 : 0.5 }}
-              >
-                <div className="flex items-center justify-between">
-                  <span style={{ color: theme.accent }}>
-                    {comp.script.split('/').pop()?.replace('.lua', '')}
-                  </span>
-                  <span style={{ color: theme.textDim }}>
-                    {comp.enabled ? '●' : '○'}
-                  </span>
-                </div>
-                {Object.keys(comp.properties).length > 0 && (
-                  <div className="mt-1 space-y-0.5" style={{ color: theme.textMuted }}>
-                    {Object.entries(comp.properties).map(([k, v]) => (
-                      <div key={k} className="flex justify-between">
-                        <span>{k}</span>
-                        <span style={{ color: theme.text }}>{JSON.stringify(v)}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Meta (custom data) */}
-      {Object.keys(selectedNode.meta).length > 0 && (
-        <div className="p-3" style={{ borderTop: `1px solid ${theme.border}` }}>
-          <div className="text-xs uppercase tracking-wider mb-2" style={{ color: theme.textMuted }}>
-            Meta
-          </div>
-          <div className="space-y-0.5" style={{ color: theme.textMuted }}>
-            {Object.entries(selectedNode.meta).map(([k, v]) => (
-              <div key={k} className="flex justify-between">
-                <span>{k}</span>
-                <span style={{ color: theme.text }}>{JSON.stringify(v)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PropertyRow({ label, value }: { label: string; value: React.ReactNode }) {
-  const theme = useTheme();
-  return (
-    <div className="flex items-center justify-between">
-      <span style={{ color: theme.textMuted }}>{label}</span>
-      <span style={{ color: theme.text }}>{value}</span>
     </div>
   );
 }

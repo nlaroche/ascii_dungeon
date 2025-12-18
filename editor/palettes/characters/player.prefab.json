@@ -1,0 +1,37 @@
+{
+  "name": "Player",
+  "description": "The player character",
+  "tags": ["player", "controllable"],
+  "template": {
+    "id": "template_player",
+    "name": "Player",
+    "type": "Node2D",
+    "children": [],
+    "components": [
+      {
+        "id": "comp_rect",
+        "script": "Rect2D",
+        "enabled": true,
+        "properties": {
+          "x": 0,
+          "y": 0,
+          "width": 1,
+          "height": 1
+        }
+      },
+      {
+        "id": "comp_glyph",
+        "script": "Glyph",
+        "enabled": true,
+        "properties": {
+          "char": "@",
+          "fg": [0.2, 0.9, 0.5],
+          "bg": [0, 0, 0]
+        }
+      }
+    ],
+    "meta": {
+      "visible": true
+    }
+  }
+}

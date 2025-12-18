@@ -4,15 +4,16 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
-import { useTheme, useSelection, useNodes, flattenNodes } from '../stores/useEngineState'
-import type { Node } from '../stores/engineState'
+import { useTheme, useSelection, useNodes, flattenNodes, useEngineState } from '../stores/useEngineState'
+import { useDragState, type DropPosition, type DropTarget } from '../stores/useDragState'
+import type { Node as SceneNode } from '../stores/engineState'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface DragState {
-  nodeId: string
+  nodeId: string | null  // null when dragging from outside (e.g., palette)
   dropTarget: string | null
   dropPosition: 'before' | 'inside' | 'after' | null
 }
@@ -47,15 +48,17 @@ function getNodeIcon(type: string): string {
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface TreeNodeProps {
-  node: Node
+  node: SceneNode
   depth: number
   expanded: Set<string>
   onToggle: (id: string) => void
   dragState: DragState | null
+  prefabDropTarget: DropTarget | null  // From global drag state for prefab drops
   onDragStart: (nodeId: string) => void
   onDragOver: (nodeId: string, position: 'before' | 'inside' | 'after') => void
   onDragEnd: () => void
-  onDrop: () => void
+  onDrop: (e: React.DragEvent) => void
+  onPrefabHover: (nodeId: string, nodeName: string, position: DropPosition) => void  // For prefab drag
   onContextMenu: (e: React.MouseEvent, nodeId: string) => void
   onSelect: (nodeId: string, e: React.MouseEvent) => void
   onStartRename: (nodeId: string) => void
@@ -63,7 +66,8 @@ interface TreeNodeProps {
   onRenameSubmit: (newName: string) => void
   onRenameCancel: () => void
   selectedIds: string[]
-  allNodes: Node[]
+  allNodes: SceneNode[]
+  onToggleVisibility: (nodeId: string) => void
 }
 
 function TreeNode({
@@ -72,10 +76,12 @@ function TreeNode({
   expanded,
   onToggle,
   dragState,
+  prefabDropTarget,
   onDragStart,
   onDragOver,
   onDragEnd,
   onDrop,
+  onPrefabHover,
   onContextMenu,
   onSelect,
   onStartRename,
@@ -84,18 +90,23 @@ function TreeNode({
   onRenameCancel,
   selectedIds,
   allNodes,
+  onToggleVisibility,
 }: TreeNodeProps) {
   const theme = useTheme()
   const isSelected = selectedIds.includes(node.id)
   const isExpanded = expanded.has(node.id)
   const hasChildren = node.children.length > 0
   const isRenaming = renamingId === node.id
+  const isVisible = node.meta?.visible !== false  // Check meta.visible for all nodes
   const renameInputRef = useRef<HTMLInputElement>(null)
+  const rowRef = useRef<HTMLDivElement>(null)
 
-  // Drag state for this node
+  // Drag state for this node - combine internal drag and prefab drag
   const isDragging = dragState?.nodeId === node.id
-  const isDropTarget = dragState?.dropTarget === node.id
-  const dropPosition = isDropTarget ? dragState?.dropPosition : null
+  const isDropTarget = dragState?.dropTarget === node.id || prefabDropTarget?.nodeId === node.id
+  const dropPosition = isDropTarget
+    ? (dragState?.dropTarget === node.id ? dragState?.dropPosition : prefabDropTarget?.position)
+    : null
 
   // Focus rename input when entering rename mode
   useEffect(() => {
@@ -104,6 +115,27 @@ function TreeNode({
       renameInputRef.current.select()
     }
   }, [isRenaming])
+
+  // Calculate drop position from Y offset within row
+  const calcDropPosition = useCallback((clientY: number): DropPosition => {
+    if (!rowRef.current) return 'inside'
+    const rect = rowRef.current.getBoundingClientRect()
+    const y = clientY - rect.top
+    const height = rect.height
+    if (y < height * 0.25) return 'before'
+    if (y > height * 0.75) return 'after'
+    return 'inside'
+  }, [])
+
+  // Handle mouse move for prefab dragging
+  const handleMouseMove = useCallback((e: React.MouseEvent) => {
+    const draggedPrefab = useDragState.getState().draggedPrefab
+    if (!draggedPrefab) return
+
+    const position = calcDropPosition(e.clientY)
+    console.log('[TreeNode] Mouse move over:', node.name, 'position:', position)
+    onPrefabHover(node.id, node.name, position)
+  }, [node.id, node.name, calcDropPosition, onPrefabHover])
 
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.effectAllowed = 'move'
@@ -114,6 +146,19 @@ function TreeNode({
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
+
+    // Debug logging
+    console.log('[TreeNode] DragOver on', node.name, 'types:', Array.from(e.dataTransfer.types))
+
+    // Check if this is a prefab drop
+    const isPrefabDrop = e.dataTransfer.types.includes('application/prefab-id')
+    if (isPrefabDrop) {
+      e.dataTransfer.dropEffect = 'copy'
+      // For prefabs, always drop 'inside' the target node
+      onDragOver(node.id, 'inside')
+      console.log('[TreeNode] Prefab drop detected for', node.name)
+      return
+    }
 
     if (!dragState || dragState.nodeId === node.id) return
 
@@ -141,7 +186,7 @@ function TreeNode({
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    onDrop()
+    onDrop(e)
   }
 
   const handleClick = (e: React.MouseEvent) => {
@@ -198,6 +243,7 @@ function TreeNode({
     <div>
       {/* Node row */}
       <div
+        ref={rowRef}
         draggable={node.id !== 'root' && !isRenaming}
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
@@ -206,13 +252,14 @@ function TreeNode({
         onDragEnd={onDragEnd}
         onClick={handleClick}
         onDoubleClick={handleDoubleClick}
+        onMouseMove={handleMouseMove}
         onContextMenu={(e) => onContextMenu(e, node.id)}
         className="flex items-center gap-1 px-2 py-1 cursor-pointer rounded text-xs select-none"
         style={{
           paddingLeft: `${depth * 16 + 8}px`,
-          backgroundColor: isSelected ? theme.accentBg : 'transparent',
-          color: isSelected ? theme.accent : theme.text,
-          opacity: isDragging ? 0.5 : 1,
+          backgroundColor: isSelected ? theme.accentBg : (isDropTarget ? `${theme.accent}20` : 'transparent'),
+          color: isSelected ? theme.accent : isVisible ? theme.text : theme.textDim,
+          opacity: isDragging ? 0.5 : isVisible ? 1 : 0.5,
           ...getDropIndicatorStyle(),
         }}
         onMouseEnter={(e) => {
@@ -268,11 +315,26 @@ function TreeNode({
         {/* Component count badge */}
         {node.components.length > 0 && !isRenaming && (
           <span
-            className="ml-auto px-1 rounded text-[10px]"
+            className="px-1 rounded text-[10px]"
             style={{ backgroundColor: theme.bgHover, color: theme.textDim }}
           >
             {node.components.length}
           </span>
+        )}
+
+        {/* Visibility toggle */}
+        {!isRenaming && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onToggleVisibility(node.id)
+            }}
+            className="ml-auto w-5 h-5 flex items-center justify-center rounded text-[10px] opacity-50 hover:opacity-100 transition-opacity"
+            style={{ color: isVisible ? theme.textMuted : theme.textDim }}
+            title={isVisible ? 'Hide node' : 'Show node'}
+          >
+            {isVisible ? '◉' : '○'}
+          </button>
         )}
       </div>
 
@@ -287,10 +349,12 @@ function TreeNode({
               expanded={expanded}
               onToggle={onToggle}
               dragState={dragState}
+              prefabDropTarget={prefabDropTarget}
               onDragStart={onDragStart}
               onDragOver={onDragOver}
               onDragEnd={onDragEnd}
-              onDrop={onDrop}
+              onDrop={(e) => onDrop(e)}
+              onPrefabHover={onPrefabHover}
               onContextMenu={onContextMenu}
               onSelect={onSelect}
               onStartRename={onStartRename}
@@ -299,6 +363,7 @@ function TreeNode({
               onRenameCancel={onRenameCancel}
               selectedIds={selectedIds}
               allNodes={allNodes}
+              onToggleVisibility={onToggleVisibility}
             />
           ))}
         </div>
@@ -323,6 +388,7 @@ interface ContextMenuProps {
   onCopy: () => void
   onPaste: () => void
   onPasteAsChild: () => void
+  onCenterView: () => void
   canPaste: boolean
   isRoot: boolean
 }
@@ -338,6 +404,7 @@ function ContextMenu({
   onCopy,
   onPaste,
   onPasteAsChild,
+  onCenterView,
   canPaste,
   isRoot,
 }: ContextMenuProps) {
@@ -419,6 +486,8 @@ function ContextMenu({
       <MenuItem label="Paste as Child" shortcut="Ctrl+Shift+V" onClick={onPasteAsChild} disabled={!canPaste} />
       <MenuItem label="Duplicate" shortcut="Ctrl+D" onClick={onDuplicate} disabled={isRoot} />
       <div className="my-1" style={{ borderTop: `1px solid ${theme.border}` }} />
+      <MenuItem label="Center View" onClick={onCenterView} />
+      <div className="my-1" style={{ borderTop: `1px solid ${theme.border}` }} />
       <MenuItem label="Delete" shortcut="Del" onClick={onDelete} disabled={isRoot} danger />
     </div>
   )
@@ -430,27 +499,110 @@ function ContextMenu({
 
 export function NodeTree() {
   const theme = useTheme()
+  const setPath = useEngineState((s) => s.setPath)
   const {
     rootNode,
     createNode,
-    removeNode,
     removeNodes,
     moveNode,
-    duplicateNode,
     duplicateNodes,
     copyNodes,
     pasteNodes,
     hasClipboard,
     renameNode,
     getParent,
+    toggleVisibility,
   } = useNodes()
   const { selection, selectNode, selectNodes, clearSelection } = useSelection()
   const treeRef = useRef<HTMLDivElement>(null)
+  const [isDraggingPrefab, setIsDraggingPrefab] = useState(false)
+
+  // State-based prefab dragging (bypasses rc-dock)
+  const {
+    draggedPrefab,
+    dropTarget: prefabDropTarget,
+    setDropTarget,
+    endDrag,
+  } = useDragState()
+
+  // Handle prefab hover on tree nodes
+  const handlePrefabHover = useCallback((nodeId: string, nodeName: string, position: DropPosition) => {
+    console.log('[NodeTree] handlePrefabHover:', nodeName, position)
+    setDropTarget({ nodeId, nodeName, position })
+  }, [setDropTarget])
+
+  // Global drag event listeners to bypass rc-dock's drag interception
+  useEffect(() => {
+    const handleGlobalDragOver = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes('application/prefab-id')) return
+
+      // Check if we're over the NodeTree element
+      if (treeRef.current && treeRef.current.contains(e.target as Node)) {
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'copy'
+        setIsDraggingPrefab(true)
+      }
+    }
+
+    const handleGlobalDrop = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes('application/prefab-id')) return
+      if (!treeRef.current?.contains(e.target as Node)) return
+
+      e.preventDefault()
+      setIsDraggingPrefab(false)
+
+      const prefabId = e.dataTransfer.getData('application/prefab-id')
+      if (!prefabId) return
+
+      const prefab = useEngineState.getState().palette.prefabs[prefabId]
+      if (!prefab) return
+
+      // Clone the prefab template with new ID
+      const newNodeId = `node_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+      const currentRootNode = useEngineState.getState().scene.rootNode
+
+      const cloneNode = (node: SceneNode, newId: string): SceneNode => {
+        return {
+          ...node,
+          id: newId,
+          name: node.name,
+          children: node.children.map((child, i) =>
+            cloneNode(child, `${newId}_child_${i}`)
+          ),
+          components: node.components.map(comp => ({
+            ...comp,
+            id: `${newId}_${comp.script}_${Math.random().toString(36).slice(2, 5)}`,
+            properties: { ...comp.properties }
+          })),
+        }
+      }
+
+      const newNode = cloneNode(prefab.template, newNodeId)
+      setPath(['scene', 'rootNode', 'children'], [...currentRootNode.children, newNode], `Add prefab ${prefab.name}`)
+      selectNode(newNodeId)
+
+      console.log(`[NodeTree] Global drop handler: Added prefab '${prefab.name}'`)
+    }
+
+    const handleGlobalDragEnd = () => {
+      setIsDraggingPrefab(false)
+    }
+
+    document.addEventListener('dragover', handleGlobalDragOver)
+    document.addEventListener('drop', handleGlobalDrop)
+    document.addEventListener('dragend', handleGlobalDragEnd)
+
+    return () => {
+      document.removeEventListener('dragover', handleGlobalDragOver)
+      document.removeEventListener('drop', handleGlobalDrop)
+      document.removeEventListener('dragend', handleGlobalDragEnd)
+    }
+  }, [setPath, selectNode])
 
   // All nodes flattened for range selection
   const allNodes = useMemo(() => flattenNodes(rootNode), [rootNode])
 
-  // State
+  // State - defined before callbacks that use them
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     const initial = new Set<string>(['root'])
     rootNode.children.forEach((child) => initial.add(child.id))
@@ -460,6 +612,92 @@ export function NodeTree() {
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
   const [renamingId, setRenamingId] = useState<string | null>(null)
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null)
+
+  // Clone a prefab template to create a new node
+  const clonePrefabAsNode = useCallback((prefab: typeof draggedPrefab, newId: string): SceneNode | null => {
+    if (!prefab) return null
+
+    const cloneNode = (node: SceneNode, id: string): SceneNode => {
+      return {
+        ...node,
+        id,
+        name: node.name,
+        children: node.children.map((child, i) =>
+          cloneNode(child, `${id}_child_${i}`)
+        ),
+        components: node.components.map(comp => ({
+          ...comp,
+          id: `${id}_${comp.script}_${Math.random().toString(36).slice(2, 5)}`,
+          properties: { ...comp.properties }
+        })),
+      }
+    }
+
+    return cloneNode(prefab.template, newId)
+  }, [])
+
+  // Handle mouse up for state-based prefab dropping
+  const handleMouseUp = useCallback(() => {
+    if (!draggedPrefab) return
+
+    const newNodeId = `node_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+    const newNode = clonePrefabAsNode(draggedPrefab, newNodeId)
+    if (!newNode) {
+      endDrag()
+      return
+    }
+
+    // If we have a drop target, insert at that location
+    if (prefabDropTarget) {
+      const { nodeId: targetId, position } = prefabDropTarget
+      console.log(`[NodeTree] Dropping prefab '${draggedPrefab.name}' ${position} node ${targetId}`)
+
+      if (position === 'inside') {
+        // Add as child of target
+        const insertAsChild = (node: SceneNode): SceneNode => {
+          if (node.id === targetId) {
+            return { ...node, children: [...node.children, newNode] }
+          }
+          return { ...node, children: node.children.map(insertAsChild) }
+        }
+        const updatedRoot = insertAsChild(rootNode)
+        setPath(['scene', 'rootNode'], updatedRoot, `Add prefab ${draggedPrefab.name} as child of ${targetId}`)
+        setExpanded(prev => new Set([...prev, targetId]))
+      } else {
+        // Insert as sibling (before or after)
+        const parentNode = getParent(targetId)
+        if (parentNode) {
+          const insertAsSibling = (node: SceneNode): SceneNode => {
+            if (node.id === parentNode.id) {
+              const targetIndex = node.children.findIndex(c => c.id === targetId)
+              const insertIndex = position === 'after' ? targetIndex + 1 : targetIndex
+              const newChildren = [...node.children]
+              newChildren.splice(insertIndex, 0, newNode)
+              return { ...node, children: newChildren }
+            }
+            return { ...node, children: node.children.map(insertAsSibling) }
+          }
+          const updatedRoot = insertAsSibling(rootNode)
+          setPath(['scene', 'rootNode'], updatedRoot, `Add prefab ${draggedPrefab.name} ${position} ${targetId}`)
+        } else {
+          // Parent is root - insert into root.children
+          const targetIndex = rootNode.children.findIndex(c => c.id === targetId)
+          const insertIndex = position === 'after' ? targetIndex + 1 : targetIndex
+          const newChildren = [...rootNode.children]
+          newChildren.splice(insertIndex, 0, newNode)
+          setPath(['scene', 'rootNode', 'children'], newChildren, `Add prefab ${draggedPrefab.name}`)
+        }
+      }
+    } else {
+      // No drop target - add to root
+      setPath(['scene', 'rootNode', 'children'], [...rootNode.children, newNode], `Add prefab ${draggedPrefab.name}`)
+    }
+
+    selectNode(newNodeId)
+    endDrag()
+
+    console.log(`[NodeTree] Added prefab '${draggedPrefab.name}'`)
+  }, [draggedPrefab, prefabDropTarget, rootNode, setPath, selectNode, endDrag, clonePrefabAsNode, getParent])
 
   // Toggle expand/collapse
   const handleToggle = useCallback((id: string) => {
@@ -510,20 +748,90 @@ export function NodeTree() {
   }, [])
 
   const handleDragOver = useCallback((nodeId: string, position: 'before' | 'inside' | 'after') => {
-    setDragState((prev) => (prev ? { ...prev, dropTarget: nodeId, dropPosition: position } : null))
+    setDragState((prev) => {
+      // If no prior drag state (e.g., dragging from palette), create one with null nodeId
+      if (!prev) {
+        return { nodeId: null, dropTarget: nodeId, dropPosition: position }
+      }
+      return { ...prev, dropTarget: nodeId, dropPosition: position }
+    })
   }, [])
 
   const handleDragEnd = useCallback(() => {
     setDragState(null)
   }, [])
 
-  const handleDrop = useCallback(() => {
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    // Check if this is a prefab drop
+    const prefabId = e.dataTransfer.getData('application/prefab-id')
+    if (prefabId) {
+      // Get the prefab from store
+      const prefab = useEngineState.getState().palette.prefabs[prefabId]
+      if (!prefab || !dragState?.dropTarget) {
+        setDragState(null)
+        return
+      }
+
+      // Clone the prefab template with new ID
+      const newNodeId = `node_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+      const cloneNode = (node: SceneNode, newId: string): SceneNode => {
+        return {
+          ...node,
+          id: newId,
+          name: node.name,
+          children: node.children.map((child, i) =>
+            cloneNode(child, `${newId}_child_${i}`)
+          ),
+          components: node.components.map(comp => ({
+            ...comp,
+            properties: { ...comp.properties }
+          })),
+        }
+      }
+
+      const newNode = cloneNode(prefab.template, newNodeId)
+      const targetId = dragState.dropTarget
+
+      // Find the target node and add the prefab as a child
+      const findAndAddChild = (node: SceneNode): SceneNode => {
+        if (node.id === targetId) {
+          return {
+            ...node,
+            children: [...node.children, newNode]
+          }
+        }
+        return {
+          ...node,
+          children: node.children.map(findAndAddChild)
+        }
+      }
+
+      const updatedRoot = findAndAddChild(rootNode)
+      setPath(['scene', 'rootNode'], updatedRoot, `Add prefab ${prefab.name} to ${targetId}`)
+
+      // Expand the target and select the new node
+      setExpanded((prev) => new Set([...prev, targetId]))
+      selectNode(newNodeId)
+
+      console.log(`[NodeTree] Dropped prefab '${prefab.name}' as child of ${targetId}`)
+      setDragState(null)
+      return
+    }
+
+    // Regular node move
     if (!dragState || !dragState.dropTarget || !dragState.dropPosition) {
       setDragState(null)
       return
     }
 
     const { nodeId, dropTarget, dropPosition } = dragState
+
+    // nodeId is null for external drags (handled above for prefabs)
+    // For internal node moves, nodeId must be present
+    if (!nodeId || !dropTarget) {
+      setDragState(null)
+      return
+    }
 
     if (dropPosition === 'inside') {
       // Move as child
@@ -541,7 +849,7 @@ export function NodeTree() {
     }
 
     setDragState(null)
-  }, [dragState, moveNode, getParent])
+  }, [dragState, moveNode, getParent, rootNode, setPath, selectNode])
 
   // Context menu
   const handleContextMenu = useCallback((e: React.MouseEvent, nodeId: string) => {
@@ -638,10 +946,17 @@ export function NodeTree() {
     setRenamingId(null)
   }, [])
 
+  // Center view on a node
+  const handleCenterView = useCallback(() => {
+    if (contextMenu?.nodeId) {
+      setPath(['editor2D', 'centerOnNodeId'], contextMenu.nodeId, 'Center view on node')
+    }
+  }, [contextMenu, setPath])
+
   // Get visible nodes (respecting expanded state) for arrow key navigation
-  const getVisibleNodes = useCallback((): Node[] => {
-    const visible: Node[] = []
-    const traverse = (node: Node, depth: number) => {
+  const getVisibleNodes = useCallback((): SceneNode[] => {
+    const visible: SceneNode[] = []
+    const traverse = (node: SceneNode, depth: number) => {
       // Root's children are shown at depth 0
       if (node.id !== 'root') {
         visible.push(node)
@@ -796,11 +1111,76 @@ export function NodeTree() {
     clearSelection()
   }, [clearSelection])
 
+  // Handle dropping prefabs on background (add to root)
+  const handleBackgroundDrop = useCallback((e: React.DragEvent) => {
+    const prefabId = e.dataTransfer.getData('application/prefab-id')
+    if (!prefabId) return
+
+    e.preventDefault()
+    e.stopPropagation()
+
+    const prefab = useEngineState.getState().palette.prefabs[prefabId]
+    if (!prefab) return
+
+    // Clone the prefab template with new ID
+    const newNodeId = `node_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+    const cloneNode = (node: SceneNode, newId: string): SceneNode => {
+      return {
+        ...node,
+        id: newId,
+        name: node.name,
+        children: node.children.map((child, i) =>
+          cloneNode(child, `${newId}_child_${i}`)
+        ),
+        components: node.components.map(comp => ({
+          ...comp,
+          properties: { ...comp.properties }
+        })),
+      }
+    }
+
+    const newNode = cloneNode(prefab.template, newNodeId)
+    setPath(['scene', 'rootNode', 'children'], [...rootNode.children, newNode], `Add prefab ${prefab.name}`)
+    selectNode(newNodeId)
+
+    console.log(`[NodeTree] Dropped prefab '${prefab.name}' to root`)
+  }, [rootNode, setPath, selectNode])
+
+  const handleBackgroundDragOver = useCallback((e: React.DragEvent) => {
+    // Debug: log all drag types
+    console.log('[NodeTree] Background dragOver, types:', Array.from(e.dataTransfer.types))
+
+    if (e.dataTransfer.types.includes('application/prefab-id')) {
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'copy'
+      console.log('[NodeTree] Prefab drag detected, dropEffect set to copy')
+    }
+  }, [])
+
+  const handleBackgroundDragEnter = useCallback((e: React.DragEvent) => {
+    console.log('[NodeTree] Background dragEnter, types:', Array.from(e.dataTransfer.types))
+    if (e.dataTransfer.types.includes('application/prefab-id')) {
+      e.preventDefault()
+    }
+  }, [])
+
+  // Show visual feedback when prefab is being dragged
+  const showDropTarget = isDraggingPrefab || draggedPrefab !== null
+
   return (
     <div
       ref={treeRef}
       className="h-full overflow-y-auto py-1"
+      style={{
+        outline: showDropTarget ? `2px dashed ${theme.accent}` : 'none',
+        outlineOffset: '-2px',
+        backgroundColor: showDropTarget ? `${theme.accent}10` : 'transparent',
+      }}
       onClick={handleBackgroundClick}
+      onMouseUp={handleMouseUp}
+      onDrop={handleBackgroundDrop}
+      onDragOver={handleBackgroundDragOver}
+      onDragEnter={handleBackgroundDragEnter}
     >
       {/* Scene name header */}
       <div
@@ -830,10 +1210,12 @@ export function NodeTree() {
           expanded={expanded}
           onToggle={handleToggle}
           dragState={dragState}
+          prefabDropTarget={prefabDropTarget}
           onDragStart={handleDragStart}
           onDragOver={handleDragOver}
           onDragEnd={handleDragEnd}
           onDrop={handleDrop}
+          onPrefabHover={handlePrefabHover}
           onContextMenu={handleContextMenu}
           onSelect={handleSelect}
           onStartRename={handleStartRename}
@@ -842,6 +1224,7 @@ export function NodeTree() {
           onRenameCancel={handleRenameCancel}
           selectedIds={selection.nodes}
           allNodes={allNodes}
+          onToggleVisibility={toggleVisibility}
         />
       ))}
 
@@ -877,6 +1260,7 @@ export function NodeTree() {
           onCopy={handleCopy}
           onPaste={handlePaste}
           onPasteAsChild={handlePasteAsChild}
+          onCenterView={handleCenterView}
           canPaste={hasClipboard()}
           isRoot={contextMenu.nodeId === 'root'}
         />

@@ -11,6 +11,8 @@ import {
   type ComponentMetadata,
 } from '../scripting/decorators'
 import type { Node, NodeComponent } from '../stores/engineState'
+import { Vec2Scrubber, Vec3Scrubber, ColorScrubber } from './ui/Scrubber'
+import { SearchablePopup, type SearchableItem } from './ui/Popup'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Component Inspector
@@ -39,17 +41,7 @@ export function ComponentInspector() {
       {/* Node Header */}
       <NodeHeader node={selectedNode} />
 
-      {/* Transform (if present) - special built-in handling */}
-      {selectedNode.transform && (
-        <TransformSection node={selectedNode} setPath={setPath} getNodePath={getNodePath} />
-      )}
-
-      {/* Visual (if present) - special built-in handling */}
-      {selectedNode.visual && (
-        <VisualSection node={selectedNode} setPath={setPath} getNodePath={getNodePath} />
-      )}
-
-      {/* Components */}
+      {/* Components (includes Rect2D, Glyph, etc.) */}
       <ComponentsSection node={selectedNode} setPath={setPath} getNodePath={getNodePath} />
     </div>
   )
@@ -62,138 +54,30 @@ export function ComponentInspector() {
 function NodeHeader({ node }: { node: Node }) {
   const theme = useTheme()
 
+  // Find GlyphComponent for display
+  const glyphComp = node.components.find(c => c.script === 'Glyph')
+  const char = glyphComp?.properties?.char as string | undefined
+  const fg = glyphComp?.properties?.fg as [number, number, number] | undefined
+
   return (
     <div
-      className="px-3 py-2 flex items-center gap-2"
+      className="px-3 h-8 flex items-center gap-2"
       style={{ borderBottom: `1px solid ${theme.border}`, backgroundColor: theme.bgHover }}
     >
       <span
-        className="text-lg"
+        className="text-base"
         style={{
-          color: node.visual?.color
-            ? `rgb(${node.visual.color.map((c) => c * 255).join(',')})`
-            : theme.text,
+          color: fg ? `rgb(${fg.map(c => c * 255).join(',')})` : theme.text,
         }}
       >
-        {node.visual?.glyph || '○'}
+        {char || '○'}
       </span>
-      <div>
-        <div style={{ color: theme.text }}>{node.name}</div>
-        <div style={{ color: theme.textDim }}>{node.type}</div>
-      </div>
+      <span className="text-xs truncate" style={{ color: theme.text }}>{node.name}</span>
+      <span className="text-[10px]" style={{ color: theme.textDim }}>({node.type})</span>
     </div>
   )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Transform Section
-// ─────────────────────────────────────────────────────────────────────────────
-
-function TransformSection({
-  node,
-  setPath,
-  getNodePath,
-}: {
-  node: Node
-  setPath: (path: (string | number)[], value: unknown, description: string) => void
-  getNodePath: (nodeId: string) => number[] | null
-}) {
-  const theme = useTheme()
-  const nodePath = getNodePath(node.id)
-
-  const updateTransform = (key: string, index: number, value: number) => {
-    if (!nodePath) return
-    const fullPath = ['scene', 'rootNode', ...nodePath.flatMap((i) => ['children', i]), 'transform', key, index]
-    setPath(fullPath, value, `Update ${key}`)
-  }
-
-  if (!node.transform) return null
-
-  return (
-    <div className="p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
-      <div className="text-xs uppercase tracking-wider mb-2" style={{ color: theme.textMuted }}>
-        Transform
-      </div>
-      <div className="space-y-2">
-        <Vec3Input
-          label="Position"
-          value={node.transform.position}
-          onChange={(i, v) => updateTransform('position', i, v)}
-        />
-        <Vec3Input
-          label="Rotation"
-          value={node.transform.rotation}
-          onChange={(i, v) => updateTransform('rotation', i, v)}
-        />
-        <Vec3Input
-          label="Scale"
-          value={node.transform.scale}
-          onChange={(i, v) => updateTransform('scale', i, v)}
-        />
-      </div>
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Visual Section
-// ─────────────────────────────────────────────────────────────────────────────
-
-function VisualSection({
-  node,
-  setPath,
-  getNodePath,
-}: {
-  node: Node
-  setPath: (path: (string | number)[], value: unknown, description: string) => void
-  getNodePath: (nodeId: string) => number[] | null
-}) {
-  const theme = useTheme()
-  const nodePath = getNodePath(node.id)
-
-  const updateVisual = (key: string, value: unknown) => {
-    if (!nodePath) return
-    const fullPath = ['scene', 'rootNode', ...nodePath.flatMap((i) => ['children', i]), 'visual', key]
-    setPath(fullPath, value, `Update visual.${key}`)
-  }
-
-  if (!node.visual) return null
-
-  return (
-    <div className="p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
-      <div className="text-xs uppercase tracking-wider mb-2" style={{ color: theme.textMuted }}>
-        Visual
-      </div>
-      <div className="space-y-2">
-        <PropertyField
-          label="Glyph"
-          type="string"
-          value={node.visual.glyph || ''}
-          onChange={(v) => updateVisual('glyph', v)}
-        />
-        <PropertyField
-          label="Color"
-          type="color"
-          value={node.visual.color}
-          onChange={(v) => updateVisual('color', v)}
-        />
-        <PropertyField
-          label="Visible"
-          type="boolean"
-          value={node.visual.visible}
-          onChange={(v) => updateVisual('visible', v)}
-        />
-        <PropertyField
-          label="Opacity"
-          type="number"
-          value={node.visual.opacity}
-          onChange={(v) => updateVisual('opacity', v)}
-          options={{ min: 0, max: 1, step: 0.1 }}
-        />
-      </div>
-    </div>
-  )
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Components Section
@@ -210,6 +94,7 @@ function ComponentsSection({
 }) {
   const theme = useTheme()
   const [showAddMenu, setShowAddMenu] = useState(false)
+  const addButtonRef = useRef<HTMLButtonElement>(null)
   const nodePath = getNodePath(node.id)
 
   const updateComponentProperty = (compIndex: number, propKey: string, value: unknown) => {
@@ -239,6 +124,23 @@ function ComponentsSection({
     setPath(fullPath, enabled, enabled ? 'Enable component' : 'Disable component')
   }
 
+  // Build searchable items from component registry
+  const componentItems: SearchableItem[] = getRegisteredComponents().map((name) => {
+    const entry = componentRegistry.get(name)
+    const meta = entry?.metadata
+    return {
+      id: name,
+      label: name,
+      icon: meta?.icon || '▣',
+      description: meta?.description,
+    }
+  })
+
+  const handleAddComponent = useCallback((item: SearchableItem) => {
+    console.log('[ComponentInspector] Add component:', item.id)
+    // TODO: Add component to node
+  }, [])
+
   return (
     <div className="p-3">
       <div className="flex items-center justify-between mb-2">
@@ -246,25 +148,26 @@ function ComponentsSection({
           Components ({node.components.length})
         </div>
         <button
+          ref={addButtonRef}
           className="px-2 py-0.5 rounded text-xs"
           style={{ backgroundColor: theme.accent, color: theme.bg }}
-          onClick={() => setShowAddMenu(!showAddMenu)}
+          onClick={() => setShowAddMenu(true)}
         >
           + Add
         </button>
       </div>
 
-      {/* Add component menu */}
-      {showAddMenu && (
-        <AddComponentMenu
-          onAdd={(typeName) => {
-            console.log('[ComponentInspector] Add component:', typeName)
-            // TODO: Add component to node
-            setShowAddMenu(false)
-          }}
-          onClose={() => setShowAddMenu(false)}
-        />
-      )}
+      {/* Add component popup */}
+      <SearchablePopup
+        anchorRef={addButtonRef}
+        isOpen={showAddMenu}
+        onClose={() => setShowAddMenu(false)}
+        onSelect={handleAddComponent}
+        items={componentItems}
+        placeholder="Search components..."
+        title="Add Component"
+        width={220}
+      />
 
       {/* Component list */}
       {node.components.length === 0 ? (
@@ -343,30 +246,115 @@ function ComponentCard({ component, onPropertyChange, onToggleEnabled }: Compone
         <div className="px-2 pb-2 space-y-2">
           {metadata && groupedProperties ? (
             // Render with metadata (grouped)
-            Object.entries(groupedProperties).map(([groupName, props]) => (
-              <div key={groupName}>
-                {groupName !== 'default' && (
-                  <div
-                    className="text-xs uppercase tracking-wider mt-2 mb-1"
-                    style={{ color: theme.textDim }}
-                  >
-                    {groupName}
-                  </div>
-                )}
-                <div className="space-y-1">
-                  {props.map(([propKey, propOptions]) => (
-                    <PropertyField
-                      key={propKey}
-                      label={propOptions.label || propKey}
-                      type={propOptions.type}
-                      value={component.properties[propKey]}
-                      onChange={(value) => onPropertyChange(propKey, value)}
-                      options={propOptions}
+            Object.entries(groupedProperties).map(([groupName, props]) => {
+              // Special handling: combine Position (x,y) and Size (width,height) into Vec2Scrubbers
+              const propKeys = props.map(([key]) => key)
+
+              // Check if this is a Position group with x and y
+              if (groupName === 'Position' && propKeys.includes('x') && propKeys.includes('y')) {
+                const x = (component.properties.x as number) ?? 0
+                const y = (component.properties.y as number) ?? 0
+                return (
+                  <div key={groupName}>
+                    <Vec2Scrubber
+                      label="Position"
+                      value={[x, y]}
+                      onChange={([newX, newY]) => {
+                        onPropertyChange('x', newX)
+                        onPropertyChange('y', newY)
+                      }}
+                      step={1}
+                      precision={0}
                     />
-                  ))}
+                  </div>
+                )
+              }
+
+              // Check if this is a Size group with width and height
+              if (groupName === 'Size' && propKeys.includes('width') && propKeys.includes('height')) {
+                const width = (component.properties.width as number) ?? 1
+                const height = (component.properties.height as number) ?? 1
+                const isAutoSize = component.properties.autoSize === true
+                // Filter out width/height, but keep other Size properties (like autoSize)
+                const otherProps = props.filter(([key]) => key !== 'width' && key !== 'height')
+                return (
+                  <div key={groupName} className="space-y-1">
+                    <Vec2Scrubber
+                      label="Size"
+                      value={[width, height]}
+                      onChange={([newW, newH]) => {
+                        onPropertyChange('width', Math.max(1, newW))
+                        onPropertyChange('height', Math.max(1, newH))
+                      }}
+                      step={1}
+                      precision={0}
+                      min={1}
+                      labels={['W', 'H']}
+                      disabled={isAutoSize}
+                    />
+                    {/* Render other Size group properties (like autoSize) */}
+                    {otherProps.map(([propKey, propOptions]) => (
+                      <PropertyField
+                        key={propKey}
+                        label={propOptions.label || propKey}
+                        type={propOptions.type}
+                        value={component.properties[propKey]}
+                        onChange={(value) => onPropertyChange(propKey, value)}
+                        options={propOptions}
+                      />
+                    ))}
+                  </div>
+                )
+              }
+
+              // Check if this is a Padding group with paddingX and paddingY
+              if (groupName === 'Padding' && propKeys.includes('paddingX') && propKeys.includes('paddingY')) {
+                const px = (component.properties.paddingX as number) ?? 0
+                const py = (component.properties.paddingY as number) ?? 0
+                return (
+                  <div key={groupName}>
+                    <Vec2Scrubber
+                      label="Padding"
+                      value={[px, py]}
+                      onChange={([newPx, newPy]) => {
+                        onPropertyChange('paddingX', Math.max(0, newPx))
+                        onPropertyChange('paddingY', Math.max(0, newPy))
+                      }}
+                      step={1}
+                      precision={0}
+                      min={0}
+                      labels={['X', 'Y']}
+                    />
+                  </div>
+                )
+              }
+
+              // Default group rendering
+              return (
+                <div key={groupName}>
+                  {groupName !== 'default' && (
+                    <div
+                      className="text-xs uppercase tracking-wider mt-2 mb-1"
+                      style={{ color: theme.textDim }}
+                    >
+                      {groupName}
+                    </div>
+                  )}
+                  <div className="space-y-1">
+                    {props.map(([propKey, propOptions]) => (
+                      <PropertyField
+                        key={propKey}
+                        label={propOptions.label || propKey}
+                        type={propOptions.type}
+                        value={component.properties[propKey]}
+                        onChange={(value) => onPropertyChange(propKey, value)}
+                        options={propOptions}
+                      />
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))
+              )
+            })
           ) : (
             // Fallback: render raw properties
             Object.entries(component.properties).map(([key, value]) => (
@@ -385,57 +373,6 @@ function ComponentCard({ component, onPropertyChange, onToggleEnabled }: Compone
   )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Add Component Menu
-// ─────────────────────────────────────────────────────────────────────────────
-
-function AddComponentMenu({
-  onAdd,
-  onClose,
-}: {
-  onAdd: (typeName: string) => void
-  onClose: () => void
-}) {
-  const theme = useTheme()
-  const componentNames = getRegisteredComponents()
-
-  return (
-    <div
-      className="mb-2 p-2 rounded"
-      style={{
-        backgroundColor: theme.bgPanel,
-        border: `1px solid ${theme.border}`,
-      }}
-    >
-      <div className="text-xs mb-2" style={{ color: theme.textMuted }}>
-        Select component to add:
-      </div>
-      <div className="grid grid-cols-2 gap-1">
-        {componentNames.map((name) => {
-          const entry = componentRegistry.get(name)
-          const meta = entry?.metadata
-          return (
-            <button
-              key={name}
-              className="px-2 py-1 rounded text-left text-xs hover:opacity-80"
-              style={{ backgroundColor: theme.bgHover, color: theme.text }}
-              onClick={() => onAdd(name)}
-            >
-              <span style={{ color: theme.accent }}>{meta?.icon || '▣'}</span> {name}
-            </button>
-          )
-        })}
-      </div>
-      <button
-        className="mt-2 w-full px-2 py-1 rounded text-xs"
-        style={{ backgroundColor: theme.border, color: theme.textMuted }}
-        onClick={onClose}
-      >
-        Cancel
-      </button>
-    </div>
-  )
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Property Field Renderer
@@ -502,58 +439,50 @@ function PropertyField({ label, type, value, onChange, options }: PropertyFieldP
           </label>
         )
 
-      case 'color':
+      case 'color': {
         const colorArray = Array.isArray(value) ? value : [1, 1, 1]
-        const hexColor = `#${colorArray
-          .slice(0, 3)
-          .map((c: number) => Math.round(c * 255).toString(16).padStart(2, '0'))
-          .join('')}`
-
+        const colorValue: [number, number, number] = [
+          Number(colorArray[0]) || 0,
+          Number(colorArray[1]) || 0,
+          Number(colorArray[2]) || 0,
+        ]
         return (
-          <div className="flex items-center gap-2">
-            <input
-              type="color"
-              value={hexColor}
-              onChange={(e) => {
-                const hex = e.target.value
-                const r = parseInt(hex.slice(1, 3), 16) / 255
-                const g = parseInt(hex.slice(3, 5), 16) / 255
-                const b = parseInt(hex.slice(5, 7), 16) / 255
-                onChange([r, g, b])
-              }}
-              className="w-6 h-5 rounded cursor-pointer"
-              style={{ border: `1px solid ${theme.border}` }}
-            />
-            <span style={{ color: theme.textMuted, fontSize: '10px' }}>{hexColor}</span>
-          </div>
+          <ColorScrubber
+            value={colorValue}
+            onChange={(newColor) => onChange(newColor)}
+          />
         )
+      }
 
-      case 'vec2':
-      case 'vec3':
-        const vecValue = Array.isArray(value) ? value : type === 'vec2' ? [0, 0] : [0, 0, 0]
+      case 'vec2': {
+        const arr = Array.isArray(value) ? value : [0, 0]
+        const vec2Value: [number, number] = [Number(arr[0]) || 0, Number(arr[1]) || 0]
         return (
-          <div className="flex gap-1">
-            {vecValue.map((v: number, i: number) => (
-              <input
-                key={i}
-                type="number"
-                value={v}
-                step={options?.step || 0.1}
-                onChange={(e) => {
-                  const newVec = [...vecValue]
-                  newVec[i] = parseFloat(e.target.value) || 0
-                  onChange(newVec)
-                }}
-                className="w-full px-1 py-0.5 rounded text-xs text-center"
-                style={{
-                  backgroundColor: theme.bg,
-                  color: theme.text,
-                  border: `1px solid ${theme.border}`,
-                }}
-              />
-            ))}
-          </div>
+          <Vec2Scrubber
+            value={vec2Value}
+            onChange={(newVec) => onChange(newVec)}
+            step={options?.step || 1}
+            precision={options?.precision ?? 0}
+            min={options?.min}
+            max={options?.max}
+          />
         )
+      }
+
+      case 'vec3': {
+        const arr = Array.isArray(value) ? value : [0, 0, 0]
+        const vec3Value: [number, number, number] = [Number(arr[0]) || 0, Number(arr[1]) || 0, Number(arr[2]) || 0]
+        return (
+          <Vec3Scrubber
+            value={vec3Value}
+            onChange={(newVec) => onChange(newVec)}
+            step={options?.step || 1}
+            precision={options?.precision ?? 0}
+            min={options?.min}
+            max={options?.max}
+          />
+        )
+      }
 
       case 'select':
         return (
@@ -599,141 +528,6 @@ function PropertyField({ label, type, value, onChange, options }: PropertyFieldP
   )
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Draggable Number Input (Unity-style scrubber)
-// ─────────────────────────────────────────────────────────────────────────────
-
-function DraggableNumber({
-  value,
-  onChange,
-  step = 0.1,
-  min,
-  max,
-  color,
-  label,
-}: {
-  value: number
-  onChange: (value: number) => void
-  step?: number
-  min?: number
-  max?: number
-  color?: string
-  label?: string
-}) {
-  const theme = useTheme()
-  const inputRef = useRef<HTMLInputElement>(null)
-  const dragStartRef = useRef<{ x: number; startValue: number } | null>(null)
-
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (e.target === inputRef.current) return // Don't drag when clicking input
-
-    e.preventDefault()
-    dragStartRef.current = { x: e.clientX, startValue: value }
-
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      if (!dragStartRef.current) return
-
-      const dx = moveEvent.clientX - dragStartRef.current.x
-      const sensitivity = step * (moveEvent.shiftKey ? 0.1 : moveEvent.ctrlKey ? 10 : 1)
-      let newValue = dragStartRef.current.startValue + dx * sensitivity
-
-      if (min !== undefined) newValue = Math.max(min, newValue)
-      if (max !== undefined) newValue = Math.min(max, newValue)
-
-      // Round to step
-      newValue = Math.round(newValue / step) * step
-      newValue = parseFloat(newValue.toFixed(4)) // Avoid floating point errors
-
-      onChange(newValue)
-    }
-
-    const handleMouseUp = () => {
-      dragStartRef.current = null
-      document.removeEventListener('mousemove', handleMouseMove)
-      document.removeEventListener('mouseup', handleMouseUp)
-      document.body.style.cursor = ''
-    }
-
-    document.body.style.cursor = 'ew-resize'
-    document.addEventListener('mousemove', handleMouseMove)
-    document.addEventListener('mouseup', handleMouseUp)
-  }, [value, onChange, step, min, max])
-
-  return (
-    <div
-      className="flex items-center gap-1 flex-1 cursor-ew-resize"
-      onMouseDown={handleMouseDown}
-    >
-      {label && (
-        <span
-          className="text-[10px] font-medium select-none"
-          style={{ color: color || theme.textDim, minWidth: '12px' }}
-        >
-          {label}
-        </span>
-      )}
-      <input
-        ref={inputRef}
-        type="number"
-        value={value}
-        step={step}
-        onChange={(e) => {
-          let v = parseFloat(e.target.value) || 0
-          if (min !== undefined) v = Math.max(min, v)
-          if (max !== undefined) v = Math.min(max, v)
-          onChange(v)
-        }}
-        className="w-full px-1 py-0.5 rounded text-xs text-center cursor-text"
-        style={{
-          backgroundColor: theme.bg,
-          color: theme.text,
-          border: `1px solid ${theme.border}`,
-        }}
-        onClick={(e) => e.stopPropagation()}
-      />
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Vec3 Input Component
-// ─────────────────────────────────────────────────────────────────────────────
-
-function Vec3Input({
-  label,
-  value,
-  onChange,
-  step = 0.1,
-}: {
-  label: string
-  value: [number, number, number]
-  onChange: (index: number, value: number) => void
-  step?: number
-}) {
-  const theme = useTheme()
-  const axisColors = ['#ef4444', '#22c55e', '#3b82f6']
-  const axisLabels = ['X', 'Y', 'Z']
-
-  return (
-    <div className="flex items-center gap-2">
-      <label className="shrink-0 w-16 text-xs" style={{ color: theme.textMuted }}>
-        {label}
-      </label>
-      <div className="flex-1 flex gap-1">
-        {[0, 1, 2].map((i) => (
-          <DraggableNumber
-            key={i}
-            value={value[i]}
-            onChange={(v) => onChange(i, v)}
-            step={step}
-            color={axisColors[i]}
-            label={axisLabels[i]}
-          />
-        ))}
-      </div>
-    </div>
-  )
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper Functions
@@ -748,25 +542,31 @@ function getComponentType(component: NodeComponent): string | null {
     return (component as { type: string }).type
   }
 
-  // Legacy format: extract from script path
+  // Check if script name is a registered core component type
   if (component.script) {
+    // Core component types are just their name
+    const coreTypes = [
+      'Rect2D',
+      'GlyphMap', 'GlyphImage', 'GlyphMapRenderer',  // Multi-char ASCII art
+      'Glyph',           // Single character
+      'Terrain',         // Grid of prefab IDs
+      'Animator',        // Frame-based animation
+      'Collider',        // Collision
+      'Interactable',    // Can be activated
+    ]
+    if (coreTypes.includes(component.script)) {
+      return component.script
+    }
+
+    // Legacy builtin format
     if (component.script.startsWith('builtin:')) {
       const builtinType = component.script.replace('builtin:', '')
       const typeMap: Record<string, string> = {
         floor_generator: 'FloorGenerator',
+        tilemap_renderer: 'GlyphMap',
       }
       return typeMap[builtinType] || null
     }
-
-    const scriptName = component.script.split('/').pop()?.replace('.lua', '') || ''
-    const scriptTypeMap: Record<string, string> = {
-      player_controller: 'PlayerController',
-      health: 'Health',
-      enemy_ai: 'AI',
-      flicker: 'Light',
-      interactable: 'Interactable',
-    }
-    return scriptTypeMap[scriptName] || null
   }
 
   return null

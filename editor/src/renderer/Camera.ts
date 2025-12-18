@@ -1,5 +1,7 @@
 // Free-flying perspective camera for 3D editor
 
+export type CameraMode = '2d' | '3d'
+
 export class Camera {
   position: [number, number, number] = [12, 8, 12]
 
@@ -7,12 +9,26 @@ export class Camera {
   yaw: number = -Math.PI * 0.75  // Looking toward origin
   pitch: number = -0.4  // Slightly looking down
 
-  // Field of view
+  // Field of view (perspective mode)
   fov: number = 60  // degrees
+
+  // Orthographic settings (2D mode)
+  orthoSize: number = 12  // Half-height of the view in world units
+  orthoCenter: [number, number] = [7, 6]  // X, Z center point for 2D view (centered on tilemap)
+
+  // Camera mode
+  mode: CameraMode = '3d'
 
   // For smooth movement
   private velocity: [number, number, number] = [0, 0, 0]
   private smoothing: number = 15
+
+  // Saved 3D camera state for returning from 2D mode
+  private saved3DState: {
+    position: [number, number, number]
+    yaw: number
+    pitch: number
+  } | null = null
 
   // Set starting position looking at a point
   lookAt(targetX: number, targetY: number, targetZ: number) {
@@ -79,7 +95,66 @@ export class Camera {
     this.velocity = [0, 0, 0]
   }
 
+  // Switch camera mode
+  setMode(mode: CameraMode) {
+    if (mode === this.mode) return
+
+    if (mode === '2d') {
+      // Save current 3D state
+      this.saved3DState = {
+        position: [...this.position],
+        yaw: this.yaw,
+        pitch: this.pitch,
+      }
+      // Position camera above looking down
+      this.position = [this.orthoCenter[0], 50, this.orthoCenter[1]]
+      this.yaw = 0
+      this.pitch = -Math.PI / 2  // Looking straight down
+    } else {
+      // Restore 3D state if available
+      if (this.saved3DState) {
+        this.position = [...this.saved3DState.position]
+        this.yaw = this.saved3DState.yaw
+        this.pitch = this.saved3DState.pitch
+      } else {
+        // Default 3D position
+        this.position = [12, 8, 12]
+        this.yaw = -Math.PI * 0.75
+        this.pitch = -0.4
+      }
+    }
+    this.mode = mode
+    this.velocity = [0, 0, 0]
+  }
+
+  // Pan in 2D mode (move ortho center)
+  pan2D(deltaX: number, deltaZ: number) {
+    if (this.mode !== '2d') return
+    this.orthoCenter[0] += deltaX
+    this.orthoCenter[1] += deltaZ
+    this.position[0] = this.orthoCenter[0]
+    this.position[2] = this.orthoCenter[1]
+  }
+
+  // Zoom in 2D mode
+  zoom2D(factor: number) {
+    if (this.mode !== '2d') return
+    this.orthoSize = Math.max(2, Math.min(100, this.orthoSize * factor))
+  }
+
   getViewMatrix(): Float32Array {
+    if (this.mode === '2d') {
+      // In 2D mode, camera looks straight down -Y axis
+      // Use [0, 0, -1] as up vector to avoid gimbal lock
+      const target: [number, number, number] = [
+        this.position[0],
+        0,  // Look at ground plane
+        this.position[2],
+      ]
+      return lookAt(this.position, target, [0, 0, -1])
+    }
+
+    // 3D mode: normal free-fly camera
     const forward = this.getForward()
     const target: [number, number, number] = [
       this.position[0] + forward[0],
@@ -90,6 +165,16 @@ export class Camera {
   }
 
   getProjectionMatrix(aspect: number): Float32Array {
+    if (this.mode === '2d') {
+      // Orthographic projection for 2D mode (top-down view)
+      const halfHeight = this.orthoSize
+      const halfWidth = halfHeight * aspect
+      // Camera is at Y=50 looking down. Ground is at Y=0, which is -50 in view space.
+      // We need near/far to capture objects from just below camera to well below ground.
+      // Using negative near allows objects in front of camera (negative view Z) to be visible.
+      return orthographic(-halfWidth, halfWidth, -halfHeight, halfHeight, -100, 100)
+    }
+    // Perspective projection for 3D mode
     const fovRad = this.fov * Math.PI / 180
     const near = 0.1
     const far = 500

@@ -181,6 +181,33 @@
   padding-right: 24px !important;
 }
 
+/* Float button (pop-out to window) - only shown in Tauri */
+.dock-tab-float-btn {
+  position: absolute;
+  right: 20px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  color: var(--dock-text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+  padding: 2px 4px;
+  border-radius: 2px;
+}
+
+.dock-tab:hover .dock-tab-float-btn {
+  opacity: 0.5;
+}
+
+.dock-tab-float-btn:hover {
+  opacity: 1 !important;
+  color: var(--dock-accent) !important;
+  background: rgba(255, 255, 255, 0.1);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════ */
 /* Tab content area */
 /* ═══════════════════════════════════════════════════════════════════════════ */

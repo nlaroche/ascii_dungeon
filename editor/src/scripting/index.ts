@@ -25,42 +25,40 @@ export {
 export type { PropertyType, PropertyOptions, ComponentMetadata, ComponentOptions } from './decorators'
 
 // Built-in Components
-export { TransformComponent } from './components/TransformComponent'
-export { VisualComponent } from './components/VisualComponent'
-export { HealthComponent } from './components/HealthComponent'
-export { LightComponent } from './components/LightComponent'
-export type { LightType } from './components/LightComponent'
-export { FloorGeneratorComponent } from './components/FloorGeneratorComponent'
-export type { TilePattern } from './components/FloorGeneratorComponent'
+export { AsciiComponent } from './components/AsciiComponent'
+export type { RenderMode, CharCell, AsciiFrame } from './components/AsciiComponent'
+export { GlyphComponent } from './components/GlyphComponent'
+export { TerrainComponent } from './components/TerrainComponent'
+export { AnimatorComponent } from './components/AnimatorComponent'
+export { ColliderComponent } from './components/ColliderComponent'
+export type { ColliderType } from './components/ColliderComponent'
 export { InteractableComponent } from './components/InteractableComponent'
 export type { InteractionType } from './components/InteractableComponent'
-export { AIComponent } from './components/AIComponent'
-export type { AIState, AIBehavior } from './components/AIComponent'
-export { PlayerControllerComponent } from './components/PlayerControllerComponent'
-export type { MovementMode } from './components/PlayerControllerComponent'
+
+// Palettes
+export * from './palettes'
+
+// ASCII Art Library
+export * from './asciiArt'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Component type map for serialization
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { TransformComponent } from './components/TransformComponent'
-import { VisualComponent } from './components/VisualComponent'
-import { HealthComponent } from './components/HealthComponent'
-import { LightComponent } from './components/LightComponent'
-import { FloorGeneratorComponent } from './components/FloorGeneratorComponent'
+import { AsciiComponent } from './components/AsciiComponent'
+import { GlyphComponent } from './components/GlyphComponent'
+import { TerrainComponent } from './components/TerrainComponent'
+import { AnimatorComponent } from './components/AnimatorComponent'
+import { ColliderComponent } from './components/ColliderComponent'
 import { InteractableComponent } from './components/InteractableComponent'
-import { AIComponent } from './components/AIComponent'
-import { PlayerControllerComponent } from './components/PlayerControllerComponent'
 
 export const BUILTIN_COMPONENTS = {
-  Transform: TransformComponent,
-  Visual: VisualComponent,
-  Health: HealthComponent,
-  Light: LightComponent,
-  FloorGenerator: FloorGeneratorComponent,
+  Ascii: AsciiComponent,
+  Glyph: GlyphComponent,
+  Terrain: TerrainComponent,
+  Animator: AnimatorComponent,
+  Collider: ColliderComponent,
   Interactable: InteractableComponent,
-  AI: AIComponent,
-  PlayerController: PlayerControllerComponent,
 } as const
 
 export type BuiltinComponentName = keyof typeof BUILTIN_COMPONENTS

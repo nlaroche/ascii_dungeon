@@ -65,9 +65,14 @@ const MAX_GLYPH_INDICES = 100000  // Max indices for all glyph meshes
 const GLYPH_VERTEX_SIZE = 11 * 4  // 11 floats: pos(3) + normal(3) + color(4) + emission(1)
 
 export class WebGPURenderer {
-  private device!: GPUDevice
-  private context!: GPUCanvasContext
-  private format!: GPUTextureFormat
+  private _device!: GPUDevice
+  private _context!: GPUCanvasContext
+  private _format!: GPUTextureFormat
+
+  // Public getters for Terminal2D integration
+  get device(): GPUDevice { return this._device }
+  get context(): GPUCanvasContext { return this._context }
+  get format(): GPUTextureFormat { return this._format }
 
   // Geometry
   private vertexBuffer!: GPUBuffer
@@ -139,7 +144,7 @@ export class WebGPURenderer {
   // VSM (Variance Shadow Mapping) resources
   private vsmPipeline!: GPURenderPipeline
   private vsmBlurPipeline!: GPURenderPipeline
-  private vsmShadowMap!: GPUTexture      // rg32float format (depth, depth²)
+  private vsmShadowMap!: GPUTexture      // rgba16float format (depth, depth²)
   private vsmBlurTemp!: GPUTexture       // Intermediate blur texture
   private vsmDepthTexture!: GPUTexture   // Depth texture for VSM pass
   private vsmBindGroup!: GPUBindGroup
@@ -216,15 +221,15 @@ export class WebGPURenderer {
       throw new Error('WebGPU not supported - no adapter found')
     }
 
-    this.device = await adapter.requestDevice()
+    this._device = await adapter.requestDevice()
 
     // Setup canvas context
-    this.context = canvas.getContext('webgpu') as GPUCanvasContext
-    this.format = navigator.gpu.getPreferredCanvasFormat()
+    this._context = canvas.getContext('webgpu') as GPUCanvasContext
+    this._format = navigator.gpu.getPreferredCanvasFormat()
 
-    this.context.configure({
-      device: this.device,
-      format: this.format,
+    this._context.configure({
+      device: this._device,
+      format: this._format,
       alphaMode: 'premultiplied',
     })
 
@@ -235,25 +240,25 @@ export class WebGPURenderer {
     this.createGeometryBuffers()
 
     // Create instance buffer
-    this.instanceBuffer = this.device.createBuffer({
+    this.instanceBuffer = this._device.createBuffer({
       size: MAX_INSTANCES * INSTANCE_BYTES,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
     })
 
     // Create uniform buffer
-    this.uniformBuffer = this.device.createBuffer({
+    this.uniformBuffer = this._device.createBuffer({
       size: this.uniformData.byteLength,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     })
 
     // Create grid uniform buffer
-    this.gridUniformBuffer = this.device.createBuffer({
+    this.gridUniformBuffer = this._device.createBuffer({
       size: this.gridUniformData.byteLength,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     })
 
     // Create sky uniform buffer
-    this.skyUniformBuffer = this.device.createBuffer({
+    this.skyUniformBuffer = this._device.createBuffer({
       size: this.skyUniformData.byteLength,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     })
@@ -277,7 +282,7 @@ export class WebGPURenderer {
     this.createBindGroups()
 
     // Initialize post-processing
-    this.postProcessManager = new PostProcessManager(this.device, this.format)
+    this.postProcessManager = new PostProcessManager(this._device, this._format)
     await this.postProcessManager.init()
     this.postProcessManager.resize(this.width, this.height)
 
@@ -285,63 +290,63 @@ export class WebGPURenderer {
   }
 
   private createGeometryBuffers() {
-    this.vertexBuffer = this.device.createBuffer({
+    this.vertexBuffer = this._device.createBuffer({
       size: CUBE_VERTICES.byteLength,
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     })
-    this.device.queue.writeBuffer(this.vertexBuffer, 0, CUBE_VERTICES)
+    this._device.queue.writeBuffer(this.vertexBuffer, 0, CUBE_VERTICES)
 
-    this.indexBuffer = this.device.createBuffer({
+    this.indexBuffer = this._device.createBuffer({
       size: CUBE_INDICES.byteLength,
       usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
     })
-    this.device.queue.writeBuffer(this.indexBuffer, 0, CUBE_INDICES)
+    this._device.queue.writeBuffer(this.indexBuffer, 0, CUBE_INDICES)
   }
 
   private createTextures() {
     // Depth texture for main pass (depth32float for post-process sampling)
-    this.depthTexture = this.device.createTexture({
+    this.depthTexture = this._device.createTexture({
       size: [this.width, this.height],
       format: 'depth32float',
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     })
 
     // Shadow map
-    this.shadowMap = this.device.createTexture({
+    this.shadowMap = this._device.createTexture({
       size: [SHADOW_MAP_SIZE, SHADOW_MAP_SIZE],
       format: 'depth32float',
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     })
 
     // Reflection texture (for water)
-    this.reflectionTexture = this.device.createTexture({
+    this.reflectionTexture = this._device.createTexture({
       size: [this.width, this.height],
-      format: this.format,
+      format: this._format,
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     })
 
-    this.reflectionDepth = this.device.createTexture({
+    this.reflectionDepth = this._device.createTexture({
       size: [this.width, this.height],
       format: 'depth32float',
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
     })
 
-    // VSM shadow map (rg32float for depth moments)
-    this.vsmShadowMap = this.device.createTexture({
+    // VSM shadow map (rgba16float for depth moments)
+    this.vsmShadowMap = this._device.createTexture({
       size: [SHADOW_MAP_SIZE, SHADOW_MAP_SIZE],
-      format: 'rg32float',
+      format: 'rgba16float',
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     })
 
     // VSM blur intermediate texture
-    this.vsmBlurTemp = this.device.createTexture({
+    this.vsmBlurTemp = this._device.createTexture({
       size: [SHADOW_MAP_SIZE, SHADOW_MAP_SIZE],
-      format: 'rg32float',
+      format: 'rgba16float',
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     })
 
     // VSM depth texture (for depth testing during VSM shadow pass)
-    this.vsmDepthTexture = this.device.createTexture({
+    this.vsmDepthTexture = this._device.createTexture({
       size: [SHADOW_MAP_SIZE, SHADOW_MAP_SIZE],
       format: 'depth32float',
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
@@ -349,19 +354,19 @@ export class WebGPURenderer {
   }
 
   private createSamplers() {
-    this.shadowSampler = this.device.createSampler({
+    this.shadowSampler = this._device.createSampler({
       compare: 'greater',  // ref > stored → 1.0: fragment further than shadow map = LIT (inverted depth)
       magFilter: 'linear',
       minFilter: 'linear',
     })
 
-    this.reflectionSampler = this.device.createSampler({
+    this.reflectionSampler = this._device.createSampler({
       magFilter: 'linear',
       minFilter: 'linear',
     })
 
     // VSM sampler - non-comparison, linear filtering for soft shadows
-    this.vsmSampler = this.device.createSampler({
+    this.vsmSampler = this._device.createSampler({
       magFilter: 'linear',
       minFilter: 'linear',
       addressModeU: 'clamp-to-edge',
@@ -370,8 +375,8 @@ export class WebGPURenderer {
   }
 
   private async createPipelines() {
-    const voxelModule = this.device.createShaderModule({ code: voxelShaderCode })
-    const waterModule = this.device.createShaderModule({ code: waterShaderCode })
+    const voxelModule = this._device.createShaderModule({ code: voxelShaderCode })
+    const waterModule = this._device.createShaderModule({ code: waterShaderCode })
 
     // Check for shader compilation errors
     const voxelInfo = await voxelModule.getCompilationInfo()
@@ -398,7 +403,7 @@ export class WebGPURenderer {
     }
 
     // Bind group layout for main pipeline
-    const mainBindGroupLayout = this.device.createBindGroupLayout({
+    const mainBindGroupLayout = this._device.createBindGroupLayout({
       entries: [
         { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
         { binding: 1, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
@@ -408,8 +413,8 @@ export class WebGPURenderer {
     })
 
     // Main render pipeline
-    this.mainPipeline = this.device.createRenderPipeline({
-      layout: this.device.createPipelineLayout({ bindGroupLayouts: [mainBindGroupLayout] }),
+    this.mainPipeline = this._device.createRenderPipeline({
+      layout: this._device.createPipelineLayout({ bindGroupLayouts: [mainBindGroupLayout] }),
       vertex: {
         module: voxelModule,
         entryPoint: 'vs_main',
@@ -418,7 +423,7 @@ export class WebGPURenderer {
       fragment: {
         module: voxelModule,
         entryPoint: 'fs_main',
-        targets: [{ format: this.format }],
+        targets: [{ format: this._format }],
       },
       primitive: {
         topology: 'triangle-list',
@@ -432,15 +437,15 @@ export class WebGPURenderer {
     })
 
     // Shadow pipeline (depth only)
-    const shadowBindGroupLayout = this.device.createBindGroupLayout({
+    const shadowBindGroupLayout = this._device.createBindGroupLayout({
       entries: [
         { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
         { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
       ],
     })
 
-    this.shadowPipeline = this.device.createRenderPipeline({
-      layout: this.device.createPipelineLayout({ bindGroupLayouts: [shadowBindGroupLayout] }),
+    this.shadowPipeline = this._device.createRenderPipeline({
+      layout: this._device.createPipelineLayout({ bindGroupLayouts: [shadowBindGroupLayout] }),
       vertex: {
         module: voxelModule,
         entryPoint: 'vs_shadow',
@@ -458,16 +463,16 @@ export class WebGPURenderer {
     })
 
     // VSM shadow pipeline (outputs depth moments to color attachment)
-    const vsmModule = this.device.createShaderModule({ code: shadowVSMCode })
-    const vsmBindGroupLayout = this.device.createBindGroupLayout({
+    const vsmModule = this._device.createShaderModule({ code: shadowVSMCode })
+    const vsmBindGroupLayout = this._device.createBindGroupLayout({
       entries: [
         { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
         { binding: 1, visibility: GPUShaderStage.VERTEX, buffer: { type: 'read-only-storage' } },
       ],
     })
 
-    this.vsmPipeline = this.device.createRenderPipeline({
-      layout: this.device.createPipelineLayout({ bindGroupLayouts: [vsmBindGroupLayout] }),
+    this.vsmPipeline = this._device.createRenderPipeline({
+      layout: this._device.createPipelineLayout({ bindGroupLayouts: [vsmBindGroupLayout] }),
       vertex: {
         module: vsmModule,
         entryPoint: 'vs_main',
@@ -476,7 +481,7 @@ export class WebGPURenderer {
       fragment: {
         module: vsmModule,
         entryPoint: 'fs_main',
-        targets: [{ format: 'rg32float' }],
+        targets: [{ format: 'rgba16float' }],
       },
       primitive: {
         topology: 'triangle-list',
@@ -490,8 +495,8 @@ export class WebGPURenderer {
     })
 
     // VSM blur pipeline (Gaussian blur)
-    const vsmBlurModule = this.device.createShaderModule({ code: vsmBlurCode })
-    const vsmBlurBindGroupLayout = this.device.createBindGroupLayout({
+    const vsmBlurModule = this._device.createShaderModule({ code: vsmBlurCode })
+    const vsmBlurBindGroupLayout = this._device.createBindGroupLayout({
       entries: [
         { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
         { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'float' } },
@@ -499,8 +504,8 @@ export class WebGPURenderer {
       ],
     })
 
-    this.vsmBlurPipeline = this.device.createRenderPipeline({
-      layout: this.device.createPipelineLayout({ bindGroupLayouts: [vsmBlurBindGroupLayout] }),
+    this.vsmBlurPipeline = this._device.createRenderPipeline({
+      layout: this._device.createPipelineLayout({ bindGroupLayouts: [vsmBlurBindGroupLayout] }),
       vertex: {
         module: vsmBlurModule,
         entryPoint: 'vs_main',
@@ -508,7 +513,7 @@ export class WebGPURenderer {
       fragment: {
         module: vsmBlurModule,
         entryPoint: 'fs_main',
-        targets: [{ format: 'rg32float' }],
+        targets: [{ format: 'rgba16float' }],
       },
       primitive: {
         topology: 'triangle-list',
@@ -516,13 +521,13 @@ export class WebGPURenderer {
     })
 
     // VSM blur uniform buffer
-    this.vsmBlurUniformBuffer = this.device.createBuffer({
+    this.vsmBlurUniformBuffer = this._device.createBuffer({
       size: 16, // vec2 direction + vec2 texelSize
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     })
 
     // Water pipeline
-    const waterBindGroupLayout = this.device.createBindGroupLayout({
+    const waterBindGroupLayout = this._device.createBindGroupLayout({
       entries: [
         { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
         { binding: 1, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'read-only-storage' } },
@@ -531,8 +536,8 @@ export class WebGPURenderer {
       ],
     })
 
-    this.waterPipeline = this.device.createRenderPipeline({
-      layout: this.device.createPipelineLayout({ bindGroupLayouts: [waterBindGroupLayout] }),
+    this.waterPipeline = this._device.createRenderPipeline({
+      layout: this._device.createPipelineLayout({ bindGroupLayouts: [waterBindGroupLayout] }),
       vertex: {
         module: waterModule,
         entryPoint: 'vs_main',
@@ -542,7 +547,7 @@ export class WebGPURenderer {
         module: waterModule,
         entryPoint: 'fs_main',
         targets: [{
-          format: this.format,
+          format: this._format,
           blend: {
             color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' },
             alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
@@ -561,8 +566,8 @@ export class WebGPURenderer {
     })
 
     // Sky pipeline (fullscreen gradient)
-    const skyModule = this.device.createShaderModule({ code: skyShaderCode })
-    this.skyPipeline = this.device.createRenderPipeline({
+    const skyModule = this._device.createShaderModule({ code: skyShaderCode })
+    this.skyPipeline = this._device.createRenderPipeline({
       layout: 'auto',
       vertex: {
         module: skyModule,
@@ -571,7 +576,7 @@ export class WebGPURenderer {
       fragment: {
         module: skyModule,
         entryPoint: 'fs_main',
-        targets: [{ format: this.format }],
+        targets: [{ format: this._format }],
       },
       primitive: {
         topology: 'triangle-list',
@@ -584,8 +589,8 @@ export class WebGPURenderer {
     })
 
     // Grid pipeline
-    const gridModule = this.device.createShaderModule({ code: gridShaderCode })
-    this.gridPipeline = this.device.createRenderPipeline({
+    const gridModule = this._device.createShaderModule({ code: gridShaderCode })
+    this.gridPipeline = this._device.createRenderPipeline({
       layout: 'auto',
       vertex: {
         module: gridModule,
@@ -595,7 +600,7 @@ export class WebGPURenderer {
         module: gridModule,
         entryPoint: 'fs_main',
         targets: [{
-          format: this.format,
+          format: this._format,
           blend: {
             color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha' },
             alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha' },
@@ -614,7 +619,7 @@ export class WebGPURenderer {
   }
 
   private async createGizmoPipeline() {
-    const gizmoModule = this.device.createShaderModule({ code: gizmoShaderCode })
+    const gizmoModule = this._device.createShaderModule({ code: gizmoShaderCode })
 
     // Check for shader compilation errors
     const info = await gizmoModule.getCompilationInfo()
@@ -626,7 +631,7 @@ export class WebGPURenderer {
     }
 
     // Create uniform buffer for gizmo
-    this.gizmoUniformBuffer = this.device.createBuffer({
+    this.gizmoUniformBuffer = this._device.createBuffer({
       size: this.gizmoUniformData.byteLength,
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     })
@@ -635,12 +640,12 @@ export class WebGPURenderer {
     const MAX_GIZMO_VERTICES = 2048
     const MAX_GIZMO_INDICES = 4096
 
-    this.gizmoVertexBuffer = this.device.createBuffer({
+    this.gizmoVertexBuffer = this._device.createBuffer({
       size: MAX_GIZMO_VERTICES * 7 * 4, // 7 floats per vertex
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     })
 
-    this.gizmoIndexBuffer = this.device.createBuffer({
+    this.gizmoIndexBuffer = this._device.createBuffer({
       size: MAX_GIZMO_INDICES * 2, // 2 bytes per index
       usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
     })
@@ -655,7 +660,7 @@ export class WebGPURenderer {
     }
 
     // Gizmo pipeline
-    this.gizmoPipeline = this.device.createRenderPipeline({
+    this.gizmoPipeline = this._device.createRenderPipeline({
       layout: 'auto',
       vertex: {
         module: gizmoModule,
@@ -665,7 +670,7 @@ export class WebGPURenderer {
       fragment: {
         module: gizmoModule,
         entryPoint: 'fs_main',
-        targets: [{ format: this.format }],
+        targets: [{ format: this._format }],
       },
       primitive: {
         topology: 'triangle-list',
@@ -679,27 +684,27 @@ export class WebGPURenderer {
     })
 
     // Wireframe uniform buffer (viewProj + model + color)
-    this.wireframeUniformBuffer = this.device.createBuffer({
+    this.wireframeUniformBuffer = this._device.createBuffer({
       size: (16 + 16 + 4) * 4, // viewProj(16) + modelMatrix(16) + color(4)
       usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
     })
 
     // Create wireframe vertex/index buffers
     const wireBox = GizmoGeometry.createWireframeBox()
-    this.wireframeVertexBuffer = this.device.createBuffer({
+    this.wireframeVertexBuffer = this._device.createBuffer({
       size: wireBox.vertices.byteLength,
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     })
-    this.device.queue.writeBuffer(this.wireframeVertexBuffer, 0, wireBox.vertices)
+    this._device.queue.writeBuffer(this.wireframeVertexBuffer, 0, wireBox.vertices as unknown as BufferSource)
 
-    this.wireframeIndexBuffer = this.device.createBuffer({
+    this.wireframeIndexBuffer = this._device.createBuffer({
       size: wireBox.indices.byteLength,
       usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
     })
-    this.device.queue.writeBuffer(this.wireframeIndexBuffer, 0, wireBox.indices)
+    this._device.queue.writeBuffer(this.wireframeIndexBuffer, 0, wireBox.indices as unknown as BufferSource)
 
     // Wireframe pipeline (line-list)
-    this.wireframePipeline = this.device.createRenderPipeline({
+    this.wireframePipeline = this._device.createRenderPipeline({
       layout: 'auto',
       vertex: {
         module: gizmoModule,
@@ -714,7 +719,7 @@ export class WebGPURenderer {
       fragment: {
         module: gizmoModule,
         entryPoint: 'fs_wireframe',
-        targets: [{ format: this.format }],
+        targets: [{ format: this._format }],
       },
       primitive: {
         topology: 'line-list',
@@ -728,7 +733,7 @@ export class WebGPURenderer {
   }
 
   private async createGlyphPipeline() {
-    const glyphModule = this.device.createShaderModule({ code: glyphShaderCode })
+    const glyphModule = this._device.createShaderModule({ code: glyphShaderCode })
 
     // Check for shader compilation errors
     const info = await glyphModule.getCompilationInfo()
@@ -740,13 +745,13 @@ export class WebGPURenderer {
     }
 
     // Create glyph vertex buffer (dynamic, updated each frame)
-    this.glyphVertexBuffer = this.device.createBuffer({
+    this.glyphVertexBuffer = this._device.createBuffer({
       size: MAX_GLYPH_VERTICES * GLYPH_VERTEX_SIZE,
       usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST,
     })
 
     // Create glyph index buffer (dynamic, updated each frame)
-    this.glyphIndexBuffer = this.device.createBuffer({
+    this.glyphIndexBuffer = this._device.createBuffer({
       size: MAX_GLYPH_INDICES * 4, // 4 bytes per index (uint32)
       usage: GPUBufferUsage.INDEX | GPUBufferUsage.COPY_DST,
     })
@@ -763,7 +768,7 @@ export class WebGPURenderer {
     }
 
     // Bind group layout for glyph pipeline
-    const glyphBindGroupLayout = this.device.createBindGroupLayout({
+    const glyphBindGroupLayout = this._device.createBindGroupLayout({
       entries: [
         { binding: 0, visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT, buffer: { type: 'uniform' } },
         { binding: 1, visibility: GPUShaderStage.FRAGMENT, texture: { sampleType: 'depth' } },
@@ -772,8 +777,8 @@ export class WebGPURenderer {
     })
 
     // Glyph render pipeline
-    this.glyphPipeline = this.device.createRenderPipeline({
-      layout: this.device.createPipelineLayout({ bindGroupLayouts: [glyphBindGroupLayout] }),
+    this.glyphPipeline = this._device.createRenderPipeline({
+      layout: this._device.createPipelineLayout({ bindGroupLayouts: [glyphBindGroupLayout] }),
       vertex: {
         module: glyphModule,
         entryPoint: 'vs_main',
@@ -782,7 +787,7 @@ export class WebGPURenderer {
       fragment: {
         module: glyphModule,
         entryPoint: 'fs_main',
-        targets: [{ format: this.format }],
+        targets: [{ format: this._format }],
       },
       primitive: {
         topology: 'triangle-list',
@@ -796,14 +801,14 @@ export class WebGPURenderer {
     })
 
     // Glyph shadow pipeline (depth-only for shadow casting)
-    const glyphShadowBindGroupLayout = this.device.createBindGroupLayout({
+    const glyphShadowBindGroupLayout = this._device.createBindGroupLayout({
       entries: [
         { binding: 0, visibility: GPUShaderStage.VERTEX, buffer: { type: 'uniform' } },
       ],
     })
 
-    this.glyphShadowPipeline = this.device.createRenderPipeline({
-      layout: this.device.createPipelineLayout({ bindGroupLayouts: [glyphShadowBindGroupLayout] }),
+    this.glyphShadowPipeline = this._device.createRenderPipeline({
+      layout: this._device.createPipelineLayout({ bindGroupLayouts: [glyphShadowBindGroupLayout] }),
       vertex: {
         module: glyphModule,
         entryPoint: 'vs_shadow',
@@ -823,7 +828,7 @@ export class WebGPURenderer {
 
   private createBindGroups() {
     // Main bind group
-    this.mainBindGroup = this.device.createBindGroup({
+    this.mainBindGroup = this._device.createBindGroup({
       layout: this.mainPipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.uniformBuffer } },
@@ -834,7 +839,7 @@ export class WebGPURenderer {
     })
 
     // Shadow bind group
-    this.shadowBindGroup = this.device.createBindGroup({
+    this.shadowBindGroup = this._device.createBindGroup({
       layout: this.shadowPipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.uniformBuffer } },
@@ -843,7 +848,7 @@ export class WebGPURenderer {
     })
 
     // Water bind group
-    this.waterBindGroup = this.device.createBindGroup({
+    this.waterBindGroup = this._device.createBindGroup({
       layout: this.waterPipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.uniformBuffer } },
@@ -854,7 +859,7 @@ export class WebGPURenderer {
     })
 
     // Grid bind group
-    this.gridBindGroup = this.device.createBindGroup({
+    this.gridBindGroup = this._device.createBindGroup({
       layout: this.gridPipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.gridUniformBuffer } },
@@ -862,7 +867,7 @@ export class WebGPURenderer {
     })
 
     // Sky bind group
-    this.skyBindGroup = this.device.createBindGroup({
+    this.skyBindGroup = this._device.createBindGroup({
       layout: this.skyPipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.skyUniformBuffer } },
@@ -870,7 +875,7 @@ export class WebGPURenderer {
     })
 
     // Gizmo bind group
-    this.gizmoBindGroup = this.device.createBindGroup({
+    this.gizmoBindGroup = this._device.createBindGroup({
       layout: this.gizmoPipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.gizmoUniformBuffer } },
@@ -878,7 +883,7 @@ export class WebGPURenderer {
     })
 
     // Wireframe bind group (uses binding 0 for its own uniforms)
-    this.wireframeBindGroup = this.device.createBindGroup({
+    this.wireframeBindGroup = this._device.createBindGroup({
       layout: this.wireframePipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.wireframeUniformBuffer } },
@@ -886,7 +891,7 @@ export class WebGPURenderer {
     })
 
     // Glyph bind group
-    this.glyphBindGroup = this.device.createBindGroup({
+    this.glyphBindGroup = this._device.createBindGroup({
       layout: this.glyphPipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.uniformBuffer } },
@@ -896,7 +901,7 @@ export class WebGPURenderer {
     })
 
     // Glyph shadow bind group (for shadow casting)
-    this.glyphShadowBindGroup = this.device.createBindGroup({
+    this.glyphShadowBindGroup = this._device.createBindGroup({
       layout: this.glyphShadowPipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.uniformBuffer } },
@@ -904,7 +909,7 @@ export class WebGPURenderer {
     })
 
     // VSM bind group (uses same layout as shadow bind group)
-    this.vsmBindGroup = this.device.createBindGroup({
+    this.vsmBindGroup = this._device.createBindGroup({
       layout: this.vsmPipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.uniformBuffer } },
@@ -913,7 +918,7 @@ export class WebGPURenderer {
     })
 
     // VSM blur bind groups (horizontal: vsmShadowMap -> vsmBlurTemp, vertical: vsmBlurTemp -> vsmShadowMap)
-    this.vsmBlurBindGroupH = this.device.createBindGroup({
+    this.vsmBlurBindGroupH = this._device.createBindGroup({
       layout: this.vsmBlurPipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.vsmBlurUniformBuffer } },
@@ -922,7 +927,7 @@ export class WebGPURenderer {
       ],
     })
 
-    this.vsmBlurBindGroupV = this.device.createBindGroup({
+    this.vsmBlurBindGroupV = this._device.createBindGroup({
       layout: this.vsmBlurPipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.vsmBlurUniformBuffer } },
@@ -944,26 +949,26 @@ export class WebGPURenderer {
     this.reflectionTexture.destroy()
     this.reflectionDepth.destroy()
 
-    this.depthTexture = this.device.createTexture({
+    this.depthTexture = this._device.createTexture({
       size: [width, height],
       format: 'depth32float',
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     })
 
-    this.reflectionTexture = this.device.createTexture({
+    this.reflectionTexture = this._device.createTexture({
       size: [width, height],
-      format: this.format,
+      format: this._format,
       usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
     })
 
-    this.reflectionDepth = this.device.createTexture({
+    this.reflectionDepth = this._device.createTexture({
       size: [width, height],
       format: 'depth32float',
       usage: GPUTextureUsage.RENDER_ATTACHMENT,
     })
 
     // Recreate bind groups that reference resized textures
-    this.waterBindGroup = this.device.createBindGroup({
+    this.waterBindGroup = this._device.createBindGroup({
       layout: this.waterPipeline.getBindGroupLayout(0),
       entries: [
         { binding: 0, resource: { buffer: this.uniformBuffer } },
@@ -996,7 +1001,7 @@ export class WebGPURenderer {
     }
     this.frameCount++
 
-    this.device.queue.writeBuffer(this.instanceBuffer, 0, instanceData.buffer, instanceData.byteOffset, instanceData.byteLength)
+    this._device.queue.writeBuffer(this.instanceBuffer, 0, instanceData.buffer, instanceData.byteOffset, instanceData.byteLength)
 
     // Update uniforms with lighting from settings
     const viewProj = this.multiplyMatrices(
@@ -1047,9 +1052,9 @@ export class WebGPURenderer {
     // ambientGround: 56-59
     this.uniformData.set(ambientGround, 56)
 
-    this.device.queue.writeBuffer(this.uniformBuffer, 0, this.uniformData)
+    this._device.queue.writeBuffer(this.uniformBuffer, 0, this.uniformData)
 
-    const commandEncoder = this.device.createCommandEncoder()
+    const commandEncoder = this._device.createCommandEncoder()
 
     // Update glyph buffers early so they can be used in shadow pass
     const hasGlyphs = scene.hasGlyphs()
@@ -1057,8 +1062,8 @@ export class WebGPURenderer {
       const glyphVertexData = scene.getGlyphVertexData()
       const glyphIndexData = scene.getGlyphIndexData()
       this.glyphIndexCount = scene.getGlyphIndexCount()
-      this.device.queue.writeBuffer(this.glyphVertexBuffer, 0, glyphVertexData.buffer, glyphVertexData.byteOffset, glyphVertexData.byteLength)
-      this.device.queue.writeBuffer(this.glyphIndexBuffer, 0, glyphIndexData.buffer, glyphIndexData.byteOffset, glyphIndexData.byteLength)
+      this._device.queue.writeBuffer(this.glyphVertexBuffer, 0, glyphVertexData.buffer, glyphVertexData.byteOffset, glyphVertexData.byteLength)
+      this._device.queue.writeBuffer(this.glyphIndexBuffer, 0, glyphIndexData.buffer, glyphIndexData.byteOffset, glyphIndexData.byteLength)
     }
 
     // Shadow pass - render both voxels and glyphs to shadow map
@@ -1118,7 +1123,7 @@ export class WebGPURenderer {
     // Determine render target (post-process scene texture or canvas)
     const hasPostEffects = this.postProcessEnabled && this.postProcessManager?.hasActiveEffects()
     const sceneTarget = hasPostEffects ? this.postProcessManager.getSceneTarget() : null
-    const mainRenderTarget = sceneTarget?.view ?? this.context.getCurrentTexture().createView()
+    const mainRenderTarget = sceneTarget?.view ?? this._context.getCurrentTexture().createView()
 
     // Pass depth texture to post-process manager for effects that need it
     if (hasPostEffects) {
@@ -1146,7 +1151,7 @@ export class WebGPURenderer {
     this.skyUniformData.set([sky.zenithColor[0], sky.zenithColor[1], sky.zenithColor[2], 1.0], 0)
     this.skyUniformData.set([sky.horizonColor[0], sky.horizonColor[1], sky.horizonColor[2], 1.0], 4)
     this.skyUniformData.set([sky.groundColor[0], sky.groundColor[1], sky.groundColor[2], 1.0], 8)
-    this.device.queue.writeBuffer(this.skyUniformBuffer, 0, this.skyUniformData)
+    this._device.queue.writeBuffer(this.skyUniformBuffer, 0, this.skyUniformData)
 
     // Draw sky gradient first
     mainPass.setPipeline(this.skyPipeline)
@@ -1156,7 +1161,7 @@ export class WebGPURenderer {
     // Draw grid
     this.gridUniformData.set(viewProj, 0)
     this.gridUniformData.set(camera.position, 16)
-    this.device.queue.writeBuffer(this.gridUniformBuffer, 0, this.gridUniformData)
+    this._device.queue.writeBuffer(this.gridUniformBuffer, 0, this.gridUniformData)
     mainPass.setPipeline(this.gridPipeline)
     mainPass.setBindGroup(0, this.gridBindGroup)
     mainPass.draw(6) // Two triangles for the quad
@@ -1188,11 +1193,11 @@ export class WebGPURenderer {
 
     // Execute post-processing chain
     if (hasPostEffects) {
-      const canvasView = this.context.getCurrentTexture().createView()
+      const canvasView = this._context.getCurrentTexture().createView()
       this.postProcessManager.execute(commandEncoder, canvasView, scene.time)
     }
 
-    this.device.queue.submit([commandEncoder.finish()])
+    this._device.queue.submit([commandEncoder.finish()])
   }
 
   // Render gizmo for a selected node
@@ -1261,8 +1266,8 @@ export class WebGPURenderer {
     const vertexData = new Float32Array(totalVertices)
     const indexData = new Uint16Array(totalIndices)
 
-    this.device.queue.writeBuffer(this.gizmoVertexBuffer, 0, vertexData)
-    this.device.queue.writeBuffer(this.gizmoIndexBuffer, 0, indexData)
+    this._device.queue.writeBuffer(this.gizmoVertexBuffer, 0, vertexData)
+    this._device.queue.writeBuffer(this.gizmoIndexBuffer, 0, indexData)
 
     // Update uniforms
     this.gizmoUniformData.set(viewProj, 0)
@@ -1270,13 +1275,13 @@ export class WebGPURenderer {
     this.gizmoUniformData[17] = position[1]
     this.gizmoUniformData[18] = position[2]
     this.gizmoUniformData[19] = gizmoScale
-    this.device.queue.writeBuffer(this.gizmoUniformBuffer, 0, this.gizmoUniformData)
+    this._device.queue.writeBuffer(this.gizmoUniformBuffer, 0, this.gizmoUniformData)
 
     // Render
-    const commandEncoder = this.device.createCommandEncoder()
+    const commandEncoder = this._device.createCommandEncoder()
     const pass = commandEncoder.beginRenderPass({
       colorAttachments: [{
-        view: this.context.getCurrentTexture().createView(),
+        view: this._context.getCurrentTexture().createView(),
         loadOp: 'load', // Don't clear, draw on top
         storeOp: 'store',
       }],
@@ -1294,7 +1299,7 @@ export class WebGPURenderer {
     pass.drawIndexed(indexData.length)
     pass.end()
 
-    this.device.queue.submit([commandEncoder.finish()])
+    this._device.queue.submit([commandEncoder.finish()])
   }
 
   // Render wireframe bounds for selected objects
@@ -1310,18 +1315,18 @@ export class WebGPURenderer {
 
     // Always refresh wireframe geometry to avoid any caching issues
     const wireBox = GizmoGeometry.createWireframeBox()
-    this.device.queue.writeBuffer(this.wireframeVertexBuffer, 0, wireBox.vertices)
-    this.device.queue.writeBuffer(this.wireframeIndexBuffer, 0, wireBox.indices)
+    this._device.queue.writeBuffer(this.wireframeVertexBuffer, 0, wireBox.vertices as unknown as BufferSource)
+    this._device.queue.writeBuffer(this.wireframeIndexBuffer, 0, wireBox.indices as unknown as BufferSource)
 
     const viewProj = this.multiplyMatrices(
       camera.getProjectionMatrix(this.width / this.height),
       camera.getViewMatrix()
     )
 
-    const commandEncoder = this.device.createCommandEncoder()
+    const commandEncoder = this._device.createCommandEncoder()
     const pass = commandEncoder.beginRenderPass({
       colorAttachments: [{
-        view: this.context.getCurrentTexture().createView(),
+        view: this._context.getCurrentTexture().createView(),
         loadOp: 'load',
         storeOp: 'store',
       }],
@@ -1356,14 +1361,14 @@ export class WebGPURenderer {
       uniformData.set(viewProj, 0)
       uniformData.set(modelMatrix, 16)
       uniformData.set(color, 32)
-      this.device.queue.writeBuffer(this.wireframeUniformBuffer, 0, uniformData)
+      this._device.queue.writeBuffer(this.wireframeUniformBuffer, 0, uniformData)
 
       pass.setBindGroup(0, this.wireframeBindGroup)
       pass.drawIndexed(24) // 12 edges * 2 vertices
     }
 
     pass.end()
-    this.device.queue.submit([commandEncoder.finish()])
+    this._device.queue.submit([commandEncoder.finish()])
   }
 
   private multiplyMatrices(a: Float32Array, b: Float32Array): Float32Array {
@@ -1460,9 +1465,22 @@ export class WebGPURenderer {
    * Update lighting settings from UI
    */
   updateLightingSettings(settings: {
-    sun?: Partial<typeof this.lightingSettings.sun>
-    ambient?: Partial<typeof this.lightingSettings.ambient>
-    fill?: Partial<typeof this.lightingSettings.fill>
+    sun?: Partial<{
+      enabled: boolean
+      direction: [number, number, number]
+      color: [number, number, number]
+      intensity: number
+    }>
+    ambient?: Partial<{
+      color: [number, number, number]
+      intensity: number
+    }>
+    fill?: Partial<{
+      enabled: boolean
+      direction: [number, number, number]
+      color: [number, number, number]
+      intensity: number
+    }>
   }): void {
     if (settings.sun) Object.assign(this.lightingSettings.sun, settings.sun)
     if (settings.ambient) Object.assign(this.lightingSettings.ambient, settings.ambient)
@@ -1473,7 +1491,11 @@ export class WebGPURenderer {
    * Update environment settings from UI
    */
   updateEnvironmentSettings(settings: {
-    sky?: Partial<typeof this.environmentSettings.sky>
+    sky?: Partial<{
+      zenithColor: [number, number, number]
+      horizonColor: [number, number, number]
+      groundColor: [number, number, number]
+    }>
   }): void {
     if (settings.sky) Object.assign(this.environmentSettings.sky, settings.sky)
   }

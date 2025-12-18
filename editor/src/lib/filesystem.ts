@@ -551,6 +551,103 @@ export const level1 = {
     },
     include: ['src/**/*'],
   }, null, 2),
+
+  // Palette folder structure
+  'palettes/characters/_category.json': JSON.stringify({
+    name: 'Characters',
+    icon: '@',
+    description: 'Player characters, NPCs, and enemies',
+  }, null, 2),
+
+  'palettes/environment/_category.json': JSON.stringify({
+    name: 'Environment',
+    icon: '#',
+    description: 'Walls, floors, and terrain',
+  }, null, 2),
+
+  'palettes/items/_category.json': JSON.stringify({
+    name: 'Items',
+    icon: '!',
+    description: 'Pickups, equipment, and consumables',
+  }, null, 2),
+
+  'palettes/props/_category.json': JSON.stringify({
+    name: 'Props',
+    icon: '+',
+    description: 'Doors, chests, furniture, and decorations',
+  }, null, 2),
+
+  // Sample player prefab
+  'palettes/characters/player.prefab.json': JSON.stringify({
+    id: 'prefab_player',
+    name: 'Player',
+    category: ['characters'],
+    tags: ['player', 'controllable'],
+    description: 'The player character',
+    template: {
+      id: 'player_template',
+      name: 'Player',
+      type: 'Node',
+      children: [],
+      components: [
+        {
+          id: 'comp_rect2d',
+          script: 'Rect2D',
+          enabled: true,
+          properties: { x: 0, y: 0, width: 1, height: 1 },
+        },
+        {
+          id: 'comp_glyph',
+          script: 'Glyph',
+          enabled: true,
+          properties: {
+            char: '@',
+            fg: [0.2, 0.9, 0.4],
+            bg: [0, 0, 0],
+          },
+        },
+      ],
+      meta: {},
+    },
+    createdAt: Date.now(),
+    modifiedAt: Date.now(),
+  }, null, 2),
+
+  // Sample wall prefab
+  'palettes/environment/wall.prefab.json': JSON.stringify({
+    id: 'prefab_wall',
+    name: 'Wall',
+    category: ['environment'],
+    tags: ['blocking', 'solid'],
+    description: 'A basic wall tile',
+    template: {
+      id: 'wall_template',
+      name: 'Wall',
+      type: 'Node',
+      children: [],
+      components: [
+        {
+          id: 'comp_rect2d',
+          script: 'Rect2D',
+          enabled: true,
+          properties: { x: 0, y: 0, width: 1, height: 1 },
+        },
+        {
+          id: 'comp_glyph',
+          script: 'Glyph',
+          enabled: true,
+          properties: {
+            char: '#',
+            fg: [0.4, 0.4, 0.4],
+            bg: [0.1, 0.1, 0.1],
+          },
+        },
+      ],
+      meta: { blocking: true },
+    },
+    createdAt: Date.now(),
+    modifiedAt: Date.now(),
+  }, null, 2),
 };
 
 /**

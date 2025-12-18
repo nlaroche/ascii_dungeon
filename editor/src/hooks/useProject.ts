@@ -237,6 +237,19 @@ export function useProject() {
       // Add to recent projects
       addToRecentProjects(config.name, projectDir);
 
+      // Try to load scene.json if it exists
+      try {
+        const sceneContent = await fs.readFile(`${projectDir}/scene.json`);
+        const sceneData = JSON.parse(sceneContent);
+        if (sceneData.rootNode) {
+          setPath(['scene', 'rootNode'], sceneData.rootNode, 'Load scene');
+          log('info', 'Scene loaded');
+        }
+      } catch {
+        // No scene.json yet, that's fine - use default empty scene
+        log('info', 'No saved scene found, starting fresh');
+      }
+
       log('success', `Opened project: ${config.name}`);
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to open project';
@@ -343,15 +356,29 @@ export function useProject() {
     }
   }, [fs, openProject, log]);
 
-  // Save project configuration
+  // Save project configuration and scene
   const saveProject = useCallback(async () => {
     if (!fs || !projectPath || !projectConfig) return;
 
     try {
+      // Save project config
       await fs.writeFile(
         `${projectPath}/project.json`,
         JSON.stringify(projectConfig, null, 2)
       );
+
+      // Save scene data
+      const rootNode = useEngineState.getState().scene.rootNode;
+      const sceneData = {
+        version: '1.0.0',
+        rootNode,
+        savedAt: new Date().toISOString(),
+      };
+      await fs.writeFile(
+        `${projectPath}/scene.json`,
+        JSON.stringify(sceneData, null, 2)
+      );
+
       log('success', 'Project saved');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to save project';
@@ -435,6 +462,57 @@ export function useProject() {
   const clearRecentProjects = useCallback(() => {
     saveRecentProjects([]);
   }, [saveRecentProjects]);
+
+  // Auto-save: watch for scene changes and save after a delay
+  const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastSavedRef = useRef<string>('');
+
+  useEffect(() => {
+    if (!fs || !projectPath || !projectConfig) return;
+
+    // Subscribe to scene changes
+    const unsubscribe = useEngineState.subscribe(
+      (state) => state.scene.rootNode,
+      (rootNode) => {
+        // Serialize to compare
+        const serialized = JSON.stringify(rootNode);
+
+        // Skip if unchanged
+        if (serialized === lastSavedRef.current) return;
+
+        // Clear existing timer
+        if (autoSaveTimerRef.current) {
+          clearTimeout(autoSaveTimerRef.current);
+        }
+
+        // Set new timer for auto-save (2 second delay)
+        autoSaveTimerRef.current = setTimeout(async () => {
+          try {
+            const sceneData = {
+              version: '1.0.0',
+              rootNode,
+              savedAt: new Date().toISOString(),
+            };
+            await fs.writeFile(
+              `${projectPath}/scene.json`,
+              JSON.stringify(sceneData, null, 2)
+            );
+            lastSavedRef.current = serialized;
+            console.log('[useProject] Auto-saved scene');
+          } catch (err) {
+            console.error('[useProject] Auto-save failed:', err);
+          }
+        }, 2000);
+      }
+    );
+
+    return () => {
+      unsubscribe();
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, [fs, projectPath, projectConfig]);
 
   return {
     // State

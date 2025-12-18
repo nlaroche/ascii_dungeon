@@ -27,6 +27,12 @@ export { SceneSystem } from './systems/SceneSystem'
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { EngineState } from '../stores/engineState'
+import { SystemManager } from './SystemManager'
+import { InputSystem } from './systems/InputSystem'
+import { SceneSystem } from './systems/SceneSystem'
+import { SelectionSystem } from './systems/SelectionSystem'
+import { GizmoSystem } from './systems/GizmoSystem'
+import { RenderSystem } from './systems/RenderSystem'
 
 /**
  * Create and initialize all built-in engine systems
@@ -34,7 +40,7 @@ import type { EngineState } from '../stores/engineState'
 export async function createEngineSystems(
   getState: () => EngineState,
   setState: (path: (string | number)[], value: unknown, description?: string) => void
-): Promise<SystemManager> {
+): Promise<typeof SystemManager.prototype> {
   const manager = new SystemManager(getState, setState)
 
   // Register systems in priority order

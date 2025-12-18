@@ -137,7 +137,7 @@ export interface ToolsState {
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface CameraState {
-  mode: 'perspective' | 'orthographic' | 'topdown' | 'firstperson';
+  mode: '2d' | '3d';  // 2d = orthographic top-down, 3d = perspective free camera
   position: [number, number, number];
   target: [number, number, number];
   rotation: [number, number, number];
@@ -612,6 +612,76 @@ export interface TemplateState {
 // COMPLETE ENGINE STATE
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ASCII SETTINGS - ASCII-first rendering configuration
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface AsciiSettings {
+  palette: string;           // Palette name (e.g., 'phosphor', 'amber', 'c64')
+  fontSize: number;          // Base font size for ASCII rendering
+  animate: boolean;          // Enable character animations
+  animationSpeed: number;    // Animation speed multiplier
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 2D EDITOR STATE - Terminal-style ASCII editor
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface Editor2DState {
+  tool: 'pointer' | 'select' | 'draw' | 'erase';
+  showGrid: boolean;
+  zoom: number;                // Zoom percentage (100 = 100%)
+  currentChar: string;         // Character to draw with
+  selection: {                 // Current selection rectangle
+    x1: number;
+    y1: number;
+    x2: number;
+    y2: number;
+  } | null;
+  selectionAscii: string | null; // ASCII content within selection (from terminal grid)
+  hoveredNode: string | null;  // Currently hovered node ID
+  selectedGlyph: string;       // Currently selected glyph for drawing
+  recenterTimestamp: number;   // Increment to trigger recenter on content
+  centerOnNodeId: string | null; // Set to node ID to center view on that node
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PREFAB & PALETTE SYSTEM - Reusable node templates like Unity prefabs
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface Prefab {
+  id: string;
+  name: string;
+  category: string[];           // Hierarchical path e.g. ['buildings', 'houses']
+  tags: string[];               // Searchable tags
+  description?: string;
+  template: Node;               // The template node (including children)
+  createdAt: number;
+  modifiedAt: number;
+}
+
+export interface PrefabInstance {
+  prefabId: string;             // Reference to source prefab
+  overrides: Record<string, unknown>;  // Path -> value overrides from prefab
+}
+
+export interface PaletteCategory {
+  id: string;
+  name: string;
+  icon?: string;                // Optional icon identifier
+  children: string[];           // Child category IDs
+  prefabs: string[];            // Prefab IDs in this category
+}
+
+export interface PaletteState {
+  prefabs: Record<string, Prefab>;        // All prefabs by ID
+  categories: Record<string, PaletteCategory>;  // Categories by ID
+  rootCategories: string[];               // Top-level category IDs
+  selectedCategory: string | null;        // Currently selected category
+  searchQuery: string;                    // Current search filter
+  expandedCategories: string[];           // Expanded category IDs in tree view
+}
+
 export interface EngineState {
   _version: number;
   _lastModified: number;
@@ -632,6 +702,15 @@ export interface EngineState {
   renderPipeline: RenderPipelineState;
   lighting: LightingState;
   environment: EnvironmentState;
+
+  // ASCII rendering settings
+  ascii: AsciiSettings;
+
+  // 2D Editor state
+  editor2D: Editor2DState;
+
+  // Prefab & Palette system
+  palette: PaletteState;
 
   // Normalized entity system (O(1) lookups)
   entities: EntityMaps;
@@ -831,7 +910,7 @@ create shaders, spawn entities, and more.`,
   // Camera
   // ─────────────────────────────────────────────────────────────────────────
   camera: {
-    mode: 'perspective',
+    mode: '3d',
     position: [12, 8, 12],
     target: [0, 0, 0],
     rotation: [-0.4, -Math.PI * 0.75, 0],
@@ -840,300 +919,23 @@ create shaders, spawn entities, and more.`,
     far: 500,
     speed: 10,
     sensitivity: 0.002,
-    orthoSize: 10,
-    topdownHeight: 20,
+    orthoSize: 15,
+    topdownHeight: 50,
   },
 
   // ─────────────────────────────────────────────────────────────────────────
   // Scene - Node-based hierarchy (everything is a node)
+  // Simplified structure using TileMap for ASCII dungeon
   // ─────────────────────────────────────────────────────────────────────────
+  // Scene - starts empty, user creates content
   scene: {
-    name: 'Demo Scene',
+    name: 'Untitled Scene',
     rootNodeId: 'root',
     rootNode: {
       id: 'root',
       name: 'Scene',
       type: 'Node',
-      children: [
-        // Floor - Dark forest floor matching reference
-        {
-          id: 'floor',
-          name: 'Floor',
-          type: 'Node',
-          children: [],
-          components: [
-            {
-              id: 'floor_gen',
-              script: 'builtin:floor_generator',
-              enabled: true,
-              properties: {
-                tileType: 'checkerboard',
-                size: [21, 21],
-                tileSize: 1,
-                primaryColor: [0.04, 0.08, 0.06, 1],    // Dark tile
-                secondaryColor: [0.06, 0.12, 0.08, 1],  // Slightly lighter tile
-                gridLineColor: [0.1, 0.22, 0.15, 1],    // Subtle grid lines
-                elevation: 0,
-              },
-            },
-          ],
-          transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
-          meta: {},
-        },
-        // Main Light
-        {
-          id: 'light_main',
-          name: 'Main Light',
-          type: 'Node',
-          children: [],
-          components: [],
-          transform: { position: [5, 8, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
-          visual: {
-            visible: true,
-            glyph: '☀',
-            color: [1, 0.9, 0.7],
-            opacity: 1,
-            emission: [1, 0.9, 0.7],
-            emissionPower: 2,
-          },
-          meta: { lightType: 'point', intensity: 1.5, radius: 20 },
-        },
-        // Player - Green hero character
-        {
-          id: 'player',
-          name: 'Player',
-          type: 'Node',
-          children: [],
-          components: [
-            { id: 'comp_1', script: 'scripts/player_controller.ts', enabled: true, properties: { speed: 5 } },
-            { id: 'comp_2', script: 'scripts/health.ts', enabled: true, properties: { max: 100, current: 100 } },
-          ],
-          transform: { position: [1, 0, 1], rotation: [0, 0, 0], scale: [1, 1, 1] },
-          visual: {
-            visible: true,
-            glyph: '@',
-            color: [0.2, 0.9, 0.5],
-            opacity: 1,
-            emission: [0.2, 0.9, 0.5],
-            emissionPower: 0.3,
-          },
-          meta: {},
-        },
-        // Goblin
-        {
-          id: 'goblin_1',
-          name: 'Goblin',
-          type: 'Node',
-          children: [],
-          components: [
-            { id: 'comp_3', script: 'scripts/enemy_ai.ts', enabled: true, properties: { aggroRange: 8 } },
-            { id: 'comp_4', script: 'scripts/health.ts', enabled: true, properties: { max: 25, current: 25 } },
-          ],
-          transform: { position: [3, 0, 2], rotation: [0, 0, 0], scale: [1, 1, 1] },
-          visual: {
-            visible: true,
-            glyph: 'g',
-            color: [0.5, 0.7, 0.3],
-            opacity: 1,
-          },
-          meta: {},
-        },
-        // Torch
-        {
-          id: 'torch_1',
-          name: 'Torch',
-          type: 'Node',
-          children: [],
-          components: [
-            { id: 'comp_5', script: 'scripts/flicker.ts', enabled: true, properties: { speed: 8, amount: 0.15 } },
-          ],
-          transform: { position: [-2, 1.5, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
-          visual: {
-            visible: true,
-            glyph: '¥',
-            color: [1, 0.6, 0.3],
-            opacity: 1,
-            emission: [1, 0.6, 0.3],
-            emissionPower: 1.2,
-          },
-          meta: { lightType: 'point', intensity: 1.2, radius: 8 },
-        },
-        // Treasure Chest
-        {
-          id: 'chest_1',
-          name: 'Treasure Chest',
-          type: 'Node',
-          children: [],
-          components: [
-            { id: 'comp_6', script: 'scripts/interactable.ts', enabled: true, properties: { action: 'open' } },
-          ],
-          transform: { position: [4, 0, -1], rotation: [0, 0, 0], scale: [1, 1, 1] },
-          visual: {
-            visible: true,
-            glyph: '▣',
-            color: [0.7, 0.5, 0.2],
-            opacity: 1,
-          },
-          meta: {},
-        },
-        // ─────────────────────────────────────────────────────────────────────
-        // Demo Scene Content - Trees, Crystals, Water, Characters
-        // ─────────────────────────────────────────────────────────────────────
-        // Tree 1
-        {
-          id: 'tree_1',
-          name: 'Tree',
-          type: 'Node',
-          children: [],
-          components: [
-            { id: 'tree_gen_1', script: 'builtin:tree_generator', enabled: true, properties: { height: 3, foliageRadius: 2 } },
-          ],
-          transform: { position: [4, 0, -3.5], rotation: [0, 0, 0], scale: [1, 1, 1] },
-          meta: {},
-        },
-        // Tree 2
-        {
-          id: 'tree_2',
-          name: 'Tree',
-          type: 'Node',
-          children: [],
-          components: [
-            { id: 'tree_gen_2', script: 'builtin:tree_generator', enabled: true, properties: { height: 4, foliageRadius: 2.5 } },
-          ],
-          transform: { position: [-4, 0, -4], rotation: [0, 0, 0], scale: [1, 1, 1] },
-          meta: {},
-        },
-        // Tree 3
-        {
-          id: 'tree_3',
-          name: 'Tree',
-          type: 'Node',
-          children: [],
-          components: [
-            { id: 'tree_gen_3', script: 'builtin:tree_generator', enabled: true, properties: { height: 3.5, foliageRadius: 2 } },
-          ],
-          transform: { position: [-5, 0, 2], rotation: [0, 0, 0], scale: [1, 1, 1] },
-          meta: {},
-        },
-        // Tree 4
-        {
-          id: 'tree_4',
-          name: 'Tree',
-          type: 'Node',
-          children: [],
-          components: [
-            { id: 'tree_gen_4', script: 'builtin:tree_generator', enabled: true, properties: { height: 2.5, foliageRadius: 1.5 } },
-          ],
-          transform: { position: [5, 0, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
-          meta: {},
-        },
-        // Crystal - Cyan
-        {
-          id: 'crystal_cyan',
-          name: 'Crystal',
-          type: 'Node',
-          children: [],
-          components: [],
-          transform: { position: [2.5, 0, -4], rotation: [0, 0.3, 0], scale: [1, 1, 1] },
-          visual: {
-            visible: true,
-            glyph: '◆',
-            color: [0.3, 0.85, 0.95],
-            opacity: 1,
-            emission: [0.3, 0.85, 0.95],
-            emissionPower: 0.5,
-          },
-          meta: { lightType: 'point', intensity: 0.8, radius: 4 },
-        },
-        // Crystal - Magenta
-        {
-          id: 'crystal_magenta',
-          name: 'Crystal',
-          type: 'Node',
-          children: [],
-          components: [],
-          transform: { position: [-3, 0, -3], rotation: [0, -0.5, 0], scale: [0.8, 0.8, 0.8] },
-          visual: {
-            visible: true,
-            glyph: '◆',
-            color: [0.9, 0.3, 0.7],
-            opacity: 1,
-            emission: [0.9, 0.3, 0.7],
-            emissionPower: 0.5,
-          },
-          meta: { lightType: 'point', intensity: 0.6, radius: 3 },
-        },
-        // Crystal - Amber
-        {
-          id: 'crystal_amber',
-          name: 'Crystal',
-          type: 'Node',
-          children: [],
-          components: [],
-          transform: { position: [6, 0, 0], rotation: [0, 0.8, 0], scale: [1.2, 1.2, 1.2] },
-          visual: {
-            visible: true,
-            glyph: '◆',
-            color: [1.0, 0.7, 0.2],
-            opacity: 1,
-            emission: [1.0, 0.7, 0.2],
-            emissionPower: 0.6,
-          },
-          meta: { lightType: 'point', intensity: 1.0, radius: 5 },
-        },
-        // Water Pond
-        {
-          id: 'water_pond',
-          name: 'Pond',
-          type: 'Node',
-          children: [],
-          components: [
-            { id: 'water_gen', script: 'builtin:water_generator', enabled: true, properties: { radius: 2, depth: 0.3, reflectivity: 0.6 } },
-          ],
-          transform: { position: [-2, 0, -2], rotation: [0, 0, 0], scale: [1, 1, 1] },
-          meta: {},
-        },
-        // Character - Cyan Mage
-        {
-          id: 'char_cyan',
-          name: 'Mage',
-          type: 'Node',
-          children: [],
-          components: [
-            { id: 'comp_7', script: 'scripts/npc_idle.ts', enabled: true, properties: { bobSpeed: 2, bobAmount: 0.05 } },
-          ],
-          transform: { position: [-1, 0, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
-          visual: {
-            visible: true,
-            glyph: '♦',
-            color: [0.3, 0.85, 0.95],
-            opacity: 1,
-            emission: [0.3, 0.85, 0.95],
-            emissionPower: 0.3,
-          },
-          meta: {},
-        },
-        // Character - Magenta Rogue
-        {
-          id: 'char_magenta',
-          name: 'Rogue',
-          type: 'Node',
-          children: [],
-          components: [
-            { id: 'comp_8', script: 'scripts/npc_idle.ts', enabled: true, properties: { bobSpeed: 1.5, bobAmount: 0.03 } },
-          ],
-          transform: { position: [2, 0, 4], rotation: [0, 0, 0], scale: [1, 1, 1] },
-          visual: {
-            visible: true,
-            glyph: '♠',
-            color: [0.9, 0.3, 0.7],
-            opacity: 1,
-            emission: [0.9, 0.3, 0.7],
-            emissionPower: 0.3,
-          },
-          meta: {},
-        },
-      ],
+      children: [],
       components: [],
       meta: {},
     },
@@ -1241,12 +1043,19 @@ create shaders, spawn entities, and more.`,
       grid: { enabled: true, majorSize: 10, minorSize: 1, fadeDistance: 200 },
     },
     postEffects: [
+      // CRT/ASCII Effects (enabled by default for ASCII mode)
+      { id: 'scanlines', name: 'Scanlines', enabled: true, intensity: 0.5 },
+      { id: 'crtCurvature', name: 'CRT Curvature', enabled: true, intensity: 0.3 },
+      { id: 'crtBloom', name: 'CRT Bloom', enabled: true, intensity: 0.4 },
+      { id: 'noise', name: 'Noise', enabled: true, intensity: 0.2 },
+      { id: 'chromaticAberration', name: 'Chromatic Aberration', enabled: true, intensity: 0.3 },
+      { id: 'flicker', name: 'Flicker', enabled: true, intensity: 0.2 },
+      { id: 'vignette', name: 'Vignette', enabled: true, intensity: 0.4 },
+      // Traditional 3D effects (disabled by default)
       { id: 'ssao', name: 'SSAO', enabled: false, radius: 0.5, bias: 0.025, intensity: 0.8, samples: 16 },
       { id: 'fog', name: 'Fog', enabled: false, density: 0.03, color: [0.015, 0.02, 0.03], start: 10, end: 80, fogType: 1 },
       { id: 'bloom', name: 'Bloom', enabled: false, threshold: 0.6, intensity: 0.8, radius: 6 },
       { id: 'colorGrading', name: 'Color Grading', enabled: false, exposure: 0.1, contrast: 1.05, saturation: 1.0, tonemapping: 'aces' },
-      { id: 'vignette', name: 'Vignette', enabled: false, intensity: 0.25, smoothness: 0.4, roundness: 0.6 },
-      { id: 'chromaticAberration', name: 'Chromatic Aberration', enabled: false, intensity: 0.01 },
       { id: 'filmGrain', name: 'Film Grain', enabled: false, intensity: 0.1 },
       { id: 'pixelate', name: 'Pixelate', enabled: false, pixelSize: 4 },
       { id: 'outline', name: 'Outline', enabled: false, thickness: 1, color: [0, 0, 0, 1] },
@@ -1274,6 +1083,49 @@ create shaders, spawn entities, and more.`,
     },
     debugView: 'final',
     showStats: false,
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // ASCII Settings - ASCII-first rendering
+  // ─────────────────────────────────────────────────────────────────────────
+  ascii: {
+    palette: 'phosphor',
+    fontSize: 14,
+    animate: true,
+    animationSpeed: 1.0,
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // 2D Editor - Terminal-style ASCII editor
+  // ─────────────────────────────────────────────────────────────────────────
+  editor2D: {
+    tool: 'pointer',
+    showGrid: true,
+    zoom: 100,
+    currentChar: '#',
+    selection: null,
+    selectionAscii: null,
+    hoveredNode: null,
+    selectedGlyph: '@',
+    recenterTimestamp: 0,
+    centerOnNodeId: null,
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Prefab & Palette - Reusable node templates
+  // ─────────────────────────────────────────────────────────────────────────
+  palette: {
+    prefabs: {},
+    categories: {
+      'buildings': { id: 'buildings', name: 'Buildings', icon: '🏠', children: [], prefabs: [] },
+      'characters': { id: 'characters', name: 'Characters', icon: '👤', children: [], prefabs: [] },
+      'items': { id: 'items', name: 'Items', icon: '📦', children: [], prefabs: [] },
+      'fauna': { id: 'fauna', name: 'Fauna', icon: '🌿', children: [], prefabs: [] },
+    },
+    rootCategories: ['buildings', 'characters', 'items', 'fauna'],
+    selectedCategory: null,
+    searchQuery: '',
+    expandedCategories: [],
   },
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -1331,6 +1183,7 @@ create shaders, spawn entities, and more.`,
 
   // ─────────────────────────────────────────────────────────────────────────
   // Entities - Normalized entity storage for O(1) lookups
+  // Starts empty - content created by user
   // ─────────────────────────────────────────────────────────────────────────
   entities: {
     nodes: {
@@ -1339,358 +1192,13 @@ create shaders, spawn entities, and more.`,
         name: 'Scene',
         type: 'Node',
         parentId: null,
-        childIds: ['floor', 'light_main', 'player', 'goblin_1', 'torch_1', 'chest_1', 'tree_1', 'tree_2', 'tree_3', 'tree_4', 'crystal_cyan', 'crystal_magenta', 'crystal_amber', 'water_pond', 'char_cyan', 'char_magenta'],
-        componentIds: [],
-        meta: {},
-      },
-      floor: {
-        id: 'floor',
-        name: 'Floor',
-        type: 'Node',
-        parentId: 'root',
-        childIds: [],
-        componentIds: ['floor_gen'],
-        transform: { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] },
-        meta: {},
-      },
-      light_main: {
-        id: 'light_main',
-        name: 'Main Light',
-        type: 'Node',
-        parentId: 'root',
         childIds: [],
         componentIds: [],
-        transform: { position: [5, 8, 5], rotation: [0, 0, 0], scale: [1, 1, 1] },
-        visual: {
-          visible: true,
-          glyph: '☀',
-          color: [1, 0.9, 0.7],
-          opacity: 1,
-          emission: [1, 0.9, 0.7],
-          emissionPower: 2,
-        },
-        meta: { lightType: 'point', intensity: 1.5, radius: 20 },
-      },
-      player: {
-        id: 'player',
-        name: 'Player',
-        type: 'Node',
-        parentId: 'root',
-        childIds: [],
-        componentIds: ['comp_1', 'comp_2'],
-        transform: { position: [1, 0, 1], rotation: [0, 0, 0], scale: [1, 1, 1] },
-        visual: {
-          visible: true,
-          glyph: '@',
-          color: [0.2, 0.9, 0.5],
-          opacity: 1,
-          emission: [0.2, 0.9, 0.5],
-          emissionPower: 0.3,
-        },
-        meta: {},
-      },
-      goblin_1: {
-        id: 'goblin_1',
-        name: 'Goblin',
-        type: 'Node',
-        parentId: 'root',
-        childIds: [],
-        componentIds: ['comp_3', 'comp_4'],
-        transform: { position: [3, 0, 2], rotation: [0, 0, 0], scale: [1, 1, 1] },
-        visual: {
-          visible: true,
-          glyph: 'g',
-          color: [0.5, 0.7, 0.3],
-          opacity: 1,
-        },
-        meta: {},
-      },
-      torch_1: {
-        id: 'torch_1',
-        name: 'Torch',
-        type: 'Node',
-        parentId: 'root',
-        childIds: [],
-        componentIds: ['comp_5'],
-        transform: { position: [-2, 1.5, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
-        visual: {
-          visible: true,
-          glyph: '¥',
-          color: [1, 0.6, 0.3],
-          opacity: 1,
-          emission: [1, 0.6, 0.3],
-          emissionPower: 1.2,
-        },
-        meta: { lightType: 'point', intensity: 1.2, radius: 8 },
-      },
-      chest_1: {
-        id: 'chest_1',
-        name: 'Treasure Chest',
-        type: 'Node',
-        parentId: 'root',
-        childIds: [],
-        componentIds: ['comp_6'],
-        transform: { position: [4, 0, -1], rotation: [0, 0, 0], scale: [1, 1, 1] },
-        visual: {
-          visible: true,
-          glyph: '▣',
-          color: [0.7, 0.5, 0.2],
-          opacity: 1,
-        },
-        meta: {},
-      },
-      // Demo Scene Nodes
-      tree_1: {
-        id: 'tree_1',
-        name: 'Tree',
-        type: 'Node',
-        parentId: 'root',
-        childIds: [],
-        componentIds: ['tree_gen_1'],
-        transform: { position: [4, 0, -3.5], rotation: [0, 0, 0], scale: [1, 1, 1] },
-        meta: {},
-      },
-      tree_2: {
-        id: 'tree_2',
-        name: 'Tree',
-        type: 'Node',
-        parentId: 'root',
-        childIds: [],
-        componentIds: ['tree_gen_2'],
-        transform: { position: [-4, 0, -4], rotation: [0, 0, 0], scale: [1, 1, 1] },
-        meta: {},
-      },
-      tree_3: {
-        id: 'tree_3',
-        name: 'Tree',
-        type: 'Node',
-        parentId: 'root',
-        childIds: [],
-        componentIds: ['tree_gen_3'],
-        transform: { position: [-5, 0, 2], rotation: [0, 0, 0], scale: [1, 1, 1] },
-        meta: {},
-      },
-      tree_4: {
-        id: 'tree_4',
-        name: 'Tree',
-        type: 'Node',
-        parentId: 'root',
-        childIds: [],
-        componentIds: ['tree_gen_4'],
-        transform: { position: [5, 0, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
-        meta: {},
-      },
-      crystal_cyan: {
-        id: 'crystal_cyan',
-        name: 'Crystal',
-        type: 'Node',
-        parentId: 'root',
-        childIds: [],
-        componentIds: [],
-        transform: { position: [2.5, 0, -4], rotation: [0, 0.3, 0], scale: [1, 1, 1] },
-        visual: {
-          visible: true,
-          glyph: '◆',
-          color: [0.3, 0.85, 0.95],
-          opacity: 1,
-          emission: [0.3, 0.85, 0.95],
-          emissionPower: 0.5,
-        },
-        meta: { lightType: 'point', intensity: 0.8, radius: 4 },
-      },
-      crystal_magenta: {
-        id: 'crystal_magenta',
-        name: 'Crystal',
-        type: 'Node',
-        parentId: 'root',
-        childIds: [],
-        componentIds: [],
-        transform: { position: [-3, 0, -3], rotation: [0, -0.5, 0], scale: [0.8, 0.8, 0.8] },
-        visual: {
-          visible: true,
-          glyph: '◆',
-          color: [0.9, 0.3, 0.7],
-          opacity: 1,
-          emission: [0.9, 0.3, 0.7],
-          emissionPower: 0.5,
-        },
-        meta: { lightType: 'point', intensity: 0.6, radius: 3 },
-      },
-      crystal_amber: {
-        id: 'crystal_amber',
-        name: 'Crystal',
-        type: 'Node',
-        parentId: 'root',
-        childIds: [],
-        componentIds: [],
-        transform: { position: [6, 0, 0], rotation: [0, 0.8, 0], scale: [1.2, 1.2, 1.2] },
-        visual: {
-          visible: true,
-          glyph: '◆',
-          color: [1.0, 0.7, 0.2],
-          opacity: 1,
-          emission: [1.0, 0.7, 0.2],
-          emissionPower: 0.6,
-        },
-        meta: { lightType: 'point', intensity: 1.0, radius: 5 },
-      },
-      water_pond: {
-        id: 'water_pond',
-        name: 'Pond',
-        type: 'Node',
-        parentId: 'root',
-        childIds: [],
-        componentIds: ['water_gen'],
-        transform: { position: [-2, 0, -2], rotation: [0, 0, 0], scale: [1, 1, 1] },
-        meta: {},
-      },
-      char_cyan: {
-        id: 'char_cyan',
-        name: 'Mage',
-        type: 'Node',
-        parentId: 'root',
-        childIds: [],
-        componentIds: ['comp_7'],
-        transform: { position: [-1, 0, 3], rotation: [0, 0, 0], scale: [1, 1, 1] },
-        visual: {
-          visible: true,
-          glyph: '♦',
-          color: [0.3, 0.85, 0.95],
-          opacity: 1,
-          emission: [0.3, 0.85, 0.95],
-          emissionPower: 0.3,
-        },
-        meta: {},
-      },
-      char_magenta: {
-        id: 'char_magenta',
-        name: 'Rogue',
-        type: 'Node',
-        parentId: 'root',
-        childIds: [],
-        componentIds: ['comp_8'],
-        transform: { position: [2, 0, 4], rotation: [0, 0, 0], scale: [1, 1, 1] },
-        visual: {
-          visible: true,
-          glyph: '♠',
-          color: [0.9, 0.3, 0.7],
-          opacity: 1,
-          emission: [0.9, 0.3, 0.7],
-          emissionPower: 0.3,
-        },
         meta: {},
       },
     },
-    components: {
-      floor_gen: {
-        id: 'floor_gen',
-        nodeId: 'floor',
-        script: 'builtin:floor_generator',
-        enabled: true,
-        properties: {
-          tileType: 'checkerboard',
-          size: [21, 21],
-          tileSize: 1,
-          primaryColor: [0.04, 0.08, 0.06, 1],    // Dark tile
-          secondaryColor: [0.06, 0.12, 0.08, 1],  // Slightly lighter tile
-          gridLineColor: [0.1, 0.22, 0.15, 1],    // Subtle grid lines
-          elevation: 0,
-        },
-      },
-      comp_1: {
-        id: 'comp_1',
-        nodeId: 'player',
-        script: 'scripts/player_controller.ts',
-        enabled: true,
-        properties: { speed: 5 },
-      },
-      comp_2: {
-        id: 'comp_2',
-        nodeId: 'player',
-        script: 'scripts/health.ts',
-        enabled: true,
-        properties: { max: 100, current: 100 },
-      },
-      comp_3: {
-        id: 'comp_3',
-        nodeId: 'goblin_1',
-        script: 'scripts/enemy_ai.ts',
-        enabled: true,
-        properties: { aggroRange: 8 },
-      },
-      comp_4: {
-        id: 'comp_4',
-        nodeId: 'goblin_1',
-        script: 'scripts/health.ts',
-        enabled: true,
-        properties: { max: 25, current: 25 },
-      },
-      comp_5: {
-        id: 'comp_5',
-        nodeId: 'torch_1',
-        script: 'scripts/flicker.ts',
-        enabled: true,
-        properties: { speed: 8, amount: 0.15 },
-      },
-      comp_6: {
-        id: 'comp_6',
-        nodeId: 'chest_1',
-        script: 'scripts/interactable.ts',
-        enabled: true,
-        properties: { action: 'open' },
-      },
-      // Demo scene components
-      tree_gen_1: {
-        id: 'tree_gen_1',
-        nodeId: 'tree_1',
-        script: 'builtin:tree_generator',
-        enabled: true,
-        properties: { height: 3, foliageRadius: 2 },
-      },
-      tree_gen_2: {
-        id: 'tree_gen_2',
-        nodeId: 'tree_2',
-        script: 'builtin:tree_generator',
-        enabled: true,
-        properties: { height: 4, foliageRadius: 2.5 },
-      },
-      tree_gen_3: {
-        id: 'tree_gen_3',
-        nodeId: 'tree_3',
-        script: 'builtin:tree_generator',
-        enabled: true,
-        properties: { height: 3.5, foliageRadius: 2 },
-      },
-      tree_gen_4: {
-        id: 'tree_gen_4',
-        nodeId: 'tree_4',
-        script: 'builtin:tree_generator',
-        enabled: true,
-        properties: { height: 2.5, foliageRadius: 1.5 },
-      },
-      water_gen: {
-        id: 'water_gen',
-        nodeId: 'water_pond',
-        script: 'builtin:water_generator',
-        enabled: true,
-        properties: { radius: 2, depth: 0.3, reflectivity: 0.6 },
-      },
-      comp_7: {
-        id: 'comp_7',
-        nodeId: 'char_cyan',
-        script: 'scripts/npc_idle.ts',
-        enabled: true,
-        properties: { bobSpeed: 2, bobAmount: 0.05 },
-      },
-      comp_8: {
-        id: 'comp_8',
-        nodeId: 'char_magenta',
-        script: 'scripts/npc_idle.ts',
-        enabled: true,
-        properties: { bobSpeed: 1.5, bobAmount: 0.03 },
-      },
-    },
-    nodeOrder: ['root', 'floor', 'light_main', 'player', 'goblin_1', 'torch_1', 'chest_1', 'tree_1', 'tree_2', 'tree_3', 'tree_4', 'crystal_cyan', 'crystal_magenta', 'crystal_amber', 'water_pond', 'char_cyan', 'char_magenta'],
+    components: {},
+    nodeOrder: ['root'],
   },
 
   // ─────────────────────────────────────────────────────────────────────────

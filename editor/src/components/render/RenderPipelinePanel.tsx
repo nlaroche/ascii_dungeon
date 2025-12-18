@@ -8,7 +8,9 @@ import {
   useRenderPipeline,
   useLighting,
   useEnvironment,
+  useAscii,
 } from '../../stores/useEngineState'
+import { PALETTES } from '../../scripting/palettes'
 import { Scrubber, ColorScrubber } from '../ui/Scrubber'
 import type { PostEffect, SceneLight, DebugViewMode, ShadowType } from '../../stores/engineState'
 
@@ -24,13 +26,96 @@ export function RenderPipelinePanel() {
       className="h-full overflow-y-auto text-xs"
       style={{ backgroundColor: theme.bgPanel }}
     >
+      <AsciiSettingsSection />
+      <PostEffectsSection />
       <DebugViewSection />
       <ShadowsSection />
       <ReflectionsSection />
       <PassesSection />
-      <PostEffectsSection />
       <LightingSection />
       <EnvironmentSection />
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ASCII Settings Section
+// ─────────────────────────────────────────────────────────────────────────────
+
+function AsciiSettingsSection() {
+  const theme = useTheme()
+  const { palette, fontSize, animate, animationSpeed, setPalette, setFontSize, setAnimate, setAnimationSpeed } = useAscii()
+  const [expanded, setExpanded] = useState(true)
+
+  return (
+    <div className="p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center justify-between w-full mb-2"
+      >
+        <span className="uppercase tracking-wider" style={{ color: theme.textMuted }}>
+          {expanded ? '▼' : '▶'} ASCII Display
+        </span>
+      </button>
+
+      {expanded && (
+        <div className="space-y-3">
+          {/* Palette Selection */}
+          <div className="space-y-1">
+            <label style={{ color: theme.textMuted }}>Palette</label>
+            <div className="grid grid-cols-4 gap-1">
+              {Object.entries(PALETTES).map(([name, pal]) => (
+                <button
+                  key={name}
+                  onClick={() => setPalette(name)}
+                  className="px-1 py-1.5 text-xs rounded truncate"
+                  style={{
+                    backgroundColor: pal.bg,
+                    color: pal.chars[pal.chars.length - 1],
+                    border: palette === name ? `2px solid ${theme.accent}` : '2px solid transparent',
+                  }}
+                  title={pal.name}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Font Size */}
+          <SliderInput
+            label="Font Size"
+            value={fontSize}
+            min={8}
+            max={24}
+            step={1}
+            onChange={setFontSize}
+          />
+
+          {/* Animation */}
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={animate}
+              onChange={(e) => setAnimate(e.target.checked)}
+              style={{ accentColor: theme.accent }}
+            />
+            <span style={{ color: theme.text }}>Animate</span>
+          </div>
+
+          {/* Animation Speed (only if animation enabled) */}
+          {animate && (
+            <SliderInput
+              label="Animation Speed"
+              value={animationSpeed}
+              min={0.1}
+              max={3}
+              step={0.1}
+              onChange={setAnimationSpeed}
+            />
+          )}
+        </div>
+      )}
     </div>
   )
 }

@@ -10,6 +10,7 @@
 export type PropertyType =
   | 'number'
   | 'string'
+  | 'text'    // Multiline text input
   | 'boolean'
   | 'color'
   | 'vec2'
@@ -29,6 +30,8 @@ export interface PropertyOptions {
   max?: number
   /** Step increment for number sliders */
   step?: number
+  /** Decimal precision for number display (0 = integers) */
+  precision?: number
   /** Whether the property is read-only in inspector */
   readonly?: boolean
   /** Tooltip text */
@@ -213,3 +216,109 @@ export function createComponent(name: string, props?: Record<string, unknown>): 
   }
   return instance
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Core Component Registration
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { Rect2D } from '../engine/core/Rect2D'
+import { GlyphImage, GlyphMap } from '../engine/core/GlyphImage'
+import { GlyphImageRenderer, GlyphMapRenderer } from '../engine/core/Renderer2D'
+
+/**
+ * Register core engine components.
+ * Called during app initialization.
+ */
+export function registerCoreComponents(): void {
+  // Register Rect2D with its properties
+  const rect2DProperties = new Map<string, PropertyOptions>()
+  rect2DProperties.set('x', { type: 'number', label: 'X', group: 'Position' })
+  rect2DProperties.set('y', { type: 'number', label: 'Y', group: 'Position' })
+  rect2DProperties.set('width', { type: 'number', label: 'Width', min: 1, group: 'Size' })
+  rect2DProperties.set('height', { type: 'number', label: 'Height', min: 1, group: 'Size' })
+  rect2DProperties.set('autoSize', { type: 'boolean', label: 'Auto Size', group: 'Size', tooltip: 'Automatically size based on children bounds' })
+  rect2DProperties.set('paddingX', { type: 'number', label: 'Padding X', min: 0, group: 'Padding', tooltip: 'Extra cells on left/right when auto-sizing' })
+  rect2DProperties.set('paddingY', { type: 'number', label: 'Padding Y', min: 0, group: 'Padding', tooltip: 'Extra cells on top/bottom when auto-sizing' })
+
+  componentRegistry.set('Rect2D', {
+    metadata: {
+      name: 'Rect2D',
+      icon: '▢',
+      description: 'Position and size in 2D space',
+      properties: rect2DProperties,
+    },
+    ctor: Rect2D as unknown as new (...args: unknown[]) => unknown,
+  })
+
+  // Register GlyphImage with its properties
+  const glyphImageProperties = new Map<string, PropertyOptions>()
+  glyphImageProperties.set('cells', { type: 'string', label: 'Cells', readonly: true })
+
+  componentRegistry.set('GlyphImage', {
+    metadata: {
+      name: 'GlyphImage',
+      icon: '▤',
+      description: 'Multi-character ASCII art grid',
+      properties: glyphImageProperties,
+    },
+    ctor: GlyphImage as unknown as new (...args: unknown[]) => unknown,
+  })
+
+  // Backwards compatibility alias
+  componentRegistry.set('GlyphMap', {
+    metadata: {
+      name: 'GlyphMap',
+      icon: '▤',
+      description: 'Multi-character ASCII art grid (alias for GlyphImage)',
+      properties: glyphImageProperties,
+    },
+    ctor: GlyphMap as unknown as new (...args: unknown[]) => unknown,
+  })
+
+  // Register GlyphImageRenderer
+  componentRegistry.set('GlyphImageRenderer', {
+    metadata: {
+      name: 'GlyphImageRenderer',
+      icon: '▤',
+      description: 'Renders a GlyphImage to the terminal',
+      properties: new Map<string, PropertyOptions>(),
+    },
+    ctor: GlyphImageRenderer as unknown as new (...args: unknown[]) => unknown,
+  })
+
+  // Backwards compatibility alias
+  componentRegistry.set('GlyphMapRenderer', {
+    metadata: {
+      name: 'GlyphMapRenderer',
+      icon: '▤',
+      description: 'Renders a GlyphImage to the terminal (alias)',
+      properties: new Map<string, PropertyOptions>(),
+    },
+    ctor: GlyphMapRenderer as unknown as new (...args: unknown[]) => unknown,
+  })
+
+  // Register Glyph (single character) component
+  const glyphProperties = new Map<string, PropertyOptions>()
+  glyphProperties.set('char', { type: 'string', label: 'Character', group: 'Display' })
+  glyphProperties.set('fg', { type: 'color', label: 'Foreground', group: 'Colors' })
+  glyphProperties.set('bg', { type: 'color', label: 'Background', group: 'Colors' })
+  glyphProperties.set('emission', { type: 'number', label: 'Emission', group: 'Lighting', min: 0, max: 10, step: 0.1 })
+  glyphProperties.set('emissionColor', { type: 'color', label: 'Emission Color', group: 'Lighting' })
+  glyphProperties.set('zIndex', { type: 'number', label: 'Z-Index', group: 'Rendering' })
+  glyphProperties.set('visible', { type: 'boolean', label: 'Visible', group: 'Rendering' })
+
+  componentRegistry.set('Glyph', {
+    metadata: {
+      name: 'Glyph',
+      icon: 'A',
+      description: 'Single character with colors',
+      properties: glyphProperties,
+    },
+    ctor: class {} as unknown as new (...args: unknown[]) => unknown, // Placeholder - data-only component
+  })
+
+  console.log('[ComponentRegistry] Registered core components:', getRegisteredComponents())
+}
+
+// Auto-register on module load
+registerCoreComponents()

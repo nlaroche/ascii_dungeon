@@ -24,6 +24,10 @@ pub fn run() {
             let watcher_state = Mutex::new(commands::FileWatcherState::default());
             app.manage(watcher_state);
 
+            // Initialize floating windows state
+            let floating_state = Mutex::new(commands::FloatingWindowsState::default());
+            app.manage(floating_state);
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -58,6 +62,18 @@ pub fn run() {
             // File system watching
             commands::start_file_watcher,
             commands::stop_file_watcher,
+            // Palette / Prefab file system
+            commands::scan_palette_folder,
+            commands::read_prefab_file,
+            commands::write_prefab_file,
+            commands::delete_prefab_file,
+            commands::create_category_folder,
+            // Floating panel windows
+            commands::create_floating_window,
+            commands::close_floating_window,
+            commands::get_floating_window_bounds,
+            commands::list_floating_windows,
+            commands::request_redock,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

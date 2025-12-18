@@ -1,11 +1,14 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // Scrubber - Drag-to-adjust number input
-// Drag left/right to decrease/increase value, click to type directly
+// Drag on label to adjust value, input box for direct editing
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { useState, useRef, useCallback, useEffect } from 'react'
-import type { MouseEvent as ReactMouseEvent } from 'react'
+import { createPortal } from 'react-dom'
 import { useTheme } from '../../stores/useEngineState'
+
+// Drag direction determines cursor and which mouse axis affects value
+type DragDirection = 'horizontal' | 'vertical' | 'both'
 
 interface ScrubberProps {
   value: number
@@ -18,6 +21,8 @@ interface ScrubberProps {
   suffix?: string
   disabled?: boolean
   className?: string
+  dragDirection?: DragDirection
+  sensitivity?: number  // Pixels per step (higher = less sensitive)
 }
 
 export function Scrubber({
@@ -25,67 +30,77 @@ export function Scrubber({
   onChange,
   min = -Infinity,
   max = Infinity,
-  step = 0.01,
-  precision = 2,
+  step = 1,
+  precision = 0,
   label,
   suffix = '',
   disabled = false,
   className = '',
+  dragDirection = 'horizontal',
+  sensitivity = 4,  // 4 pixels per step (less sensitive)
 }: ScrubberProps) {
   const theme = useTheme()
   const [isDragging, setIsDragging] = useState(false)
-  const [isEditing, setIsEditing] = useState(false)
-  const [editValue, setEditValue] = useState('')
+  const [inputText, setInputText] = useState(String(value))
+  const [isFocused, setIsFocused] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const containerRef = useRef<HTMLDivElement>(null)
-  const sliderRef = useRef<HTMLDivElement>(null)
+  const dragStartRef = useRef<{ x: number; y: number; value: number } | null>(null)
 
   const clamp = (v: number) => Math.min(max, Math.max(min, v))
-  const format = (v: number) => v.toFixed(precision)
 
-  // Check if we have bounded range (can use absolute positioning)
-  const hasBounds = min !== -Infinity && max !== Infinity
-
-  // Convert mouse X to value
-  const mouseToValue = useCallback((clientX: number) => {
-    if (!sliderRef.current || !hasBounds) return value
-    const rect = sliderRef.current.getBoundingClientRect()
-    const x = clientX - rect.left
-    const ratio = Math.max(0, Math.min(1, x / rect.width))
-    const rawValue = min + ratio * (max - min)
-    // Snap to step
-    const snapped = Math.round(rawValue / step) * step
-    return clamp(snapped)
-  }, [hasBounds, min, max, step, value, clamp])
-
-  // Handle drag start
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
-    if (disabled || isEditing) return
-    e.preventDefault()
-    setIsDragging(true)
-    document.body.style.cursor = 'ew-resize'
-
-    // If bounded, immediately set value to mouse position
-    if (hasBounds) {
-      const newValue = mouseToValue(e.clientX)
-      onChange(newValue)
+  // Sync inputText when value changes externally (and not focused)
+  useEffect(() => {
+    if (!isFocused) {
+      setInputText(String(value))
     }
-  }, [disabled, isEditing, hasBounds, mouseToValue, onChange])
+  }, [value, isFocused])
+
+  // Get cursor based on drag direction
+  const getCursor = () => {
+    if (disabled) return 'not-allowed'
+    if (dragDirection === 'vertical') return 'ns-resize'
+    if (dragDirection === 'both') return 'move'
+    return 'ew-resize'
+  }
+
+  // Handle drag start on label
+  const handleLabelMouseDown = useCallback((e: React.MouseEvent) => {
+    if (disabled) return
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(true)
+    dragStartRef.current = { x: e.clientX, y: e.clientY, value }
+    document.body.style.cursor = getCursor()
+  }, [disabled, value, getCursor])
 
   // Handle drag
   useEffect(() => {
-    if (!isDragging) return
+    if (!isDragging || !dragStartRef.current) return
 
     const handleMouseMove = (e: MouseEvent) => {
-      if (hasBounds) {
-        // Absolute positioning mode - value follows mouse
-        const newValue = mouseToValue(e.clientX)
-        onChange(newValue)
+      if (!dragStartRef.current) return
+
+      const deltaX = e.clientX - dragStartRef.current.x
+      const deltaY = dragStartRef.current.y - e.clientY  // Inverted: up = increase
+
+      let delta = 0
+      if (dragDirection === 'horizontal') {
+        delta = deltaX
+      } else if (dragDirection === 'vertical') {
+        delta = deltaY
+      } else {
+        delta = deltaX + deltaY
       }
+
+      // Apply sensitivity and step
+      const steps = delta / sensitivity
+      const newValue = clamp(dragStartRef.current.value + steps * step)
+      onChange(newValue)
     }
 
     const handleMouseUp = () => {
       setIsDragging(false)
+      dragStartRef.current = null
       document.body.style.cursor = ''
     }
 
@@ -96,114 +111,89 @@ export function Scrubber({
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [isDragging, hasBounds, mouseToValue, onChange])
+  }, [isDragging, onChange, dragDirection, sensitivity, step, clamp])
 
-  // Handle double-click to edit
-  const handleDoubleClick = useCallback(() => {
-    if (disabled) return
-    setIsEditing(true)
-    setEditValue(format(value))
-    setTimeout(() => inputRef.current?.select(), 0)
-  }, [disabled, value, format])
+  // Handle input change - allow typing freely
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputText(e.target.value)
+  }, [])
 
-  // Handle edit submit
-  const handleEditSubmit = useCallback(() => {
-    const parsed = parseFloat(editValue)
+  // Commit value on blur or Enter
+  const commitValue = useCallback(() => {
+    const parsed = parseFloat(inputText)
     if (!isNaN(parsed)) {
       onChange(clamp(parsed))
+      setInputText(String(clamp(parsed)))
+    } else {
+      // Reset to current value if invalid
+      setInputText(String(value))
     }
-    setIsEditing(false)
-  }, [editValue, onChange, clamp])
+  }, [inputText, onChange, clamp, value])
 
-  // Handle edit key
-  const handleEditKey = useCallback((e: React.KeyboardEvent) => {
+  const handleFocus = useCallback(() => {
+    setIsFocused(true)
+    // Select all on focus for easy replacement
+    inputRef.current?.select()
+  }, [])
+
+  const handleBlur = useCallback(() => {
+    setIsFocused(false)
+    commitValue()
+  }, [commitValue])
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
-      handleEditSubmit()
+      commitValue()
+      inputRef.current?.blur()
     } else if (e.key === 'Escape') {
-      setIsEditing(false)
+      setInputText(String(value))
+      inputRef.current?.blur()
     }
-  }, [handleEditSubmit])
-
-  // Handle edit blur
-  const handleEditBlur = useCallback(() => {
-    handleEditSubmit()
-  }, [handleEditSubmit])
+  }, [commitValue, value])
 
   return (
-    <div
-      ref={containerRef}
-      className={`flex items-center gap-2 ${className}`}
-    >
+    <div className={`flex items-center gap-0.5 ${className}`}>
       {label && (
         <span
-          className="text-xs min-w-[60px]"
-          style={{ color: theme.textMuted }}
+          className="text-[10px] font-medium select-none rounded"
+          style={{
+            color: isDragging ? theme.text : theme.textMuted,
+            cursor: disabled ? 'not-allowed' : getCursor(),
+            backgroundColor: isDragging ? theme.accent + '40' : 'transparent',
+            width: '12px',
+            textAlign: 'center',
+          }}
+          onMouseDown={handleLabelMouseDown}
+          title={`Drag to adjust ${label}`}
         >
           {label}
         </span>
       )}
-      <div
-        ref={sliderRef}
-        className="relative flex-1 h-6 rounded overflow-hidden select-none"
+      <input
+        ref={inputRef}
+        type="text"
+        inputMode="numeric"
+        value={inputText}
+        onChange={handleInputChange}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
+        disabled={disabled}
+        className="px-1 rounded text-xs"
         style={{
-          backgroundColor: theme.bgHover,
-          cursor: disabled ? 'not-allowed' : 'ew-resize',
+          backgroundColor: theme.bg,
+          color: disabled ? theme.textDim : theme.text,
+          border: `1px solid ${isFocused ? theme.accent : theme.border}`,
+          width: '48px',
+          height: '20px',
           opacity: disabled ? 0.5 : 1,
         }}
-        onMouseDown={handleMouseDown}
-        onDoubleClick={handleDoubleClick}
-      >
-        {/* Value fill indicator */}
-        {min !== -Infinity && max !== Infinity && (
-          <div
-            className="absolute inset-y-0 left-0 pointer-events-none"
-            style={{
-              width: `${((value - min) / (max - min)) * 100}%`,
-              backgroundColor: theme.accent,
-              opacity: 0.2,
-            }}
-          />
-        )}
-
-        {/* Value display / Edit input */}
-        {isEditing ? (
-          <input
-            ref={inputRef}
-            type="text"
-            value={editValue}
-            onChange={(e) => setEditValue(e.target.value)}
-            onKeyDown={handleEditKey}
-            onBlur={handleEditBlur}
-            className="absolute inset-0 w-full h-full px-2 text-xs text-center bg-transparent outline-none"
-            style={{ color: theme.text }}
-          />
-        ) : (
-          <div
-            className="absolute inset-0 flex items-center justify-center text-xs"
-            style={{ color: theme.text }}
-          >
-            {format(value)}{suffix}
-          </div>
-        )}
-
-        {/* Drag hint arrows */}
-        {!isEditing && !isDragging && (
-          <>
-            <div
-              className="absolute left-1 top-1/2 -translate-y-1/2 text-[8px] opacity-30"
-              style={{ color: theme.textMuted }}
-            >
-              ◀
-            </div>
-            <div
-              className="absolute right-1 top-1/2 -translate-y-1/2 text-[8px] opacity-30"
-              style={{ color: theme.textMuted }}
-            >
-              ▶
-            </div>
-          </>
-        )}
-      </div>
+      />
+      {suffix && (
+        <span className="text-[10px]" style={{ color: theme.textDim }}>
+          {suffix}
+        </span>
+      )}
     </div>
   )
 }
@@ -262,7 +252,7 @@ export function ColorScrubber({
   const theme = useTheme()
   const [isOpen, setIsOpen] = useState(false)
   const [hexInput, setHexInput] = useState('')
-  const [popupPosition, setPopupPosition] = useState<'below' | 'above'>('below')
+  const [popupPosition, setPopupPosition] = useState<{ top: number; left: number } | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const popupRef = useRef<HTMLDivElement>(null)
 
@@ -291,21 +281,52 @@ export function ColorScrubber({
     setHexInput(toHex(value))
   }, [value, isOpen])
 
-  // Calculate popup position to avoid overflow
-  useEffect(() => {
-    if (!isOpen || !containerRef.current) return
+  // Calculate popup position synchronously (called when opening)
+  const calculatePosition = useCallback(() => {
+    if (!containerRef.current) return null
 
     const rect = containerRef.current.getBoundingClientRect()
     const popupHeight = 320 // Approximate popup height
+    const popupWidth = 230 // Approximate popup width (minWidth + padding)
     const spaceBelow = window.innerHeight - rect.bottom
     const spaceAbove = rect.top
+    const margin = 10 // Margin from edges
 
-    if (spaceBelow < popupHeight && spaceAbove > spaceBelow) {
-      setPopupPosition('above')
+    // Vertical positioning - prefer below, but go above if not enough space
+    let top: number
+    if (spaceBelow >= popupHeight || spaceBelow >= spaceAbove) {
+      top = rect.bottom + 4
     } else {
-      setPopupPosition('below')
+      top = rect.top - popupHeight - 4
     }
-  }, [isOpen])
+    // Clamp to viewport
+    top = Math.max(margin, Math.min(window.innerHeight - popupHeight - margin, top))
+
+    // Horizontal positioning - align with container, but don't overflow
+    let left = rect.left
+    if (left + popupWidth > window.innerWidth - margin) {
+      left = window.innerWidth - popupWidth - margin
+    }
+    left = Math.max(margin, left)
+
+    return { top, left }
+  }, [])
+
+  // Open popup and calculate position synchronously
+  const handleOpen = useCallback(() => {
+    if (disabled) return
+    const pos = calculatePosition()
+    if (pos) {
+      setPopupPosition(pos)
+      setIsOpen(true)
+    }
+  }, [disabled, calculatePosition])
+
+  // Close popup
+  const handleClose = useCallback(() => {
+    setIsOpen(false)
+    setPopupPosition(null)
+  }, [])
 
   // Handle click outside to close
   useEffect(() => {
@@ -318,12 +339,12 @@ export function ColorScrubber({
         popupRef.current &&
         !popupRef.current.contains(e.target as Node)
       ) {
-        setIsOpen(false)
+        handleClose()
       }
     }
 
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setIsOpen(false)
+      if (e.key === 'Escape') handleClose()
     }
 
     document.addEventListener('mousedown', handleClickOutside)
@@ -332,7 +353,7 @@ export function ColorScrubber({
       document.removeEventListener('mousedown', handleClickOutside)
       document.removeEventListener('keydown', handleEscape)
     }
-  }, [isOpen])
+  }, [isOpen, handleClose])
 
   const handleHexSubmit = () => {
     const rgb = fromHex(hexInput)
@@ -355,7 +376,7 @@ export function ColorScrubber({
         <div
           className="flex-1 h-6 rounded cursor-pointer flex items-center gap-2 px-2"
           style={{ backgroundColor: theme.bgHover }}
-          onClick={() => !disabled && setIsOpen(!isOpen)}
+          onClick={() => isOpen ? handleClose() : handleOpen()}
         >
           <div
             className="w-4 h-4 rounded border"
@@ -370,19 +391,17 @@ export function ColorScrubber({
         </div>
       </div>
 
-      {/* Popup color picker - matches context menu styling */}
-      {isOpen && (
+      {/* Popup color picker - rendered in portal to avoid clipping */}
+      {isOpen && popupPosition && createPortal(
         <div
           ref={popupRef}
-          className="absolute z-50 py-2 px-3 rounded shadow-lg"
+          className="fixed z-[10000] py-2 px-3 rounded shadow-lg"
           style={{
             backgroundColor: theme.bg,
             border: `1px solid ${theme.border}`,
-            left: label ? '68px' : '0',
+            top: `${popupPosition.top}px`,
+            left: `${popupPosition.left}px`,
             minWidth: '220px',
-            ...(popupPosition === 'above'
-              ? { bottom: '100%', marginBottom: '4px' }
-              : { top: '100%', marginTop: '4px' }),
           }}
         >
           {/* Large color preview */}
@@ -495,11 +514,12 @@ export function ColorScrubber({
               backgroundColor: theme.accent,
               color: theme.bg,
             }}
-            onClick={() => setIsOpen(false)}
+            onClick={handleClose}
           >
             Done
           </button>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
@@ -556,6 +576,7 @@ export function Vec3Scrubber({
           step={step}
           precision={precision}
           disabled={disabled}
+          dragDirection="horizontal"
           className="flex-1"
         />
         <Scrubber
@@ -567,6 +588,7 @@ export function Vec3Scrubber({
           step={step}
           precision={precision}
           disabled={disabled}
+          dragDirection="horizontal"
           className="flex-1"
         />
         <Scrubber
@@ -578,7 +600,134 @@ export function Vec3Scrubber({
           step={step}
           precision={precision}
           disabled={disabled}
+          dragDirection="horizontal"
           className="flex-1"
+        />
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Vec2 Scrubber - For 2D vectors (position, size, etc.)
+// Main label supports freeform drag to adjust both values at once
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface Vec2ScrubberProps {
+  value: [number, number]
+  onChange: (value: [number, number]) => void
+  label?: string
+  min?: number
+  max?: number
+  step?: number
+  precision?: number
+  labels?: [string, string]
+  disabled?: boolean
+  className?: string
+  sensitivity?: number
+}
+
+export function Vec2Scrubber({
+  value,
+  onChange,
+  label,
+  min = -Infinity,
+  max = Infinity,
+  step = 1,
+  precision = 0,
+  labels = ['X', 'Y'],
+  disabled = false,
+  className = '',
+  sensitivity = 4,  // 4 pixels per step
+}: Vec2ScrubberProps) {
+  const theme = useTheme()
+  const [isDragging, setIsDragging] = useState(false)
+  const dragStartRef = useRef<{ x: number; y: number; value: [number, number] } | null>(null)
+
+  const clamp = (v: number) => Math.min(max, Math.max(min, v))
+
+  // Handle freeform drag on main label
+  const handleLabelMouseDown = useCallback((e: React.MouseEvent) => {
+    if (disabled) return
+    e.preventDefault()
+    setIsDragging(true)
+    dragStartRef.current = { x: e.clientX, y: e.clientY, value: [...value] as [number, number] }
+    document.body.style.cursor = 'move'
+  }, [disabled, value])
+
+  // Handle drag
+  useEffect(() => {
+    if (!isDragging || !dragStartRef.current) return
+
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!dragStartRef.current) return
+      const deltaX = e.clientX - dragStartRef.current.x
+      const deltaY = dragStartRef.current.y - e.clientY  // Inverted: up = increase
+
+      // Apply delta with sensitivity (X follows horizontal, Y follows vertical)
+      const stepsX = deltaX / sensitivity
+      const stepsY = deltaY / sensitivity
+      const newX = clamp(dragStartRef.current.value[0] + stepsX * step)
+      const newY = clamp(dragStartRef.current.value[1] + stepsY * step)
+      onChange([newX, newY])
+    }
+
+    const handleMouseUp = () => {
+      setIsDragging(false)
+      dragStartRef.current = null
+      document.body.style.cursor = ''
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [isDragging, onChange, step, sensitivity, clamp])
+
+  return (
+    <div className={`flex items-center ${className}`}>
+      {label && (
+        <span
+          className="text-xs select-none rounded shrink-0"
+          style={{
+            color: isDragging ? theme.text : theme.textMuted,
+            cursor: disabled ? 'not-allowed' : 'move',
+            backgroundColor: isDragging ? theme.accent + '40' : 'transparent',
+            width: '55px',
+          }}
+          onMouseDown={handleLabelMouseDown}
+          title="Drag to adjust both values"
+        >
+          {label}
+        </span>
+      )}
+      <div className="flex gap-1">
+        <Scrubber
+          label={labels[0]}
+          value={value[0]}
+          onChange={(v) => onChange([v, value[1]])}
+          min={min}
+          max={max}
+          step={step}
+          precision={precision}
+          disabled={disabled}
+          dragDirection="horizontal"
+          sensitivity={sensitivity}
+        />
+        <Scrubber
+          label={labels[1]}
+          value={value[1]}
+          onChange={(v) => onChange([value[0], v])}
+          min={min}
+          max={max}
+          step={step}
+          precision={precision}
+          disabled={disabled}
+          dragDirection="vertical"
+          sensitivity={sensitivity}
         />
       </div>
     </div>

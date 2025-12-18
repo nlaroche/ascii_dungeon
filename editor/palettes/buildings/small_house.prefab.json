@@ -1,0 +1,42 @@
+{
+  "name": "Small House",
+  "description": "A simple one-room house",
+  "tags": ["structure", "shelter", "starter"],
+  "template": {
+    "id": "template_small_house",
+    "name": "Small House",
+    "type": "Node2D",
+    "children": [],
+    "components": [
+      {
+        "id": "comp_rect",
+        "script": "Rect2D",
+        "enabled": true,
+        "properties": {
+          "x": 0,
+          "y": 0,
+          "width": 8,
+          "height": 6
+        }
+      },
+      {
+        "id": "comp_glyph",
+        "script": "GlyphMap",
+        "enabled": true,
+        "properties": {
+          "cells": "+------+\n|......|\n|......|\n|......|\n|..++..|\n+--++--+",
+          "palette": {
+            "#": [0.5, 0.4, 0.35],
+            "+": [0.6, 0.5, 0.3],
+            "-": [0.5, 0.4, 0.35],
+            "|": [0.5, 0.4, 0.35],
+            ".": [0.3, 0.25, 0.2]
+          }
+        }
+      }
+    ],
+    "meta": {
+      "visible": true
+    }
+  }
+}
