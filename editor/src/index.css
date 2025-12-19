@@ -89,3 +89,73 @@ input[type="checkbox"]:checked::after {
   color: #09090b;
   line-height: 12px;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   React Flow Dark Theme
+   ───────────────────────────────────────────────────────────────────────────── */
+
+/* Controls panel dark styling */
+.react-flow-controls-dark .react-flow__controls-button {
+  background-color: #18181b;
+  border: none;
+  border-bottom: 1px solid #27272a;
+  color: #a1a1aa;
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+}
+
+.react-flow-controls-dark .react-flow__controls-button:hover {
+  background-color: #27272a;
+  color: #d4d4d8;
+}
+
+.react-flow-controls-dark .react-flow__controls-button:last-child {
+  border-bottom: none;
+}
+
+.react-flow-controls-dark .react-flow__controls-button svg {
+  fill: currentColor;
+  max-width: 14px;
+  max-height: 14px;
+}
+
+/* Edge styling */
+.react-flow__edge-path {
+  stroke: #71717a;
+  stroke-width: 2;
+}
+
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:focus .react-flow__edge-path,
+.react-flow__edge:focus-visible .react-flow__edge-path {
+  stroke: #22d3ee;
+}
+
+/* Connection line */
+.react-flow__connection-line {
+  stroke: #22d3ee;
+  stroke-width: 2;
+}
+
+/* Handle styling */
+.react-flow__handle {
+  width: 8px;
+  height: 8px;
+  border: 2px solid #27272a;
+  background-color: #71717a;
+}
+
+.react-flow__handle:hover {
+  background-color: #22d3ee;
+}
+
+.react-flow__handle.connecting {
+  background-color: #22d3ee;
+}
+
+/* Selection box */
+.react-flow__selection {
+  background: rgba(34, 211, 238, 0.08);
+  border: 1px dashed #22d3ee;
+}

@@ -107,8 +107,6 @@ const TEMPLATE_LAYOUTS: Record<string, () => LayoutData> = {
               tabs: [
                 { id: 'scene', title: 'Scene', group: 'default' },
                 { id: 'code', title: 'Code', group: 'default' },
-                { id: 'components', title: 'Components', group: 'default' },
-                { id: 'node-editor', title: 'Node Editor', group: 'default' },
               ],
               activeId: 'scene',
             } as PanelData,

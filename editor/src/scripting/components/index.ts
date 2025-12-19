@@ -12,11 +12,45 @@ export { AnimatorComponent } from './AnimatorComponent'
 
 // Physics/Collision
 export { ColliderComponent } from './ColliderComponent'
-export type { ColliderType } from './ColliderComponent'
+export type { ColliderType, CollisionEventData } from './ColliderComponent'
 
 // Behavior
 export { InteractableComponent } from './InteractableComponent'
 export type { InteractionType } from './InteractableComponent'
+
+// Debug/Development
+export { DebugComponent, Debug, onDebugMessage } from './DebugComponent'
+export type { LogLevel, DebugMessageEvent } from './DebugComponent'
+
+// Audio
+export { AudioComponent, GameAudio, onSoundEnd } from './AudioComponent'
+export type { SFXCategory, SoundEndEvent } from './AudioComponent'
+
+// Camera
+export {
+  CameraComponent,
+  CameraTransposerComponent,
+  CameraComposerComponent,
+  CameraConfinerComponent,
+  CameraShakeComponent,
+  CameraLetterboxComponent,
+  CameraBrain,
+  GameCamera,
+} from './CameraComponent'
+export type {
+  BlendCurve,
+  CameraOutput,
+  CameraTransitionEvent,
+  CameraShakeEvent,
+} from './CameraComponent'
+
+// Behavior (Visual Scripting)
+export {
+  BehaviorComponent,
+  BehaviorGraphRegistry,
+  ComponentInstanceRegistry,
+} from './BehaviorComponent'
+export type { GraphReference, ExecutionMode } from './BehaviorComponent'
 
 // Re-export decorators for convenience
 export {

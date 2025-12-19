@@ -328,9 +328,8 @@ function calculateChildrenBounds(node: Node): Rect2DBounds | null {
 
 /**
  * Recalculate auto-sized nodes in the tree.
- * Nodes with autoSize: true in their Rect2D will have their SIZE
- * updated to encompass all children plus padding.
- * POSITION (x, y) is NOT affected by autoSize - user can move the node freely.
+ * Nodes with autoSize: true in their Rect2D will have their SIZE and POSITION
+ * updated to encompass all children plus padding evenly on all sides.
  * Returns a new tree with updated nodes (immutable).
  */
 export function recalculateAutoSizeNodes(node: Node): Node {
@@ -357,38 +356,76 @@ export function recalculateAutoSizeNodes(node: Node): Node {
   const paddingX = (rect2D.properties?.paddingX as number) || 0;
   const paddingY = (rect2D.properties?.paddingY as number) || 0;
 
-  // Calculate new SIZE based on children bounds
-  // Position is NOT changed - only width and height are auto-calculated
-  // Size must encompass all children, including those at negative positions
+  // Get current position
+  const currentX = (rect2D.properties?.x as number) || 0;
+  const currentY = (rect2D.properties?.y as number) || 0;
+
+  // Calculate children bounds
   const minChildX = childrenBounds.x;
   const minChildY = childrenBounds.y;
   const maxChildX = childrenBounds.x + childrenBounds.width;
   const maxChildY = childrenBounds.y + childrenBounds.height;
 
-  // Width/height must cover from min(0, minChild) to max(0, maxChild)
-  // This ensures children at negative positions are included
-  const newWidth = Math.max(0, maxChildX) - Math.min(0, minChildX) + paddingX * 2;
-  const newHeight = Math.max(0, maxChildY) - Math.min(0, minChildY) + paddingY * 2;
+  // Calculate new size and position:
+  // Position should shift to (minChildX - paddingX, minChildY - paddingY) relative to current
+  // This ensures padding is even on all sides
+  // Also need to shift all children by the inverse to maintain their world positions
+  const newX = currentX + minChildX - paddingX;
+  const newY = currentY + minChildY - paddingY;
+  const newWidth = (maxChildX - minChildX) + paddingX * 2;
+  const newHeight = (maxChildY - minChildY) + paddingY * 2;
 
-  // Only update if size actually changed
+  // Calculate how much children need to shift (inverse of position change)
+  // Since parent position changed, children's local coords need adjustment to stay in place
+  const childOffsetX = paddingX - minChildX;
+  const childOffsetY = paddingY - minChildY;
+
+  // Only update if something actually changed
   const currentWidth = (rect2D.properties?.width as number) || 1;
   const currentHeight = (rect2D.properties?.height as number) || 1;
 
-  if (newWidth === currentWidth && newHeight === currentHeight) {
+  const positionChanged = newX !== currentX || newY !== currentY;
+  const sizeChanged = newWidth !== currentWidth || newHeight !== currentHeight;
+
+  if (!positionChanged && !sizeChanged) {
     return updatedNode;
   }
 
-  // Update the Rect2D component with new SIZE only
-  // Position (x, y) remains unchanged - user can move the node freely
+  // Update the Rect2D component with new position and size
   const updatedComponents = [...updatedNode.components];
   updatedComponents[rect2DIdx] = {
     ...rect2D,
     properties: {
       ...rect2D.properties,
+      x: newX,
+      y: newY,
       width: newWidth,
       height: newHeight,
     },
   };
+
+  // Shift all children's positions to compensate for parent position change
+  // This maintains their world positions
+  const shiftedChildren = updatedChildren.map(child => {
+    const childRect2DIdx = child.components.findIndex(c => c.script === 'Rect2D');
+    if (childRect2DIdx === -1) return child;
+
+    const childRect2D = child.components[childRect2DIdx];
+    const childX = (childRect2D.properties?.x as number) || 0;
+    const childY = (childRect2D.properties?.y as number) || 0;
+
+    const shiftedComponents = [...child.components];
+    shiftedComponents[childRect2DIdx] = {
+      ...childRect2D,
+      properties: {
+        ...childRect2D.properties,
+        x: childX + childOffsetX,
+        y: childY + childOffsetY,
+      },
+    };
+
+    return { ...child, components: shiftedComponents };
+  });
 
   // Also update the GlyphMap/GlyphImage cells to match new size if present
   const glyphMapIdx = updatedComponents.findIndex(c => c.script === 'GlyphMap' || c.script === 'GlyphImage');
@@ -426,6 +463,7 @@ export function recalculateAutoSizeNodes(node: Node): Node {
 
   return {
     ...updatedNode,
+    children: shiftedChildren,
     components: updatedComponents,
   };
 }

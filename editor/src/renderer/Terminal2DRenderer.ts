@@ -430,9 +430,30 @@ export class Terminal2DRenderer {
   }
 
   /**
-   * Set zoom level directly (1.0 = 100%) - no animation
+   * Set zoom level with animation toward center of viewport
+   * Used by toolbar controls
    */
-  setZoom(zoom: number) {
+  setZoom(zoom: number, canvasWidth?: number, canvasHeight?: number) {
+    const newZoom = Math.max(0.25, Math.min(4.0, zoom))
+
+    // If already at this zoom or animating to it, skip
+    if (Math.abs(this.targetZoom - newZoom) < 0.001) return
+
+    // If we have canvas dimensions, animate toward center
+    if (canvasWidth !== undefined && canvasHeight !== undefined) {
+      this.zoomTowardPoint(newZoom, canvasWidth / 2, canvasHeight / 2)
+    } else {
+      // No dimensions, just snap
+      this.zoom = newZoom
+      this.targetZoom = newZoom
+      this.zoomAnimating = false
+    }
+  }
+
+  /**
+   * Set zoom level directly without animation (for initialization)
+   */
+  setZoomImmediate(zoom: number) {
     this.zoom = Math.max(0.25, Math.min(4.0, zoom))
     this.targetZoom = this.zoom
     this.zoomAnimating = false
@@ -547,14 +568,8 @@ export class Terminal2DRenderer {
    * Used for Home key
    */
   resetView(canvasWidth: number, canvasHeight: number) {
-    // Reset zoom to 100%
-    this.zoom = 1.0
-    this.targetZoom = 1.0
-    this.zoomAnimating = false
-
-    // Center the view so origin (0,0) is at the center of the canvas
-    const cellW = this.config.cellWidth * this.zoom
-    const cellH = this.config.cellHeight * this.zoom
+    // Reset zoom to 100% immediately (no animation for reset)
+    this.setZoomImmediate(1.0)
 
     // Put origin at center of canvas
     this.viewOffset[0] = canvasWidth / 2

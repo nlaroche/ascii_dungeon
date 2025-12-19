@@ -50,7 +50,88 @@ export interface ComponentMetadata {
   name: string
   icon?: string
   description?: string
+  category?: string
+  timeMode?: 'game' | 'real'
   properties: Map<string, PropertyOptions>
+  actions: Map<string, ActionMetadata>
+  signals: Map<string, SignalMetadata>
+  handlers: Map<string, HandlerMetadata>
+  lifecycleHandlers: Map<string, LifecycleMetadata>
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Action Metadata (methods exposed to logic graphs)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ActionMetadata {
+  /** Method name */
+  methodName: string
+  /** Display name in editor */
+  displayName?: string
+  /** Category for grouping in UI */
+  category?: string
+  /** Whether the action is async */
+  async?: boolean
+  /** Output pin names (e.g., ['success', 'error', 'timeout']) */
+  outputs?: string[]
+  /** Description for tooltips */
+  description?: string
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Signal Metadata (outbound events)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface SignalMetadata {
+  /** Property name */
+  propertyName: string
+  /** Display name in editor */
+  displayName?: string
+  /** Description for tooltips */
+  description?: string
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Handler Metadata (event listeners)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type EventPhase = 'before' | 'execute' | 'after'
+
+export interface HandlerMetadata {
+  /** Method name */
+  methodName: string
+  /** Event type to listen for */
+  eventType: string
+  /** Which phase to handle */
+  phase: EventPhase
+  /** Priority (higher = runs first) */
+  priority?: number
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Lifecycle Metadata
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type LifecycleEvent =
+  | 'ConstructionScript'
+  | 'Before:Init'
+  | 'Execute:Init'
+  | 'After:Init'
+  | 'Execute:Enable'
+  | 'Execute:Disable'
+  | 'Execute:Update'
+  | 'Execute:FixedUpdate'
+  | 'Execute:LateUpdate'
+  | 'Execute:VisibilityChange'
+  | 'Before:Dispose'
+  | 'Execute:Dispose'
+  | 'After:Dispose'
+
+export interface LifecycleMetadata {
+  /** Method name */
+  methodName: string
+  /** Lifecycle event to hook */
+  event: LifecycleEvent
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -62,6 +143,18 @@ const componentMetadataMap = new WeakMap<Function, ComponentMetadata>()
 
 // Store property metadata by prototype (accumulated during decoration)
 const propertyMetadataMap = new WeakMap<object, Map<string, PropertyOptions>>()
+
+// Store action metadata by prototype (methods exposed to logic graphs)
+const actionMetadataMap = new WeakMap<object, Map<string, ActionMetadata>>()
+
+// Store signal metadata by prototype (outbound events)
+const signalMetadataMap = new WeakMap<object, Map<string, SignalMetadata>>()
+
+// Store handler metadata by prototype (event listeners)
+const handlerMetadataMap = new WeakMap<object, Map<string, HandlerMetadata>>()
+
+// Store lifecycle metadata by prototype (lifecycle hooks)
+const lifecycleMetadataMap = new WeakMap<object, Map<string, LifecycleMetadata>>()
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Component Registry
@@ -96,15 +189,27 @@ export function component(options: ComponentOptions | string = {}) {
     const opts = typeof options === 'string' ? { name: options } : options
     const name = opts.name || target.name
 
-    // Collect property metadata from the prototype
+    // Collect all metadata from the prototype
     const properties: Map<string, PropertyOptions> =
       propertyMetadataMap.get(target.prototype) || new Map()
+    const actions: Map<string, ActionMetadata> =
+      actionMetadataMap.get(target.prototype) || new Map()
+    const signals: Map<string, SignalMetadata> =
+      signalMetadataMap.get(target.prototype) || new Map()
+    const handlers: Map<string, HandlerMetadata> =
+      handlerMetadataMap.get(target.prototype) || new Map()
+    const lifecycleHandlers: Map<string, LifecycleMetadata> =
+      lifecycleMetadataMap.get(target.prototype) || new Map()
 
     const metadata: ComponentMetadata = {
       name,
       icon: opts.icon,
       description: opts.description,
       properties,
+      actions,
+      signals,
+      handlers,
+      lifecycleHandlers,
     }
 
     // Store metadata on the class
@@ -185,6 +290,170 @@ export function select(options: string[], extra: Partial<PropertyOptions> = {}) 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// @action Decorator
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ActionOptions {
+  /** Display name in editor (defaults to method name) */
+  displayName?: string
+  /** Category for grouping in UI */
+  category?: string
+  /** Whether the action is async (auto-detected if method returns Promise) */
+  async?: boolean
+  /** Output pin names for branching (e.g., ['success', 'error']) */
+  outputs?: string[]
+  /** Description for tooltips */
+  description?: string
+}
+
+/**
+ * Marks a method as an action that can be triggered from logic graphs
+ * @example
+ * @action({ displayName: 'Take Damage', outputs: ['survived', 'died'] })
+ * takeDamage(amount: number): void { ... }
+ */
+export function action(options: ActionOptions | string = {}) {
+  return function (
+    target: object,
+    propertyKey: string,
+    _descriptor: PropertyDescriptor
+  ) {
+    const opts = typeof options === 'string' ? { displayName: options } : options
+
+    // Get or create the actions map on this prototype
+    let actions = actionMetadataMap.get(target)
+    if (!actions) {
+      actions = new Map()
+      actionMetadataMap.set(target, actions)
+    }
+
+    // Store this action's metadata
+    actions.set(propertyKey, {
+      methodName: propertyKey,
+      displayName: opts.displayName || propertyKey,
+      category: opts.category,
+      async: opts.async,
+      outputs: opts.outputs,
+      description: opts.description,
+    })
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// @signal Decorator
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface SignalOptions {
+  /** Display name in editor (defaults to property name) */
+  displayName?: string
+  /** Description for tooltips */
+  description?: string
+}
+
+/**
+ * Marks a property as a signal that can emit events to logic graphs
+ * Signals are typically EventEmitter-like objects
+ * @example
+ * @signal({ displayName: 'On Death' })
+ * onDeath = new Signal<{ killer: Entity }>()
+ */
+export function signal(options: SignalOptions | string = {}) {
+  return function (target: object, propertyKey: string) {
+    const opts = typeof options === 'string' ? { displayName: options } : options
+
+    // Get or create the signals map on this prototype
+    let signals = signalMetadataMap.get(target)
+    if (!signals) {
+      signals = new Map()
+      signalMetadataMap.set(target, signals)
+    }
+
+    // Store this signal's metadata
+    signals.set(propertyKey, {
+      propertyName: propertyKey,
+      displayName: opts.displayName || propertyKey,
+      description: opts.description,
+    })
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// @handler Decorator
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface HandlerOptions {
+  /** Event type to listen for */
+  event: string
+  /** Which phase to handle (defaults to 'execute') */
+  phase?: EventPhase
+  /** Priority (higher = runs first, defaults to 0) */
+  priority?: number
+}
+
+/**
+ * Marks a method as an event handler
+ * @example
+ * @handler({ event: 'damage', phase: 'before' })
+ * onBeforeDamage(event: GameEvent<DamageData>): void { ... }
+ */
+export function handler(options: HandlerOptions) {
+  return function (
+    target: object,
+    propertyKey: string,
+    _descriptor: PropertyDescriptor
+  ) {
+    // Get or create the handlers map on this prototype
+    let handlers = handlerMetadataMap.get(target)
+    if (!handlers) {
+      handlers = new Map()
+      handlerMetadataMap.set(target, handlers)
+    }
+
+    // Store this handler's metadata
+    handlers.set(propertyKey, {
+      methodName: propertyKey,
+      eventType: options.event,
+      phase: options.phase || 'execute',
+      priority: options.priority ?? 0,
+    })
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// @lifecycle Decorator
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Marks a method as a lifecycle hook
+ * @example
+ * @lifecycle('Execute:Init')
+ * onInit(): void { ... }
+ *
+ * @lifecycle('Execute:Update')
+ * onUpdate(): void { ... }
+ */
+export function lifecycle(event: LifecycleEvent) {
+  return function (
+    target: object,
+    propertyKey: string,
+    _descriptor: PropertyDescriptor
+  ) {
+    // Get or create the lifecycle handlers map on this prototype
+    let lifecycleHandlers = lifecycleMetadataMap.get(target)
+    if (!lifecycleHandlers) {
+      lifecycleHandlers = new Map()
+      lifecycleMetadataMap.set(target, lifecycleHandlers)
+    }
+
+    // Store this lifecycle handler's metadata
+    lifecycleHandlers.set(propertyKey, {
+      methodName: propertyKey,
+      event,
+    })
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Utility Functions
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -225,6 +494,16 @@ import { Rect2D } from '../engine/core/Rect2D'
 import { GlyphImage, GlyphMap } from '../engine/core/GlyphImage'
 import { GlyphImageRenderer, GlyphMapRenderer } from '../engine/core/Renderer2D'
 
+/** Helper to create empty metadata maps */
+function createEmptyMetadataMaps() {
+  return {
+    actions: new Map<string, ActionMetadata>(),
+    signals: new Map<string, SignalMetadata>(),
+    handlers: new Map<string, HandlerMetadata>(),
+    lifecycleHandlers: new Map<string, LifecycleMetadata>(),
+  }
+}
+
 /**
  * Register core engine components.
  * Called during app initialization.
@@ -246,6 +525,7 @@ export function registerCoreComponents(): void {
       icon: '▢',
       description: 'Position and size in 2D space',
       properties: rect2DProperties,
+      ...createEmptyMetadataMaps(),
     },
     ctor: Rect2D as unknown as new (...args: unknown[]) => unknown,
   })
@@ -260,6 +540,7 @@ export function registerCoreComponents(): void {
       icon: '▤',
       description: 'Multi-character ASCII art grid',
       properties: glyphImageProperties,
+      ...createEmptyMetadataMaps(),
     },
     ctor: GlyphImage as unknown as new (...args: unknown[]) => unknown,
   })
@@ -271,6 +552,7 @@ export function registerCoreComponents(): void {
       icon: '▤',
       description: 'Multi-character ASCII art grid (alias for GlyphImage)',
       properties: glyphImageProperties,
+      ...createEmptyMetadataMaps(),
     },
     ctor: GlyphMap as unknown as new (...args: unknown[]) => unknown,
   })
@@ -282,6 +564,7 @@ export function registerCoreComponents(): void {
       icon: '▤',
       description: 'Renders a GlyphImage to the terminal',
       properties: new Map<string, PropertyOptions>(),
+      ...createEmptyMetadataMaps(),
     },
     ctor: GlyphImageRenderer as unknown as new (...args: unknown[]) => unknown,
   })
@@ -293,6 +576,7 @@ export function registerCoreComponents(): void {
       icon: '▤',
       description: 'Renders a GlyphImage to the terminal (alias)',
       properties: new Map<string, PropertyOptions>(),
+      ...createEmptyMetadataMaps(),
     },
     ctor: GlyphMapRenderer as unknown as new (...args: unknown[]) => unknown,
   })
@@ -313,6 +597,7 @@ export function registerCoreComponents(): void {
       icon: 'A',
       description: 'Single character with colors',
       properties: glyphProperties,
+      ...createEmptyMetadataMaps(),
     },
     ctor: class {} as unknown as new (...args: unknown[]) => unknown, // Placeholder - data-only component
   })

@@ -23,6 +23,7 @@ import { RenderPipelinePanel } from './components/render';
 import { PalettePanel } from './components/PalettePanel';
 import { DragOverlay } from './components/DragOverlay';
 import { getFloatingPanelId, isFloatingPanelWindow, isTauri } from './stores/useFloatingWindows';
+import { useCodeEditor } from './stores/useCodeEditor';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main App
@@ -383,6 +384,13 @@ function FileTree() {
     }
   };
 
+  // Open file in code editor
+  const openInCodeEditor = useCallback((path: string) => {
+    window.dispatchEvent(new CustomEvent('code-editor-open-file', {
+      detail: { path }
+    }));
+  }, []);
+
   // Render a file entry recursively
   const renderEntry = (entry: FileEntry, depth: number = 0) => {
     const isExpanded = expandedDirs.has(entry.path);
@@ -397,6 +405,12 @@ function FileTree() {
               toggleDirectory(entry.path);
             } else {
               setPath(['project', 'selectedFile'], entry.path, `Select ${entry.name}`);
+            }
+          }}
+          onDoubleClick={() => {
+            if (!entry.isDirectory) {
+              // Open in code editor on double-click
+              openInCodeEditor(entry.path);
             }
           }}
           className="py-1 cursor-pointer rounded transition-colors flex items-center gap-1"
@@ -671,119 +685,153 @@ function SceneView() {
 
 function CodeEditor() {
   const theme = useTheme();
-  const selectedFile = useEngineState((s) => s.project.selectedFile);
-  const [fileContent, setFileContent] = useState<string>('');
+  const { tabs, activeTabPath, openFile, closeTab, setActiveTab, updateContent, markSaved, isDirty } = useCodeEditor();
+  const activeTab = tabs.find(t => t.path === activeTabPath);
   const [isLoading, setIsLoading] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load file when selected
+  // Subscribe to file open requests (from double-clicking in file tree)
   useEffect(() => {
-    if (!selectedFile) {
-      setFileContent('');
-      return;
-    }
+    const handleOpenFile = async (event: CustomEvent<{ path: string }>) => {
+      const { path } = event.detail;
 
-    setIsLoading(true);
-    setError(null);
+      // Check if already open
+      const existingTab = tabs.find(t => t.path === path);
+      if (existingTab) {
+        setActiveTab(path);
+        return;
+      }
 
-    import('./lib/filesystem').then(({ getFileSystem }) => {
-      getFileSystem().then(fs => {
-        fs.readFile(selectedFile)
-          .then(content => {
-            setFileContent(content);
-            setIsDirty(false);
-          })
-          .catch(err => {
-            setError(`Failed to load file: ${err.message}`);
-            setFileContent('');
-          })
-          .finally(() => setIsLoading(false));
-      });
-    });
-  }, [selectedFile]);
+      // Load the file
+      setIsLoading(true);
+      setError(null);
+      try {
+        const { getFileSystem } = await import('./lib/filesystem');
+        const fs = await getFileSystem();
+        const content = await fs.readFile(path);
+        openFile(path, content);
+      } catch (err) {
+        setError(`Failed to load: ${(err as Error).message}`);
+      } finally {
+        setIsLoading(false);
+      }
+    };
 
-  // Save file
+    window.addEventListener('code-editor-open-file', handleOpenFile as EventListener);
+    return () => window.removeEventListener('code-editor-open-file', handleOpenFile as EventListener);
+  }, [tabs, openFile, setActiveTab]);
+
+  // Save current file
   const handleSave = useCallback(async () => {
-    if (!selectedFile) return;
+    if (!activeTabPath) return;
+    const tab = tabs.find(t => t.path === activeTabPath);
+    if (!tab) return;
 
     try {
       const { getFileSystem } = await import('./lib/filesystem');
       const fs = await getFileSystem();
-      await fs.writeFile(selectedFile, fileContent);
-      setIsDirty(false);
+      await fs.writeFile(activeTabPath, tab.content);
+      markSaved(activeTabPath);
     } catch (err) {
       setError(`Failed to save: ${(err as Error).message}`);
     }
-  }, [selectedFile, fileContent]);
+  }, [activeTabPath, tabs, markSaved]);
 
   // Handle content change
   const handleChange = useCallback((value: string) => {
-    setFileContent(value);
-    setIsDirty(true);
-  }, []);
-
-  // Determine language from file extension
-  const getLanguage = (filename: string | null): string => {
-    if (!filename) return 'plaintext';
-    const ext = filename.split('.').pop()?.toLowerCase();
-    switch (ext) {
-      case 'lua': return 'lua';
-      case 'json': return 'json';
-      case 'ts': case 'tsx': return 'typescript';
-      case 'js': case 'jsx': return 'javascript';
-      case 'md': return 'markdown';
-      case 'css': return 'css';
-      case 'html': return 'html';
-      case 'xml': return 'xml';
-      case 'yaml': case 'yml': return 'yaml';
-      default: return 'plaintext';
+    if (activeTabPath) {
+      updateContent(activeTabPath, value);
     }
-  };
+  }, [activeTabPath, updateContent]);
 
-  const fileName = selectedFile?.split('/').pop();
-  const dirName = selectedFile?.split('/').slice(-2, -1)[0];
+  // Handle tab close (with dirty check)
+  const handleCloseTab = useCallback((path: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (isDirty(path)) {
+      // TODO: Show save prompt
+      if (!window.confirm('This file has unsaved changes. Close anyway?')) {
+        return;
+      }
+    }
+    closeTab(path);
+  }, [closeTab, isDirty]);
 
-  // Use basic Monaco for all files
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        handleSave();
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === 'w') {
+        e.preventDefault();
+        if (activeTabPath) handleCloseTab(activeTabPath);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleSave, handleCloseTab, activeTabPath]);
+
   return (
     <div className="h-full flex flex-col">
-      {/* File header */}
-      <div
-        className="h-8 flex items-center justify-between px-3 shrink-0"
-        style={{ borderBottom: `1px solid ${theme.border}` }}
-      >
-        {selectedFile ? (
-          <>
-            <div className="flex items-center gap-2 text-xs">
-              <span style={{ color: theme.textDim }}>{dirName}/</span>
-              <span style={{ color: theme.text }}>{fileName}</span>
-              {isDirty && <span style={{ color: theme.warning }}>●</span>}
+      {/* Tab bar */}
+      {tabs.length > 0 && (
+        <div
+          className="flex items-center shrink-0 overflow-x-auto"
+          style={{
+            backgroundColor: theme.bgPanel,
+            borderBottom: `1px solid ${theme.border}`,
+          }}
+        >
+          {tabs.map(tab => (
+            <div
+              key={tab.path}
+              className="flex items-center gap-1.5 px-3 py-1.5 cursor-pointer select-none shrink-0 group"
+              style={{
+                backgroundColor: tab.path === activeTabPath ? theme.bg : 'transparent',
+                borderRight: `1px solid ${theme.border}`,
+                color: tab.path === activeTabPath ? theme.text : theme.textDim,
+              }}
+              onClick={() => setActiveTab(tab.path)}
+              title={tab.path}
+            >
+              <span className="text-xs">{tab.fileName}</span>
+              {isDirty(tab.path) && (
+                <span className="text-[10px]" style={{ color: theme.warning }}>●</span>
+              )}
+              <button
+                className="opacity-0 group-hover:opacity-100 ml-1 w-4 h-4 flex items-center justify-center rounded hover:bg-white/10 transition-opacity text-xs"
+                onClick={(e) => handleCloseTab(tab.path, e)}
+                style={{ color: theme.textMuted }}
+              >
+                ×
+              </button>
             </div>
+          ))}
+          {/* Save button */}
+          {activeTabPath && isDirty(activeTabPath) && (
             <button
               onClick={handleSave}
-              disabled={!isDirty}
-              className="px-2 py-0.5 rounded text-xs"
+              className="ml-auto px-2 py-1 mx-2 rounded text-xs shrink-0"
               style={{
-                backgroundColor: isDirty ? theme.accent : theme.bgHover,
-                color: isDirty ? theme.bg : theme.textDim,
+                backgroundColor: theme.accent,
+                color: theme.bg,
               }}
             >
               Save
             </button>
-          </>
-        ) : (
-          <span className="text-xs" style={{ color: theme.textDim }}>No file selected</span>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       {/* Editor content */}
-      {!selectedFile ? (
+      {tabs.length === 0 ? (
         <div className="flex-1 flex items-center justify-center" style={{ color: theme.textDim }}>
           <div className="text-center">
             <div className="text-4xl mb-2">{'{ }'}</div>
-            <div>Select a file to edit</div>
+            <div>No files open</div>
             <div className="text-xs mt-1" style={{ color: theme.textMuted }}>
-              Click on a file in the Files panel
+              Double-click a file in the Files panel to open it
             </div>
           </div>
         </div>
@@ -801,15 +849,16 @@ function CodeEditor() {
             <div className="text-xs">{error}</div>
           </div>
         </div>
-      ) : (
+      ) : activeTab ? (
         <div className="flex-1 min-h-0">
           <MonacoFileEditor
-            value={fileContent}
+            key={activeTab.path}
+            value={activeTab.content}
             onChange={handleChange}
-            language={getLanguage(selectedFile)}
+            language={activeTab.language}
           />
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

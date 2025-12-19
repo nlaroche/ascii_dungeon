@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { useState, useRef, useCallback } from 'react'
-import { useTheme, useSelection, useNodes } from '../stores/useEngineState'
+import { useTheme, useSelection, useNodes, useEngineState } from '../stores/useEngineState'
 import {
   componentRegistry,
   getRegisteredComponents,
@@ -13,6 +13,9 @@ import {
 import type { Node, NodeComponent } from '../stores/engineState'
 import { Vec2Scrubber, Vec3Scrubber, ColorScrubber } from './ui/Scrubber'
 import { SearchablePopup, type SearchableItem } from './ui/Popup'
+
+// Special ID for "Create New Component" item
+const CREATE_NEW_COMPONENT_ID = '__create_new__'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Component Inspector
@@ -93,7 +96,10 @@ function ComponentsSection({
   getNodePath: (nodeId: string) => number[] | null
 }) {
   const theme = useTheme()
+  const projectPath = useEngineState((s) => s.project.path)
   const [showAddMenu, setShowAddMenu] = useState(false)
+  const [showCreateDialog, setShowCreateDialog] = useState(false)
+  const [newComponentName, setNewComponentName] = useState('')
   const addButtonRef = useRef<HTMLButtonElement>(null)
   const nodePath = getNodePath(node.id)
 
@@ -125,20 +131,99 @@ function ComponentsSection({
   }
 
   // Build searchable items from component registry
-  const componentItems: SearchableItem[] = getRegisteredComponents().map((name) => {
-    const entry = componentRegistry.get(name)
-    const meta = entry?.metadata
-    return {
-      id: name,
-      label: name,
-      icon: meta?.icon || '▣',
-      description: meta?.description,
-    }
+  const componentItems: SearchableItem[] = [
+    // Add "Create New Component" at the top
+    {
+      id: CREATE_NEW_COMPONENT_ID,
+      label: '+ Create New Component',
+      icon: '✎',
+      description: 'Create a new TypeScript component',
+    },
+    // Then existing components
+    ...getRegisteredComponents().map((name) => {
+      const entry = componentRegistry.get(name)
+      const meta = entry?.metadata
+      return {
+        id: name,
+        label: name,
+        icon: meta?.icon || '▣',
+        description: meta?.description,
+      }
+    }),
+  ]
+
+  // Create a new component file
+  const createNewComponent = useCallback(async (name: string) => {
+    if (!name || !projectPath) return
+
+    // Ensure name is PascalCase
+    const componentName = name.charAt(0).toUpperCase() + name.slice(1)
+    const fileName = `${componentName}Component.ts`
+    const filePath = `${projectPath}/src/components/${fileName}`
+
+    // Component template
+    const template = `import { Component, component, property } from '@ascii-dungeon/scripting'
+
+@component({
+  name: '${componentName}',
+  icon: '●',
+  description: 'Custom ${componentName} component'
+})
+export class ${componentName}Component extends Component {
+  @property({
+    type: 'number',
+    label: 'Example Property',
+    min: 0,
+    max: 100,
   })
+  exampleProperty: number = 0
+
+  onAttach(): void {
+    console.log('${componentName} attached')
+  }
+
+  onUpdate(deltaTime: number): void {
+    // Update logic here
+  }
+}
+`
+
+    try {
+      // Create the file
+      const { getFileSystem } = await import('../lib/filesystem')
+      const fs = await getFileSystem()
+
+      // Ensure src/components directory exists
+      try {
+        await fs.createDirectory(`${projectPath}/src`)
+      } catch { /* ignore if exists */ }
+      try {
+        await fs.createDirectory(`${projectPath}/src/components`)
+      } catch { /* ignore if exists */ }
+
+      await fs.writeFile(filePath, template)
+
+      // Open in code editor
+      window.dispatchEvent(new CustomEvent('code-editor-open-file', {
+        detail: { path: filePath }
+      }))
+
+      console.log('[ComponentInspector] Created component:', filePath)
+    } catch (err) {
+      console.error('[ComponentInspector] Failed to create component:', err)
+    }
+  }, [projectPath])
 
   const handleAddComponent = useCallback((item: SearchableItem) => {
-    console.log('[ComponentInspector] Add component:', item.id)
-    // TODO: Add component to node
+    if (item.id === CREATE_NEW_COMPONENT_ID) {
+      // Show create dialog
+      setShowAddMenu(false)
+      setShowCreateDialog(true)
+      setNewComponentName('')
+    } else {
+      console.log('[ComponentInspector] Add component:', item.id)
+      // TODO: Add component to node
+    }
   }, [])
 
   return (
@@ -182,6 +267,73 @@ function ComponentsSection({
               onToggleEnabled={(enabled) => toggleComponentEnabled(compIndex, enabled)}
             />
           ))}
+        </div>
+      )}
+
+      {/* Create New Component Dialog */}
+      {showCreateDialog && (
+        <div
+          className="fixed inset-0 flex items-center justify-center"
+          style={{ backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 10001 }}
+          onClick={() => setShowCreateDialog(false)}
+        >
+          <div
+            className="rounded p-4 w-80"
+            style={{ backgroundColor: theme.bgPanel, border: `1px solid ${theme.border}` }}
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="text-sm mb-3" style={{ color: theme.text }}>Create New Component</div>
+            <input
+              type="text"
+              value={newComponentName}
+              onChange={e => setNewComponentName(e.target.value)}
+              placeholder="ComponentName (e.g. Health, Inventory)"
+              autoFocus
+              className="w-full px-3 py-2 rounded text-sm mb-3"
+              style={{
+                backgroundColor: theme.bg,
+                color: theme.text,
+                border: `1px solid ${theme.border}`,
+              }}
+              onKeyDown={e => {
+                if (e.key === 'Enter' && newComponentName.trim()) {
+                  createNewComponent(newComponentName.trim())
+                  setShowCreateDialog(false)
+                }
+                if (e.key === 'Escape') {
+                  setShowCreateDialog(false)
+                }
+              }}
+            />
+            <div className="text-xs mb-3" style={{ color: theme.textDim }}>
+              Will be created at: src/components/{newComponentName || 'Name'}Component.ts
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                className="px-3 py-1.5 rounded text-xs"
+                style={{ backgroundColor: theme.bgHover, color: theme.textMuted }}
+                onClick={() => setShowCreateDialog(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-3 py-1.5 rounded text-xs"
+                style={{
+                  backgroundColor: newComponentName.trim() ? theme.accent : theme.bgHover,
+                  color: newComponentName.trim() ? theme.bg : theme.textDim,
+                }}
+                disabled={!newComponentName.trim()}
+                onClick={() => {
+                  if (newComponentName.trim()) {
+                    createNewComponent(newComponentName.trim())
+                    setShowCreateDialog(false)
+                  }
+                }}
+              >
+                Create
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

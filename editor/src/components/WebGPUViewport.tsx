@@ -26,6 +26,7 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
 
   // Terminal 2D renderer for ASCII grid mode
   const terminal2DRef = useRef<Terminal2DRenderer | null>(null)
+  const terminalNeedsRefreshRef = useRef(false)  // Dirty flag for deferred refresh
 
   // 2D Editor state from global store
   const tool2D = useEngineState((s) => s.editor2D?.tool || 'pointer') as EditorTool2D
@@ -127,6 +128,7 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
   const hoveredNodeRef = useRef<string | null>(null)
   const rootNodeRef = useRef<Node>(rootNode)
   const setPathRef = useRef(setPath)
+  const batchUpdateRef = useRef(useEngineState.getState().batchUpdate)
   const toolSettingsRef = useRef(toolSettings)
   const normalizedNodesRef = useRef(normalizedNodes)
 
@@ -1124,24 +1126,18 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
           // Mark as actively dragging (distinguishes click from drag)
           isDraggingNodeRef.current = true
 
-          // Calculate new position
-          const newX = dragOriginalPosRef.current.x + deltaX
-          const newY = dragOriginalPosRef.current.y + deltaY
+          // Calculate new position (snap to grid by rounding)
+          const newX = Math.round(dragOriginalPosRef.current.x + deltaX)
+          const newY = Math.round(dragOriginalPosRef.current.y + deltaY)
 
           // Get node path and update position
           const posInfo = getNodePositionInfo(draggedNodeIdRef.current)
           if (posInfo) {
-            // Update x and y separately
-            setPathRef.current(
-              [...posInfo.path, 'components', posInfo.rect2DIndex, 'properties', 'x'],
-              newX,
-              'Move node X'
-            )
-            setPathRef.current(
-              [...posInfo.path, 'components', posInfo.rect2DIndex, 'properties', 'y'],
-              newY,
-              'Move node Y'
-            )
+            // Update x and y together using batchUpdate to avoid double re-render
+            batchUpdateRef.current([
+              { path: [...posInfo.path, 'components', posInfo.rect2DIndex, 'properties', 'x'], value: newX },
+              { path: [...posInfo.path, 'components', posInfo.rect2DIndex, 'properties', 'y'], value: newY },
+            ], 'Move node')
           }
         }
         return
@@ -1628,9 +1624,9 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
     const WORLD_ORIGIN_X = Math.floor(gridSize[0] / 2)  // 100
     const WORLD_ORIGIN_Y = Math.floor(gridSize[1] / 2)  // 75
 
-    // Helper to convert world coords to grid coords
+    // Helper to convert world coords to grid coords (must be integers for cell lookup)
     const worldToGrid = (worldX: number, worldY: number): [number, number] => {
-      return [WORLD_ORIGIN_X + worldX, WORLD_ORIGIN_Y + worldY]
+      return [Math.round(WORLD_ORIGIN_X + worldX), Math.round(WORLD_ORIGIN_Y + worldY)]
     }
 
     // Helper to get global position of a node (traverses parent chain)
@@ -1732,12 +1728,14 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
     }
   }, [])
 
-  // Sync tilemap changes to terminal
+  // Sync tilemap changes to terminal (deferred to render loop to avoid flickering)
   useEffect(() => {
     if (terminal2DRef.current && cameraMode === '2d') {
-      loadTilemapToTerminal(terminal2DRef.current)
+      // Just mark as needing refresh - the render loop will do the actual update
+      // This prevents multiple clear+draw cycles between frames
+      terminalNeedsRefreshRef.current = true
     }
-  }, [normalizedNodes, rootNode, cameraMode, loadTilemapToTerminal])
+  }, [normalizedNodes, rootNode, cameraMode])
 
   // Handle recenter requests (from button or keyboard)
   useEffect(() => {
@@ -1827,9 +1825,9 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
     const WORLD_ORIGIN_X = Math.floor(gridSize[0] / 2)
     const WORLD_ORIGIN_Y = Math.floor(gridSize[1] / 2)
 
-    // Helper to convert world coords to grid coords
+    // Helper to convert world coords to grid coords (must be integers for cell lookup)
     const worldToGrid = (worldX: number, worldY: number): [number, number] => {
-      return [WORLD_ORIGIN_X + worldX, WORLD_ORIGIN_Y + worldY]
+      return [Math.round(WORLD_ORIGIN_X + worldX), Math.round(WORLD_ORIGIN_Y + worldY)]
     }
 
     // Find selected node and calculate its global position (traversing parent chain)
@@ -1882,14 +1880,22 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
     terminal2DRef.current.setSelection(gridX, gridY, gridX + result.width - 1, gridY + result.height - 1)
   }, [selectedNodes, rootNode, cameraMode, selection2D])
 
-  // Sync zoom/showGrid to Terminal2D renderer
+  // Sync showGrid to Terminal2D renderer
   useEffect(() => {
     if (terminal2DRef.current && cameraMode === '2d') {
-      // Convert percentage (100 = 100%) to factor (1.0 = 100%)
-      terminal2DRef.current.setZoom(zoom / 100)
       terminal2DRef.current.setShowGrid(showGrid)
     }
-  }, [zoom, showGrid, cameraMode])
+  }, [showGrid, cameraMode])
+
+  // Sync zoom from toolbar to renderer (with animation toward center)
+  // Wheel zoom calls renderer directly, this handles toolbar zoom changes
+  useEffect(() => {
+    if (terminal2DRef.current && cameraMode === '2d' && canvasRef.current) {
+      const canvas = canvasRef.current
+      // setZoom already skips if already animating to this target
+      terminal2DRef.current.setZoom(zoom / 100, canvas.width, canvas.height)
+    }
+  }, [zoom, cameraMode])
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -2033,6 +2039,12 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
 
           // Render based on camera mode
           if (cameraModeRef.current === '2d' && terminal2DRef.current && rendererRef.current) {
+            // Refresh terminal if marked dirty (deferred from useEffect to prevent flickering)
+            if (terminalNeedsRefreshRef.current) {
+              terminalNeedsRefreshRef.current = false
+              loadTilemapToTerminal(terminal2DRef.current)
+            }
+
             // Update zoom animation (smooth eased transition)
             terminal2DRef.current.updateZoomAnimation(deltaTime)
 
