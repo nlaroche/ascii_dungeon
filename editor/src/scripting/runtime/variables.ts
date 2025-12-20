@@ -108,8 +108,9 @@ class VariableStore {
       if (def.max !== undefined) coercedValue = Math.min(def.max, coercedValue)
     }
 
-    // Check readonly
-    if (def?.readonly && oldValue !== undefined) {
+    // Check readonly (allow system/runtime sources to bypass)
+    const isSystemSource = source === 'runtime' || source === 'system'
+    if (def?.readonly && oldValue !== undefined && !isSystemSource) {
       console.warn(`[Variables] Cannot modify readonly variable: ${name}`)
       return oldValue ?? null
     }

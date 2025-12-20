@@ -25,6 +25,7 @@ import { DragOverlay } from './components/DragOverlay';
 import { getFloatingPanelId, isFloatingPanelWindow, isTauri } from './stores/useFloatingWindows';
 import { useCodeEditor } from './stores/useCodeEditor';
 import { RuntimeInspector } from './components/RuntimeInspector';
+import { GameViewPanel } from './components/GameViewPanel';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main App
@@ -148,6 +149,8 @@ function useFloatingPanelContent(tabId: string) {
       return <NodeEditor />
     case 'scene':
       return <SceneView />
+    case 'game':
+      return <GameViewPanel />
     case 'code':
       return <CodeEditor />
     case 'chat':
@@ -248,6 +251,8 @@ function AppContent() {
         return <NodeEditor />;
       case 'scene':
         return <SceneView />;
+      case 'game':
+        return <GameViewPanel />;
       case 'code':
         return <CodeEditor />;
       case 'chat':

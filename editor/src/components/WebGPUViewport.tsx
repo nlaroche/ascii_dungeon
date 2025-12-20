@@ -1667,6 +1667,16 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
 
     // Recursively load visible nodes
     // parentGlobalX/Y are in WORLD coords (before grid conversion)
+    // Helper to pack RGB array to u32
+    const packColor = (rgb: [number, number, number], a: number = 1): number => {
+      return (
+        (Math.round(rgb[0] * 255) << 0) |
+        (Math.round(rgb[1] * 255) << 8) |
+        (Math.round(rgb[2] * 255) << 16) |
+        (Math.round(a * 255) << 24)
+      )
+    }
+
     const loadNode = (node: Node, parentGlobalX: number, parentGlobalY: number) => {
       // Skip hidden nodes
       if (node.meta?.visible === false) return
@@ -1675,23 +1685,38 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
       const globalRect = getGlobalRect(node, parentGlobalX, parentGlobalY)
 
       // Get GlyphMap/GlyphImage component for cells data (multi-character grid)
-      const glyphMapComp = node.components.find(c => c.script === 'GlyphMap' || c.script === 'GlyphImage')
+      // Only use if enabled
+      const glyphMapComp = node.components.find(c =>
+        (c.script === 'GlyphMap' || c.script === 'GlyphImage') && c.enabled !== false
+      )
       const cells = glyphMapComp?.properties?.cells as string | undefined
 
-      // Get Glyph component for single character
-      const glyphComp = node.components.find(c => c.script === 'Glyph')
+      // Get Glyph component for single character (only if enabled)
+      const glyphComp = node.components.find(c => c.script === 'Glyph' && c.enabled !== false)
+
+      // Extract Glyph properties
       const char = glyphComp?.properties?.char as string | undefined
       const emission = (glyphComp?.properties?.emission as number) ?? 0
+      const fg = glyphComp?.properties?.fg as [number, number, number] | undefined
+      const bg = glyphComp?.properties?.bg as [number, number, number] | undefined
+      const visible = glyphComp?.properties?.visible !== false
 
       // If node has cells data in GlyphMap, load it at the global grid position
-      if (cells && globalRect) {
+      if (cells && globalRect && glyphMapComp) {
         const [gridX, gridY] = worldToGrid(globalRect.x, globalRect.y)
         terminal.loadAscii(cells, gridX, gridY, emission)
       }
       // If node has a single Glyph character, render it at the position
-      else if (char && globalRect) {
+      else if (char && globalRect && visible) {
         const [gridX, gridY] = worldToGrid(globalRect.x, globalRect.y)
-        terminal.setCellChar(gridX, gridY, char, 0, emission)
+        // Use component colors if provided, otherwise use palette
+        if (fg || bg) {
+          const fgColor = fg ? packColor(fg) : undefined
+          const bgColor = bg ? packColor(bg) : undefined
+          terminal.setCell(gridX, gridY, char, fgColor, bgColor, 0, emission)
+        } else {
+          terminal.setCellChar(gridX, gridY, char, 0, emission)
+        }
       }
 
       // Process children with this node's global position as parent offset
@@ -2044,18 +2069,25 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
 
             // 2D Terminal mode - render ASCII grid with post-processing
             const device = rendererRef.current.device!
+            const width = canvas!.width
+            const height = canvas!.height
+
+            // Skip rendering if canvas has invalid dimensions
+            if (width <= 0 || height <= 0) {
+              animationIdRef.current = requestAnimationFrame(animate)
+              return
+            }
+
             const encoder = device.createCommandEncoder()
             const screenTexture = rendererRef.current.context!.getCurrentTexture()
             const screenView = screenTexture.createView()
-            const width = canvas!.width
-            const height = canvas!.height
 
             // Check if post-processing is needed
             const postSettings = globalPostProcessRef.current
             const postProcess = postProcessRef.current
             const needsPostProcess = postSettings.enabled && postSettings.crtEnabled && postProcess
 
-            if (needsPostProcess) {
+            if (needsPostProcess && width > 0 && height > 0) {
               // Create or resize intermediate texture if needed
               if (!intermediateTextureRef.current ||
                   intermediateTextureRef.current.width !== width ||
@@ -2185,13 +2217,18 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
       const { width, height } = entry.contentRect
       const dpr = window.devicePixelRatio || 1
 
+      // Skip resize if dimensions are invalid
+      const newWidth = Math.floor(width * dpr)
+      const newHeight = Math.floor(height * dpr)
+      if (newWidth <= 0 || newHeight <= 0) return
+
       if (canvas) {
-        canvas.width = width * dpr
-        canvas.height = height * dpr
+        canvas.width = newWidth
+        canvas.height = newHeight
       }
 
       if (rendererRef.current) {
-        rendererRef.current.resize(width * dpr, height * dpr)
+        rendererRef.current.resize(newWidth, newHeight)
       }
     })
 

@@ -5,6 +5,7 @@
 
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
+import { useEffect } from 'react';
 import {
   EngineState,
   INITIAL_ENGINE_STATE,
@@ -2388,6 +2389,22 @@ queueMicrotask(() => {
 export function usePlayMode() {
   const playMode = useEngineState((state) => state.playMode);
   const setPath = useEngineState((state) => state.setPath);
+
+  // Subscribe to PlayMode state updates for continuous sync
+  useEffect(() => {
+    const unsubscribe = PlayMode.subscribe((pmState) => {
+      useEngineState.setState((state) => ({
+        ...state,
+        playMode: {
+          ...state.playMode,
+          status: pmState.status,
+          frameCount: pmState.frameCount,
+          elapsedTime: pmState.elapsedTime,
+        },
+      }));
+    });
+    return unsubscribe;
+  }, []);
 
   const start = async () => {
     await PlayMode.start();

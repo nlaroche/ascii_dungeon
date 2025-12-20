@@ -52,6 +52,7 @@ const TAB_DEFINITIONS: Record<string, { icon: string; label: string }> = {
   components: { icon: '▣', label: 'Components' },
   'node-editor': { icon: '◎', label: 'Node Editor' },
   scene: { icon: '▦', label: 'Scene' },
+  game: { icon: '▶', label: 'Game' },
   code: { icon: '{ }', label: 'Code' },
   chat: { icon: '◆', label: 'AI Chat' },
   notes: { icon: '✎', label: 'Note taking' },
@@ -106,6 +107,7 @@ const TEMPLATE_LAYOUTS: Record<string, () => LayoutData> = {
               size: 700,
               tabs: [
                 { id: 'scene', title: 'Scene', group: 'default' },
+                { id: 'game', title: 'Game', group: 'default' },
                 { id: 'code', title: 'Code', group: 'default' },
               ],
               activeId: 'scene',
