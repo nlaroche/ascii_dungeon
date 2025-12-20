@@ -1,0 +1,523 @@
+{
+  "version": "1.0.0",
+  "savedAt": "2024-01-01T00:00:00.000Z",
+  "rootNode": {
+    "id": "scene-root",
+    "name": "Village Scene",
+    "type": "Node",
+    "children": [
+      {
+        "id": "ground-layer",
+        "name": "Ground",
+        "type": "Node",
+        "children": [],
+        "components": [
+          {
+            "id": "ground-terrain",
+            "script": "Terrain",
+            "enabled": true,
+            "properties": {
+              "width": 60,
+              "height": 40,
+              "fillChar": ".",
+              "palette": "grass"
+            }
+          }
+        ],
+        "transform": {
+          "position": [-30, -20, 0],
+          "rotation": [0, 0, 0],
+          "scale": [1, 1, 1]
+        },
+        "meta": {}
+      },
+      {
+        "id": "player",
+        "name": "Player",
+        "type": "Node2D",
+        "children": [],
+        "components": [
+          {
+            "id": "player-glyph",
+            "script": "Glyph",
+            "enabled": true,
+            "properties": {
+              "char": "@",
+              "fg": "#22ff66",
+              "bg": "transparent",
+              "bold": true
+            }
+          },
+          {
+            "id": "player-camera",
+            "script": "Camera",
+            "enabled": true,
+            "properties": {
+              "priority": 10,
+              "active": true,
+              "zoom": 1.5,
+              "dampingX": 3,
+              "dampingY": 3,
+              "bindingMode": "follow"
+            }
+          },
+          {
+            "id": "player-audio",
+            "script": "Audio",
+            "enabled": true,
+            "properties": {
+              "masterVolume": 0.7,
+              "sfxVolume": 1.0,
+              "pitchVariation": 0.1
+            }
+          },
+          {
+            "id": "player-collider",
+            "script": "Collider",
+            "enabled": true,
+            "properties": {
+              "blocksMovement": true,
+              "layer": "player"
+            }
+          }
+        ],
+        "transform": {
+          "position": [0, 0, 0],
+          "rotation": [0, 0, 0],
+          "scale": [1, 1, 1]
+        },
+        "visual": {
+          "visible": true,
+          "glyph": "@",
+          "color": [0.1, 1.0, 0.4],
+          "opacity": 1.0,
+          "emission": [0.0, 0.3, 0.1],
+          "emissionPower": 0.5
+        },
+        "meta": {
+          "isPlayer": true
+        }
+      },
+      {
+        "id": "hut-1",
+        "name": "Village Hut",
+        "type": "Node2D",
+        "children": [],
+        "components": [
+          {
+            "id": "hut-1-ascii",
+            "script": "Ascii",
+            "enabled": true,
+            "properties": {
+              "art": "  /\\  \n /##\\ \n |##| \n |==| ",
+              "width": 6,
+              "height": 4,
+              "palette": "stone",
+              "brightness": 1.0,
+              "transparentBg": true
+            }
+          },
+          {
+            "id": "hut-1-collider",
+            "script": "Collider",
+            "enabled": true,
+            "properties": {
+              "blocksMovement": true,
+              "blocksVision": true,
+              "layer": "building"
+            }
+          }
+        ],
+        "transform": {
+          "position": [-8, -5, 0],
+          "rotation": [0, 0, 0],
+          "scale": [1, 1, 1]
+        },
+        "meta": {
+          "building": "hut"
+        }
+      },
+      {
+        "id": "hut-2",
+        "name": "Blacksmith",
+        "type": "Node2D",
+        "children": [],
+        "components": [
+          {
+            "id": "hut-2-ascii",
+            "script": "Ascii",
+            "enabled": true,
+            "properties": {
+              "art": "   ___   \n  /###\\  \n |#####| \n |=====| \n  \\___/  ",
+              "width": 9,
+              "height": 5,
+              "palette": "fire",
+              "brightness": 1.2,
+              "transparentBg": true,
+              "animate": true,
+              "animationSpeed": 2,
+              "animationType": "flicker"
+            }
+          },
+          {
+            "id": "hut-2-collider",
+            "script": "Collider",
+            "enabled": true,
+            "properties": {
+              "blocksMovement": true,
+              "blocksVision": true,
+              "layer": "building"
+            }
+          }
+        ],
+        "transform": {
+          "position": [6, -3, 0],
+          "rotation": [0, 0, 0],
+          "scale": [1, 1, 1]
+        },
+        "meta": {
+          "building": "blacksmith"
+        }
+      },
+      {
+        "id": "hut-3",
+        "name": "Inn",
+        "type": "Node2D",
+        "children": [],
+        "components": [
+          {
+            "id": "hut-3-ascii",
+            "script": "Ascii",
+            "enabled": true,
+            "properties": {
+              "art": "    /\\    \n   /##\\   \n  /####\\  \n |######| \n |==##==| ",
+              "width": 10,
+              "height": 5,
+              "palette": "wood",
+              "brightness": 1.0,
+              "transparentBg": true
+            }
+          },
+          {
+            "id": "hut-3-collider",
+            "script": "Collider",
+            "enabled": true,
+            "properties": {
+              "blocksMovement": true,
+              "blocksVision": true,
+              "layer": "building"
+            }
+          }
+        ],
+        "transform": {
+          "position": [-3, 6, 0],
+          "rotation": [0, 0, 0],
+          "scale": [1, 1, 1]
+        },
+        "meta": {
+          "building": "inn"
+        }
+      },
+      {
+        "id": "npc-villager-1",
+        "name": "Farmer",
+        "type": "Node2D",
+        "children": [],
+        "components": [
+          {
+            "id": "villager-1-glyph",
+            "script": "Glyph",
+            "enabled": true,
+            "properties": {
+              "char": "V",
+              "fg": "#aa8855",
+              "bg": "transparent"
+            }
+          },
+          {
+            "id": "villager-1-collider",
+            "script": "Collider",
+            "enabled": true,
+            "properties": {
+              "blocksMovement": true,
+              "layer": "npc"
+            }
+          },
+          {
+            "id": "villager-1-interactable",
+            "script": "Interactable",
+            "enabled": true,
+            "properties": {
+              "interactionRange": 2,
+              "promptText": "Talk"
+            }
+          }
+        ],
+        "transform": {
+          "position": [5, 4, 0],
+          "rotation": [0, 0, 0],
+          "scale": [1, 1, 1]
+        },
+        "visual": {
+          "visible": true,
+          "glyph": "V",
+          "color": [0.7, 0.5, 0.3],
+          "opacity": 1.0
+        },
+        "meta": {
+          "npc": true,
+          "dialog": "Hello traveler! Welcome to our village."
+        }
+      },
+      {
+        "id": "npc-villager-2",
+        "name": "Merchant",
+        "type": "Node2D",
+        "children": [],
+        "components": [
+          {
+            "id": "villager-2-glyph",
+            "script": "Glyph",
+            "enabled": true,
+            "properties": {
+              "char": "M",
+              "fg": "#ffcc00",
+              "bg": "transparent"
+            }
+          },
+          {
+            "id": "villager-2-collider",
+            "script": "Collider",
+            "enabled": true,
+            "properties": {
+              "blocksMovement": true,
+              "layer": "npc"
+            }
+          },
+          {
+            "id": "villager-2-interactable",
+            "script": "Interactable",
+            "enabled": true,
+            "properties": {
+              "interactionRange": 2,
+              "promptText": "Trade"
+            }
+          }
+        ],
+        "transform": {
+          "position": [-5, 2, 0],
+          "rotation": [0, 0, 0],
+          "scale": [1, 1, 1]
+        },
+        "visual": {
+          "visible": true,
+          "glyph": "M",
+          "color": [1.0, 0.8, 0.0],
+          "opacity": 1.0
+        },
+        "meta": {
+          "npc": true,
+          "dialog": "Looking to buy or sell?"
+        }
+      },
+      {
+        "id": "tree-1",
+        "name": "Oak Tree",
+        "type": "Node2D",
+        "children": [],
+        "components": [
+          {
+            "id": "tree-1-ascii",
+            "script": "Ascii",
+            "enabled": true,
+            "properties": {
+              "art": "  &&&  \n &&&&& \n  |#|  ",
+              "width": 7,
+              "height": 3,
+              "palette": "forest",
+              "brightness": 0.9,
+              "transparentBg": true
+            }
+          },
+          {
+            "id": "tree-1-collider",
+            "script": "Collider",
+            "enabled": true,
+            "properties": {
+              "blocksMovement": true,
+              "layer": "environment"
+            }
+          }
+        ],
+        "transform": {
+          "position": [12, -2, 0],
+          "rotation": [0, 0, 0],
+          "scale": [1, 1, 1]
+        },
+        "meta": {}
+      },
+      {
+        "id": "tree-2",
+        "name": "Pine Tree",
+        "type": "Node2D",
+        "children": [],
+        "components": [
+          {
+            "id": "tree-2-ascii",
+            "script": "Ascii",
+            "enabled": true,
+            "properties": {
+              "art": "   ^   \n  ^^^  \n ^^^^^ \n  |#|  ",
+              "width": 7,
+              "height": 4,
+              "palette": "forest",
+              "brightness": 0.85,
+              "transparentBg": true
+            }
+          },
+          {
+            "id": "tree-2-collider",
+            "script": "Collider",
+            "enabled": true,
+            "properties": {
+              "blocksMovement": true,
+              "layer": "environment"
+            }
+          }
+        ],
+        "transform": {
+          "position": [-12, 4, 0],
+          "rotation": [0, 0, 0],
+          "scale": [1, 1, 1]
+        },
+        "meta": {}
+      },
+      {
+        "id": "well",
+        "name": "Village Well",
+        "type": "Node2D",
+        "children": [],
+        "components": [
+          {
+            "id": "well-ascii",
+            "script": "Ascii",
+            "enabled": true,
+            "properties": {
+              "art": " /--\\ \n |~~| \n \\__/ ",
+              "width": 6,
+              "height": 3,
+              "palette": "water",
+              "brightness": 1.0,
+              "transparentBg": true,
+              "animate": true,
+              "animationSpeed": 0.5,
+              "animationType": "wave"
+            }
+          },
+          {
+            "id": "well-collider",
+            "script": "Collider",
+            "enabled": true,
+            "properties": {
+              "blocksMovement": true,
+              "layer": "environment"
+            }
+          },
+          {
+            "id": "well-interactable",
+            "script": "Interactable",
+            "enabled": true,
+            "properties": {
+              "interactionRange": 1.5,
+              "promptText": "Drink"
+            }
+          }
+        ],
+        "transform": {
+          "position": [2, 2, 0],
+          "rotation": [0, 0, 0],
+          "scale": [1, 1, 1]
+        },
+        "meta": {}
+      },
+      {
+        "id": "campfire",
+        "name": "Campfire",
+        "type": "Node2D",
+        "children": [],
+        "components": [
+          {
+            "id": "campfire-ascii",
+            "script": "Ascii",
+            "enabled": true,
+            "properties": {
+              "art": " *** \n*###*\n \\#/ ",
+              "width": 5,
+              "height": 3,
+              "palette": "fire",
+              "brightness": 1.5,
+              "transparentBg": true,
+              "animate": true,
+              "animationSpeed": 4,
+              "animationType": "flicker"
+            }
+          },
+          {
+            "id": "campfire-light",
+            "script": "Light",
+            "enabled": true,
+            "properties": {
+              "color": [1.0, 0.6, 0.2],
+              "intensity": 2.0,
+              "radius": 8,
+              "falloff": 1.5
+            }
+          },
+          {
+            "id": "campfire-audio",
+            "script": "Audio",
+            "enabled": true,
+            "properties": {
+              "masterVolume": 0.3
+            }
+          }
+        ],
+        "transform": {
+          "position": [8, 8, 0],
+          "rotation": [0, 0, 0],
+          "scale": [1, 1, 1]
+        },
+        "meta": {}
+      },
+      {
+        "id": "ambient-light",
+        "name": "Ambient Light",
+        "type": "Light",
+        "children": [],
+        "components": [
+          {
+            "id": "ambient-light-comp",
+            "script": "Light",
+            "enabled": true,
+            "properties": {
+              "color": [0.4, 0.45, 0.6],
+              "intensity": 0.3,
+              "radius": 100,
+              "falloff": 0
+            }
+          }
+        ],
+        "transform": {
+          "position": [0, 0, 10],
+          "rotation": [0, 0, 0],
+          "scale": [1, 1, 1]
+        },
+        "meta": {}
+      }
+    ],
+    "components": [],
+    "meta": {
+      "description": "A peaceful village with huts, NPCs, and ambient sounds"
+    }
+  }
+}

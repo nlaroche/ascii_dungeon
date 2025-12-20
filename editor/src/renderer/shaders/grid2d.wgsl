@@ -121,6 +121,50 @@ fn vs_main(input: VertexInput) -> VertexOutput {
   return output;
 }
 
+// Extract emission from flags (bits 8-15)
+fn getEmission(flags: u32) -> f32 {
+  return f32((flags >> 8u) & 0xFFu) / 255.0;
+}
+
+// Get cell at grid position (with bounds check)
+fn getCellAt(x: i32, y: i32) -> Cell {
+  let gridW = i32(uniforms.gridSize.x);
+  let gridH = i32(uniforms.gridSize.y);
+  if (x < 0 || x >= gridW || y < 0 || y >= gridH) {
+    return Cell(0u, 0u, 0u, 0u);
+  }
+  return cells[u32(y * gridW + x)];
+}
+
+// Calculate emission contribution from neighboring cells
+fn calculateEmissionLight(cellX: i32, cellY: i32) -> vec3<f32> {
+  var light = vec3<f32>(0.0);
+  let radius = 3;  // Check 3 cells in each direction
+
+  for (var dy = -radius; dy <= radius; dy = dy + 1) {
+    for (var dx = -radius; dx <= radius; dx = dx + 1) {
+      if (dx == 0 && dy == 0) { continue; }  // Skip self
+
+      let neighbor = getCellAt(cellX + dx, cellY + dy);
+      let emission = getEmission(neighbor.flags);
+
+      if (emission > 0.0) {
+        // Get neighbor's foreground color as emission color
+        let emitColor = unpackColor(neighbor.fgColor).rgb;
+
+        // Distance falloff (1/distance^2 but clamped)
+        let dist = sqrt(f32(dx * dx + dy * dy));
+        let falloff = 1.0 / (1.0 + dist * dist * 0.5);
+
+        // Add contribution
+        light = light + emitColor * emission * falloff;
+      }
+    }
+  }
+
+  return light;
+}
+
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
   // Sample font texture (white on transparent)
@@ -131,6 +175,20 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 
   // Blend foreground and background based on font alpha
   var color = mix(input.bgColor, input.fgColor, alpha);
+
+  // Apply emission lighting from neighboring cells
+  let cellX = i32(input.cellCoord.x);
+  let cellY = i32(input.cellCoord.y);
+  let emissionLight = calculateEmissionLight(cellX, cellY);
+  color = vec4<f32>(color.rgb + emissionLight * 0.5, color.a);
+
+  // Also apply self-emission glow
+  let selfCell = getCellAt(cellX, cellY);
+  let selfEmission = getEmission(selfCell.flags);
+  if (selfEmission > 0.0) {
+    let emitColor = unpackColor(selfCell.fgColor).rgb;
+    color = vec4<f32>(color.rgb + emitColor * selfEmission * 0.3, color.a);
+  }
 
   // Grid line parameters
   let gridLineWidth = 1.0 / uniforms.cellSize.x;  // 1 pixel line width

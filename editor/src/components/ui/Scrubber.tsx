@@ -1,11 +1,235 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// Scrubber - Drag-to-adjust number input
-// Drag on label to adjust value, input box for direct editing
+// UI Components - Scrubbers, Toggles, and Stack Items
+// Drag-to-adjust inputs, consistent toggle patterns, collapsible stacks
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useTheme } from '../../stores/useEngineState'
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Toggle Button - Consistent toggle styling across the app
+// Selected: outline + alpha fill, Unselected: darker/depressed
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface ToggleButtonProps {
+  active: boolean
+  onClick: () => void
+  children: ReactNode
+  className?: string
+  size?: 'sm' | 'md'
+}
+
+export function ToggleButton({
+  active,
+  onClick,
+  children,
+  className = '',
+  size = 'md',
+}: ToggleButtonProps) {
+  const theme = useTheme()
+  const sizeClasses = size === 'sm' ? 'px-2 py-0.5 text-[10px]' : 'px-3 py-1.5 text-xs'
+
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded font-medium transition-all ${sizeClasses} ${className}`}
+      style={{
+        backgroundColor: active ? theme.accent + '25' : theme.bg,
+        border: `1px solid ${active ? theme.accent : theme.border}`,
+        color: active ? theme.accent : theme.textMuted,
+        boxShadow: active ? 'none' : 'inset 0 1px 2px rgba(0,0,0,0.2)',
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Toggle Checkbox - Small inline toggle for lists
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface ToggleCheckboxProps {
+  checked: boolean
+  onChange: (checked: boolean) => void
+  size?: 'sm' | 'md'
+}
+
+export function ToggleCheckbox({ checked, onChange, size = 'md' }: ToggleCheckboxProps) {
+  const theme = useTheme()
+  const sizeClass = size === 'sm' ? 'w-3 h-3 text-[8px]' : 'w-4 h-4 text-xs'
+
+  return (
+    <div
+      className={`${sizeClass} rounded flex items-center justify-center cursor-pointer transition-all`}
+      style={{
+        backgroundColor: checked ? theme.accent + '30' : theme.bg,
+        border: `1px solid ${checked ? theme.accent : theme.border}`,
+        color: checked ? theme.accent : theme.textMuted,
+        boxShadow: checked ? 'none' : 'inset 0 1px 2px rgba(0,0,0,0.15)',
+      }}
+      onClick={() => onChange(!checked)}
+    >
+      {checked ? '✓' : ''}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Stack Item - Collapsible item with toggle, title, and optional value
+// Used for effects, components, layers, etc.
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface StackItemProps {
+  enabled: boolean
+  onToggle: (enabled: boolean) => void
+  title: string
+  icon?: string
+  value?: number | string
+  valuePrecision?: number
+  description?: string
+  expanded?: boolean
+  onExpandToggle?: () => void
+  children?: ReactNode
+}
+
+export function StackItem({
+  enabled,
+  onToggle,
+  title,
+  icon,
+  value,
+  valuePrecision = 2,
+  description,
+  expanded = true,
+  onExpandToggle,
+  children,
+}: StackItemProps) {
+  const theme = useTheme()
+
+  return (
+    <div
+      className="rounded overflow-hidden transition-all"
+      style={{
+        backgroundColor: enabled ? theme.accent + '15' : theme.bg,
+        border: `1px solid ${enabled ? theme.accent : theme.border}`,
+        boxShadow: enabled ? 'none' : 'inset 0 1px 2px rgba(0,0,0,0.15)',
+      }}
+    >
+      {/* Header row */}
+      <div
+        className="flex items-center gap-2 px-2 py-1.5 cursor-pointer"
+        onClick={() => onToggle(!enabled)}
+        title={description}
+      >
+        {/* Toggle checkbox */}
+        <ToggleCheckbox checked={enabled} onChange={onToggle} />
+
+        {/* Icon if provided */}
+        {icon && (
+          <span style={{ color: enabled ? theme.accent : theme.textMuted }}>{icon}</span>
+        )}
+
+        {/* Title */}
+        <span
+          className="flex-1 text-xs"
+          style={{ color: enabled ? theme.text : theme.textMuted }}
+        >
+          {title}
+        </span>
+
+        {/* Value badge */}
+        {enabled && value !== undefined && (
+          <span
+            className="text-xs px-1.5 rounded font-mono"
+            style={{
+              backgroundColor: theme.accent + '20',
+              color: theme.accent,
+              border: `1px solid ${theme.accent}40`,
+            }}
+          >
+            {typeof value === 'number' ? value.toFixed(valuePrecision) : value}
+          </span>
+        )}
+
+        {/* Expand toggle if children */}
+        {children && onExpandToggle && (
+          <span
+            style={{ color: theme.textDim }}
+            onClick={(e) => {
+              e.stopPropagation()
+              onExpandToggle()
+            }}
+          >
+            {expanded ? '▾' : '▸'}
+          </span>
+        )}
+      </div>
+
+      {/* Children (expanded content) */}
+      {enabled && expanded && children && (
+        <div className="px-2 pb-2">{children}</div>
+      )}
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// Stack Item with Scrubber - Convenience wrapper for numeric values
+// ═══════════════════════════════════════════════════════════════════════════
+
+interface StackItemScrubberProps {
+  enabled: boolean
+  onToggle: (enabled: boolean) => void
+  title: string
+  icon?: string
+  value: number
+  onChange: (value: number) => void
+  min?: number
+  max?: number
+  step?: number
+  precision?: number
+  description?: string
+}
+
+export function StackItemScrubber({
+  enabled,
+  onToggle,
+  title,
+  icon,
+  value,
+  onChange,
+  min = 0,
+  max = 1,
+  step = 0.05,
+  precision = 2,
+  description,
+}: StackItemScrubberProps) {
+  const theme = useTheme()
+
+  return (
+    <StackItem
+      enabled={enabled}
+      onToggle={onToggle}
+      title={title}
+      icon={icon}
+      value={value}
+      valuePrecision={precision}
+      description={description}
+    >
+      <Scrubber
+        label=""
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        precision={precision}
+        onChange={onChange}
+      />
+    </StackItem>
+  )
+}
 
 // Drag direction determines cursor and which mouse axis affects value
 type DragDirection = 'horizontal' | 'vertical' | 'both'

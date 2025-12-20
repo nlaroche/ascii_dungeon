@@ -4,7 +4,8 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { getFileSystem, FileSystem, FileEntry, createProjectFromTemplate } from '../lib/filesystem';
+import { getFileSystem, FileSystem, FileEntry } from '../lib/filesystem';
+import { getDemoProject } from '../lib/demoProjects';
 import { useEngineState } from '../stores/useEngineState';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, UnlistenFn } from '@tauri-apps/api/event';
@@ -356,6 +357,103 @@ export function useProject() {
     }
   }, [fs, openProject, log]);
 
+  // Create a new project from a demo template
+  const createProjectFromDemo = useCallback(async (demoId: string | null, demoName: string) => {
+    console.log('[useProject] createProjectFromDemo called:', demoId, demoName);
+
+    if (!fs) {
+      const errMsg = 'File system not initialized. Please wait and try again.';
+      log('error', errMsg);
+      setError(errMsg);
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+
+    try {
+      const fsAvailable = await fs.isAvailable();
+      if (!fsAvailable) {
+        throw new Error('File system is not available on this platform');
+      }
+
+      // Get demo data
+      const demo = getDemoProject(demoId || 'empty');
+      if (!demo) {
+        throw new Error(`Demo project not found: ${demoId}`);
+      }
+
+      // Pick destination directory
+      const projectDir = await fs.pickDirectory();
+      if (!projectDir) {
+        setIsLoading(false);
+        log('info', 'Project creation cancelled');
+        return;
+      }
+
+      log('info', `Creating project "${demoName}" at: ${projectDir}`);
+
+      // Write project.json
+      const projectConfig = { ...demo.projectJson, name: demoName };
+      await fs.writeFile(
+        `${projectDir}/project.json`,
+        JSON.stringify(projectConfig, null, 2)
+      );
+      console.log('[useProject] Wrote project.json');
+
+      // Write scene.json
+      await fs.writeFile(
+        `${projectDir}/scene.json`,
+        JSON.stringify(demo.sceneJson, null, 2)
+      );
+      console.log('[useProject] Wrote scene.json');
+
+      // Create palettes directory and write palette files
+      if (Object.keys(demo.palettes).length > 0) {
+        await fs.createDirectory(`${projectDir}/palettes`);
+
+        for (const [relativePath, content] of Object.entries(demo.palettes)) {
+          const fullPath = `${projectDir}/palettes/${relativePath}`;
+          const dir = fullPath.substring(0, fullPath.lastIndexOf('/'));
+
+          // Create subdirectory if needed
+          try {
+            await fs.createDirectory(dir);
+          } catch {
+            // Directory might already exist
+          }
+
+          await fs.writeFile(fullPath, JSON.stringify(content, null, 2));
+        }
+        console.log('[useProject] Wrote palette files');
+      }
+
+      // Open the new project
+      await openProject(projectDir);
+
+      // Set minimal post-processing preset for demo scenes
+      if (demoId && demoId !== 'empty') {
+        const { DEFAULT_CRT_SETTINGS } = await import('../stores/engineState');
+        useEngineState.getState().setPath(['renderPipeline', 'globalPostProcess'], {
+          enabled: true,
+          crtEnabled: true,
+          crtSettings: { ...DEFAULT_CRT_SETTINGS, scanlines: 0.2, bloom: 0.2, vignette: 0.2 },
+          effects: [],
+          preset: 'minimal',
+        });
+      }
+
+      log('success', `Created project: ${demoName}`);
+    } catch (err) {
+      console.error('[useProject] Error creating project from demo:', err);
+      const message = err instanceof Error ? err.message : 'Failed to create project';
+      setError(message);
+      log('error', message);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [fs, openProject, log]);
+
   // Save project configuration and scene
   const saveProject = useCallback(async () => {
     if (!fs || !projectPath || !projectConfig) return;
@@ -528,6 +626,7 @@ export function useProject() {
     // Project operations
     openProject,
     createProject,
+    createProjectFromDemo,
     saveProject,
 
     // File operations

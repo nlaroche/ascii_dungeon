@@ -1,0 +1,23 @@
+{
+  "name": "ascii-dungeon-engine-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for ASCII Dungeon engine development - provides introspection, pattern extraction, and consistency checking",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^0.5.0",
+    "glob": "^10.3.10",
+    "typescript": "^5.3.3",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/ws": "^8.5.10",
+    "tsx": "^4.7.0"
+  }
+}

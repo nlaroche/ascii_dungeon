@@ -372,74 +372,70 @@ export interface RenderSettings {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RENDER PIPELINE - Flexible, reorderable post-processing system
+// RENDER PIPELINE - 2D ASCII-focused post-processing system
 // ─────────────────────────────────────────────────────────────────────────────
 
-export interface RenderPassSettings {
-  enabled: boolean;
-  [key: string]: unknown;
+// CRT/ASCII effect settings (unified shader pass)
+export interface CRTSettings {
+  scanlines: number;       // 0-1
+  curvature: number;       // 0-1
+  bloom: number;           // 0-1
+  noise: number;           // 0-1
+  chromatic: number;       // 0-1
+  flicker: number;         // 0-1
+  vignette: number;        // 0-1
+  pixelate: number;        // 0-1
+  colorShift: number;      // -1 to 1 (cool to warm)
 }
 
-export type ShadowType = 'pcf' | 'vsm' | 'pcss';
-
-export interface ShadowSettings {
-  enabled: boolean;
-  type: ShadowType;
-  resolution: number;
-  bias: number;
-  normalBias: number;
-  softness: number;        // 0-1, controls PCF kernel size or VSM blur
-  cascades: number;
-  cascadeSplits: [number, number, number];  // Split distances for CSM
-}
-
-export interface ReflectionSettings {
-  enabled: boolean;
-  type: 'planar' | 'ssr' | 'cubemap';
-  floorReflectivity: number;   // 0-1
-  waterReflectivity: number;   // 0-1
-  ssrMaxSteps: number;
-  ssrThickness: number;
-  ssrRoughnessFade: number;
-}
-
-export interface RenderPasses {
-  shadow: RenderPassSettings & {
-    resolution: number;
-    bias: number;
-    cascades: number;
-  };
-  main: RenderPassSettings;
-  glyph: RenderPassSettings;
-  sky: RenderPassSettings & {
-    zenithColor: [number, number, number];
-    horizonColor: [number, number, number];
-    groundColor: [number, number, number];
-  };
-  grid: RenderPassSettings & {
-    majorSize: number;
-    minorSize: number;
-    fadeDistance: number;
-  };
-}
-
-export interface PostEffect {
+// Individual post-process effect
+export interface PostProcessEffect {
   id: string;
   name: string;
   enabled: boolean;
-  [key: string]: unknown;
+  intensity?: number;
+  params?: Record<string, number | string | number[]>;
 }
 
-export type DebugViewMode = 'final' | 'depth' | 'normals' | 'shadow' | 'albedo';
+// Post-processing stack (used for both camera and global)
+export interface PostProcessStack {
+  enabled: boolean;
+  crtEnabled: boolean;
+  crtSettings: CRTSettings;
+  effects: PostProcessEffect[];
+  preset?: string;
+}
+
+export type DebugViewMode = 'final' | 'depth' | 'normals' | 'emission';
 
 export interface RenderPipelineState {
-  passes: RenderPasses;
-  postEffects: PostEffect[];
-  shadows: ShadowSettings;
-  reflections: ReflectionSettings;
+  // Global post-processing (applied after camera effects)
+  globalPostProcess: PostProcessStack;
+  // Debug view mode
   debugView: DebugViewMode;
   showStats: boolean;
 }
+
+// Default CRT settings
+export const DEFAULT_CRT_SETTINGS: CRTSettings = {
+  scanlines: 0,
+  curvature: 0,
+  bloom: 0,
+  noise: 0,
+  chromatic: 0,
+  flicker: 0,
+  vignette: 0,
+  pixelate: 0,
+  colorShift: 0,
+};
+
+// Default post-process stack
+export const DEFAULT_POST_PROCESS_STACK: PostProcessStack = {
+  enabled: false,
+  crtEnabled: false,
+  crtSettings: { ...DEFAULT_CRT_SETTINGS },
+  effects: [],
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LIGHTING - Full multi-light system
@@ -609,6 +605,27 @@ export interface TemplateState {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PLAY MODE TYPES - Unity-like scene execution with snapshot/restore
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type PlayModeStatus = 'stopped' | 'playing' | 'paused';
+
+export interface PlayModeSnapshot {
+  timestamp: number;
+  rootNode: Node;
+  entities: EntityMaps;
+  globalVariables: Record<string, unknown>;
+}
+
+export interface PlayModeState {
+  status: PlayModeStatus;
+  snapshot: PlayModeSnapshot | null;
+  startTime: number;
+  frameCount: number;
+  elapsedTime: number;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // COMPLETE ENGINE STATE
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -717,6 +734,9 @@ export interface EngineState {
 
   // Transient state (no history tracking - for drag, hover, etc.)
   transient: TransientState;
+
+  // Play mode state (for scene execution)
+  playMode: PlayModeState;
 
   // Runtime state (not persisted)
   console: {
@@ -1027,59 +1047,25 @@ create shaders, spawn entities, and more.`,
   },
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Render Pipeline - Flexible post-processing system
+  // Render Pipeline - 2D ASCII-focused post-processing
   // ─────────────────────────────────────────────────────────────────────────
   renderPipeline: {
-    passes: {
-      shadow: { enabled: true, resolution: 1024, bias: 0.005, cascades: 3 },
-      main: { enabled: true },
-      glyph: { enabled: true },
-      sky: {
-        enabled: true,
-        zenithColor: [0.02, 0.03, 0.06],     // Dark night sky
-        horizonColor: [0.08, 0.12, 0.18],    // Subtle blue-gray horizon
-        groundColor: [0.03, 0.04, 0.03],     // Dark ground reflection
+    globalPostProcess: {
+      enabled: true,
+      crtEnabled: true,
+      crtSettings: {
+        scanlines: 0.5,
+        curvature: 0.3,
+        bloom: 0.4,
+        noise: 0.15,
+        chromatic: 0.3,
+        flicker: 0.2,
+        vignette: 0.4,
+        pixelate: 0,
+        colorShift: 0,
       },
-      grid: { enabled: true, majorSize: 10, minorSize: 1, fadeDistance: 200 },
-    },
-    postEffects: [
-      // CRT/ASCII Effects (enabled by default for ASCII mode)
-      { id: 'scanlines', name: 'Scanlines', enabled: true, intensity: 0.5 },
-      { id: 'crtCurvature', name: 'CRT Curvature', enabled: true, intensity: 0.3 },
-      { id: 'crtBloom', name: 'CRT Bloom', enabled: true, intensity: 0.4 },
-      { id: 'noise', name: 'Noise', enabled: true, intensity: 0.2 },
-      { id: 'chromaticAberration', name: 'Chromatic Aberration', enabled: true, intensity: 0.3 },
-      { id: 'flicker', name: 'Flicker', enabled: true, intensity: 0.2 },
-      { id: 'vignette', name: 'Vignette', enabled: true, intensity: 0.4 },
-      // Traditional 3D effects (disabled by default)
-      { id: 'ssao', name: 'SSAO', enabled: false, radius: 0.5, bias: 0.025, intensity: 0.8, samples: 16 },
-      { id: 'fog', name: 'Fog', enabled: false, density: 0.03, color: [0.015, 0.02, 0.03], start: 10, end: 80, fogType: 1 },
-      { id: 'bloom', name: 'Bloom', enabled: false, threshold: 0.6, intensity: 0.8, radius: 6 },
-      { id: 'colorGrading', name: 'Color Grading', enabled: false, exposure: 0.1, contrast: 1.05, saturation: 1.0, tonemapping: 'aces' },
-      { id: 'filmGrain', name: 'Film Grain', enabled: false, intensity: 0.1 },
-      { id: 'pixelate', name: 'Pixelate', enabled: false, pixelSize: 4 },
-      { id: 'outline', name: 'Outline', enabled: false, thickness: 1, color: [0, 0, 0, 1] },
-      { id: 'sharpen', name: 'Sharpen', enabled: false, intensity: 0.5 },
-      { id: 'fxaa', name: 'FXAA', enabled: false, quality: 'high' },
-    ],
-    shadows: {
-      enabled: true,
-      type: 'pcf',
-      resolution: 1024,
-      bias: 0.005,
-      normalBias: 0.02,
-      softness: 0.5,           // Medium softness
-      cascades: 1,
-      cascadeSplits: [0.1, 0.3, 0.5],
-    },
-    reflections: {
-      enabled: true,
-      type: 'planar',
-      floorReflectivity: 0.15,
-      waterReflectivity: 0.6,
-      ssrMaxSteps: 64,
-      ssrThickness: 0.5,
-      ssrRoughnessFade: 0.8,
+      effects: [],
+      preset: 'crt',
     },
     debugView: 'final',
     showStats: false,
@@ -1226,6 +1212,17 @@ create shaders, spawn entities, and more.`,
       startYaw: 0,
       startPitch: 0,
     },
+  },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Play Mode (scene execution)
+  // ─────────────────────────────────────────────────────────────────────────
+  playMode: {
+    status: 'stopped',
+    snapshot: null,
+    startTime: 0,
+    frameCount: 0,
+    elapsedTime: 0,
   },
 
   // ─────────────────────────────────────────────────────────────────────────

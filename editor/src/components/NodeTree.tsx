@@ -68,6 +68,7 @@ interface TreeNodeProps {
   selectedIds: string[]
   allNodes: SceneNode[]
   onToggleVisibility: (nodeId: string) => void
+  isSceneRoot?: boolean  // True if this is the scene root node
 }
 
 function TreeNode({
@@ -91,6 +92,7 @@ function TreeNode({
   selectedIds,
   allNodes,
   onToggleVisibility,
+  isSceneRoot = false,
 }: TreeNodeProps) {
   const theme = useTheme()
   const isSelected = selectedIds.includes(node.id)
@@ -198,7 +200,7 @@ function TreeNode({
 
   const handleDoubleClick = (e: React.MouseEvent) => {
     e.stopPropagation()
-    if (node.id !== 'root') {
+    if (!isSceneRoot) {
       onStartRename(node.id)
     }
   }
@@ -244,7 +246,7 @@ function TreeNode({
       {/* Node row */}
       <div
         ref={rowRef}
-        draggable={node.id !== 'root' && !isRenaming}
+        draggable={!isSceneRoot && !isRenaming}
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
@@ -604,7 +606,9 @@ export function NodeTree() {
 
   // State - defined before callbacks that use them
   const [expanded, setExpanded] = useState<Set<string>>(() => {
-    const initial = new Set<string>(['root'])
+    // Include both common root ids and the actual rootNode.id
+    const initial = new Set<string>(['root', 'scene-root', rootNode.id])
+    // Expand first level children by default
     rootNode.children.forEach((child) => initial.add(child.id))
     return initial
   })
@@ -879,29 +883,29 @@ export function NodeTree() {
 
   const handleDuplicate = useCallback(() => {
     if (selection.nodes.length === 0) return
-    const clones = duplicateNodes(selection.nodes.filter((id) => id !== 'root'))
+    const clones = duplicateNodes(selection.nodes.filter((id) => id !== rootNode.id))
     if (clones.length > 0) {
       selectNodes(clones.map((n) => n.id))
     }
-  }, [selection.nodes, duplicateNodes, selectNodes])
+  }, [selection.nodes, duplicateNodes, selectNodes, rootNode.id])
 
   const handleDelete = useCallback(() => {
     if (selection.nodes.length === 0) return
-    removeNodes(selection.nodes.filter((id) => id !== 'root'))
+    removeNodes(selection.nodes.filter((id) => id !== rootNode.id))
     clearSelection()
-  }, [selection.nodes, removeNodes, clearSelection])
+  }, [selection.nodes, removeNodes, clearSelection, rootNode.id])
 
   const handleCopy = useCallback(() => {
     if (selection.nodes.length === 0) return
-    copyNodes(selection.nodes.filter((id) => id !== 'root'))
-  }, [selection.nodes, copyNodes])
+    copyNodes(selection.nodes.filter((id) => id !== rootNode.id))
+  }, [selection.nodes, copyNodes, rootNode.id])
 
   // Paste as sibling (beside selected node, under same parent)
   const handlePaste = useCallback(() => {
-    if (selection.nodes.length > 0 && selection.nodes[0] !== 'root') {
+    if (selection.nodes.length > 0 && selection.nodes[0] !== rootNode.id) {
       // Paste under same parent as selected node
       const parent = getParent(selection.nodes[0])
-      const parentId = parent?.id || 'root'
+      const parentId = parent?.id || rootNode.id
       const pasted = pasteNodes(parentId)
       if (pasted.length > 0) {
         setExpanded((prev) => new Set([...prev, parentId]))
@@ -909,28 +913,28 @@ export function NodeTree() {
       }
     } else {
       // No selection or root selected - paste under root
-      const pasted = pasteNodes('root')
+      const pasted = pasteNodes(rootNode.id)
       if (pasted.length > 0) {
         selectNodes(pasted.map((n) => n.id))
       }
     }
-  }, [selection.nodes, pasteNodes, selectNodes, getParent])
+  }, [selection.nodes, pasteNodes, selectNodes, getParent, rootNode.id])
 
   // Paste as child of selected node
   const handlePasteAsChild = useCallback(() => {
-    const parentId = selection.nodes.length > 0 ? selection.nodes[0] : 'root'
+    const parentId = selection.nodes.length > 0 ? selection.nodes[0] : rootNode.id
     const pasted = pasteNodes(parentId)
     if (pasted.length > 0) {
       setExpanded((prev) => new Set([...prev, parentId]))
       selectNodes(pasted.map((n) => n.id))
     }
-  }, [selection.nodes, pasteNodes, selectNodes])
+  }, [selection.nodes, pasteNodes, selectNodes, rootNode.id])
 
   const handleStartRename = useCallback((nodeId: string) => {
-    if (nodeId !== 'root') {
+    if (nodeId !== rootNode.id) {
       setRenamingId(nodeId)
     }
-  }, [])
+  }, [rootNode.id])
 
   const handleRenameSubmit = useCallback(
     (newName: string) => {
@@ -958,10 +962,9 @@ export function NodeTree() {
     const visible: SceneNode[] = []
     const traverse = (node: SceneNode, depth: number) => {
       // Root's children are shown at depth 0
-      if (node.id !== 'root') {
-        visible.push(node)
-      }
-      if (node.id === 'root' || expanded.has(node.id)) {
+      // Include root node in visible list for navigation
+      visible.push(node)
+      if (expanded.has(node.id)) {
         for (const child of node.children) {
           traverse(child, depth + 1)
         }
@@ -1026,7 +1029,7 @@ export function NodeTree() {
           } else {
             // Move to parent
             const parent = getParent(nodeId)
-            if (parent && parent.id !== 'root') {
+            if (parent && parent.id !== rootNode.id) {
               selectNode(parent.id)
               setLastSelectedId(parent.id)
             }
@@ -1053,7 +1056,7 @@ export function NodeTree() {
         handleDelete()
       } else if (e.key === 'F2') {
         e.preventDefault()
-        if (selection.nodes.length === 1 && selection.nodes[0] !== 'root') {
+        if (selection.nodes.length === 1 && selection.nodes[0] !== rootNode.id) {
           handleStartRename(selection.nodes[0])
         }
       } else if (e.ctrlKey || e.metaKey) {
@@ -1076,7 +1079,7 @@ export function NodeTree() {
           handleAddChild()
         } else if (e.key === 'a') {
           e.preventDefault()
-          selectNodes(allNodes.filter((n) => n.id !== 'root').map((n) => n.id))
+          selectNodes(allNodes.filter((n) => n.id !== rootNode.id).map((n) => n.id))
         }
       } else if (e.key === 'Escape') {
         clearSelection()
@@ -1201,32 +1204,31 @@ export function NodeTree() {
         </button>
       </div>
 
-      {/* Tree */}
-      {rootNode.children.map((child) => (
-        <TreeNode
-          key={child.id}
-          node={child}
-          depth={0}
-          expanded={expanded}
-          onToggle={handleToggle}
-          dragState={dragState}
-          prefabDropTarget={prefabDropTarget}
-          onDragStart={handleDragStart}
-          onDragOver={handleDragOver}
-          onDragEnd={handleDragEnd}
-          onDrop={handleDrop}
-          onPrefabHover={handlePrefabHover}
-          onContextMenu={handleContextMenu}
-          onSelect={handleSelect}
-          onStartRename={handleStartRename}
-          renamingId={renamingId}
-          onRenameSubmit={handleRenameSubmit}
-          onRenameCancel={handleRenameCancel}
-          selectedIds={selection.nodes}
-          allNodes={allNodes}
-          onToggleVisibility={toggleVisibility}
-        />
-      ))}
+      {/* Tree - Show root node at top */}
+      <TreeNode
+        key={rootNode.id}
+        node={rootNode}
+        depth={0}
+        expanded={expanded}
+        onToggle={handleToggle}
+        dragState={dragState}
+        prefabDropTarget={prefabDropTarget}
+        onDragStart={handleDragStart}
+        onDragOver={handleDragOver}
+        onDragEnd={handleDragEnd}
+        onDrop={handleDrop}
+        onPrefabHover={handlePrefabHover}
+        onContextMenu={handleContextMenu}
+        onSelect={handleSelect}
+        onStartRename={handleStartRename}
+        renamingId={renamingId}
+        onRenameSubmit={handleRenameSubmit}
+        onRenameCancel={handleRenameCancel}
+        selectedIds={selection.nodes}
+        allNodes={allNodes}
+        onToggleVisibility={toggleVisibility}
+        isSceneRoot={true}
+      />
 
       {/* Empty state */}
       {rootNode.children.length === 0 && (
@@ -1262,7 +1264,7 @@ export function NodeTree() {
           onPasteAsChild={handlePasteAsChild}
           onCenterView={handleCenterView}
           canPaste={hasClipboard()}
-          isRoot={contextMenu.nodeId === 'root'}
+          isRoot={contextMenu.nodeId === rootNode.id}
         />
       )}
     </div>

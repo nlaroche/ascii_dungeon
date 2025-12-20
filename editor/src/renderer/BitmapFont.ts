@@ -102,12 +102,14 @@ export interface GridCell {
   fgColor: number  // packed RGBA
   bgColor: number  // packed RGBA
   flags: number    // bit flags: 1=selected, 2=hovered, 4=cursor
+  emission?: number // 0-255 emission intensity (packed into flags high byte)
 }
 
 export const CELL_SIZE_BYTES = 16
 export const CELL_FLAG_SELECTED = 1
 export const CELL_FLAG_HOVERED = 2
 export const CELL_FLAG_CURSOR = 4
+export const CELL_EMISSION_SHIFT = 8  // Emission stored in bits 8-15 of flags
 
 /**
  * Create a grid data buffer for GPU upload
@@ -130,7 +132,9 @@ export function setGridCell(
   buffer[idx + 0] = cell.charCode
   buffer[idx + 1] = cell.fgColor
   buffer[idx + 2] = cell.bgColor
-  buffer[idx + 3] = cell.flags
+  // Pack emission into high byte of flags (bits 8-15)
+  const emission = Math.min(255, Math.max(0, cell.emission ?? 0))
+  buffer[idx + 3] = (cell.flags & 0xFF) | (emission << CELL_EMISSION_SHIFT)
 }
 
 /**

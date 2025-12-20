@@ -3,6 +3,7 @@
 
 import { useState } from 'react'
 import { useTheme, useEngineState } from '../stores/useEngineState'
+import { ToggleButton } from './ui/Scrubber'
 
 // Color palettes - ASCII dungeon style
 const PALETTES = {
@@ -77,17 +78,14 @@ export function PalettePanel() {
         </div>
         <div className="flex flex-wrap gap-1">
           {Object.keys(PALETTES).map((name) => (
-            <button
+            <ToggleButton
               key={name}
+              active={selectedPalette === name}
               onClick={() => setSelectedPalette(name as keyof typeof PALETTES)}
-              className="px-2 py-1 rounded text-xs transition-colors"
-              style={{
-                backgroundColor: selectedPalette === name ? theme.accent : theme.bgHover,
-                color: selectedPalette === name ? '#fff' : theme.text,
-              }}
+              size="sm"
             >
               {name}
-            </button>
+            </ToggleButton>
           ))}
         </div>
       </div>
@@ -98,41 +96,44 @@ export function PalettePanel() {
           Characters
         </div>
         <div className="grid grid-cols-4 gap-1.5">
-          {palette.colors.map((color) => (
-            <button
-              key={color.char}
-              onClick={() => handleColorSelect(color.char)}
-              className="flex flex-col items-center p-2 rounded transition-all"
-              style={{
-                backgroundColor: currentChar === color.char ? theme.accent + '40' : theme.bgHover,
-                border: currentChar === color.char
-                  ? `2px solid ${theme.accent}`
-                  : `1px solid ${theme.border}`,
-              }}
-              title={`${color.name} (${color.char})`}
-            >
-              {/* Color preview with character */}
-              <div
-                className="w-8 h-8 rounded flex items-center justify-center font-mono text-lg font-bold mb-1"
+          {palette.colors.map((color) => {
+            const isSelected = currentChar === color.char
+            return (
+              <button
+                key={color.char}
+                onClick={() => handleColorSelect(color.char)}
+                className="flex flex-col items-center p-2 rounded transition-all"
                 style={{
-                  backgroundColor: '#1a1a1a',
-                  color: color.hex,
-                  textShadow: `0 0 4px ${color.hex}`,
+                  // Consistent toggle style: outline + alpha fill when selected, depressed when not
+                  backgroundColor: isSelected ? theme.accent + '25' : theme.bg,
+                  border: `1px solid ${isSelected ? theme.accent : theme.border}`,
+                  boxShadow: isSelected ? 'none' : 'inset 0 1px 2px rgba(0,0,0,0.15)',
                 }}
+                title={`${color.name} (${color.char})`}
               >
-                {color.char}
-              </div>
-              {/* Color swatch */}
-              <div
-                className="w-full h-2 rounded"
-                style={{ backgroundColor: color.hex }}
-              />
-              {/* Label */}
-              <div className="mt-1 truncate w-full text-center" style={{ color: theme.textDim }}>
-                {color.name}
-              </div>
-            </button>
-          ))}
+                {/* Color preview with character */}
+                <div
+                  className="w-8 h-8 rounded flex items-center justify-center font-mono text-lg font-bold mb-1"
+                  style={{
+                    backgroundColor: '#1a1a1a',
+                    color: color.hex,
+                    textShadow: `0 0 4px ${color.hex}`,
+                  }}
+                >
+                  {color.char}
+                </div>
+                {/* Color swatch */}
+                <div
+                  className="w-full h-2 rounded"
+                  style={{ backgroundColor: color.hex }}
+                />
+                {/* Label */}
+                <div className="mt-1 truncate w-full text-center" style={{ color: isSelected ? theme.text : theme.textDim }}>
+                  {color.name}
+                </div>
+              </button>
+            )
+          })}
         </div>
       </div>
 

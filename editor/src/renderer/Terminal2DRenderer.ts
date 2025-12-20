@@ -301,7 +301,7 @@ export class Terminal2DRenderer {
   /**
    * Set a single cell
    */
-  setCell(x: number, y: number, char: string, fgColor?: number, bgColor?: number, flags: number = 0) {
+  setCell(x: number, y: number, char: string, fgColor?: number, bgColor?: number, flags: number = 0, emission: number = 0) {
     if (x < 0 || x >= this.config.gridWidth || y < 0 || y >= this.config.gridHeight) return
 
     const charCode = char.charCodeAt(0)
@@ -312,6 +312,7 @@ export class Terminal2DRenderer {
       fgColor: fgColor ?? palette.fg,
       bgColor: bgColor ?? palette.bg,
       flags,
+      emission: Math.round(emission * 25.5), // Scale 0-10 to 0-255
     })
     this.gridDirty = true
   }
@@ -319,21 +320,21 @@ export class Terminal2DRenderer {
   /**
    * Set cell from character with automatic palette lookup
    */
-  setCellChar(x: number, y: number, char: string, flags: number = 0) {
+  setCellChar(x: number, y: number, char: string, flags: number = 0, emission: number = 0) {
     const palette = DUNGEON_PALETTE[char] || { fg: packColor(0.5, 0.5, 0.5), bg: packColor(0.08, 0.08, 0.08) }
-    this.setCell(x, y, char, palette.fg, palette.bg, flags)
+    this.setCell(x, y, char, palette.fg, palette.bg, flags, emission)
   }
 
   /**
    * Load ASCII art string into the grid
    */
-  loadAscii(ascii: string, offsetX: number = 0, offsetY: number = 0) {
+  loadAscii(ascii: string, offsetX: number = 0, offsetY: number = 0, emission: number = 0) {
     const lines = ascii.split('\n')
     for (let y = 0; y < lines.length; y++) {
       const line = lines[y]
       for (let x = 0; x < line.length; x++) {
         const char = line[x]
-        this.setCellChar(offsetX + x, offsetY + y, char)
+        this.setCellChar(offsetX + x, offsetY + y, char, 0, emission)
       }
     }
   }
@@ -378,6 +379,10 @@ export class Terminal2DRenderer {
     for (let y = 0; y < this.config.gridHeight; y++) {
       for (let x = 0; x < this.config.gridWidth; x++) {
         const idx = (y * this.config.gridWidth + x) * 4
+
+        // Preserve emission (bits 8-15) while updating selection/hover flags (bits 0-7)
+        const existingFlags = this.gridData[idx + 3]
+        const emission = existingFlags & 0xFF00  // Keep emission bits
         let flags = 0
 
         // Selection flag
@@ -393,7 +398,7 @@ export class Terminal2DRenderer {
           flags |= CELL_FLAG_HOVERED
         }
 
-        this.gridData[idx + 3] = flags
+        this.gridData[idx + 3] = emission | flags
       }
     }
     this.gridDirty = true

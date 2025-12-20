@@ -5,7 +5,8 @@
 
 import { Component } from '../Component'
 import { component, property, action, signal, lifecycle, number, boolean, vec2 } from '../decorators'
-import type { Node, Transform as TransformData } from '../../stores/engineState'
+import type { Node, Transform as TransformData, PostProcessStack, CRTSettings } from '../../stores/engineState'
+import { DEFAULT_CRT_SETTINGS, DEFAULT_POST_PROCESS_STACK } from '../../stores/engineState'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -20,6 +21,7 @@ export interface CameraOutput {
   y: number
   zoom: number
   rotation: number
+  postProcess?: PostProcessStack
 }
 
 /** Event data for camera transitions */
@@ -113,6 +115,18 @@ export class CameraComponent extends Component {
   rotation: number = 0
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Post-Processing
+  // ─────────────────────────────────────────────────────────────────────────
+
+  @property({
+    type: 'object',
+    label: 'Post Processing',
+    group: 'Effects',
+    tooltip: 'Per-camera post-processing effects stack'
+  })
+  postProcess: PostProcessStack = { ...DEFAULT_POST_PROCESS_STACK }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Signals
   // ─────────────────────────────────────────────────────────────────────────
 
@@ -178,6 +192,28 @@ export class CameraComponent extends Component {
     this.rotation = degrees % 360
   }
 
+  @action({ displayName: 'Enable Post-Processing', category: 'Effects', description: 'Enable camera post-processing' })
+  enablePostProcess(): void {
+    this.postProcess = { ...this.postProcess, enabled: true }
+  }
+
+  @action({ displayName: 'Disable Post-Processing', category: 'Effects', description: 'Disable camera post-processing' })
+  disablePostProcess(): void {
+    this.postProcess = { ...this.postProcess, enabled: false }
+  }
+
+  @action({ displayName: 'Set CRT Effect', category: 'Effects', description: 'Set a CRT effect value (0-1)' })
+  setCRTEffect(effect: keyof CRTSettings, value: number): void {
+    this.postProcess = {
+      ...this.postProcess,
+      crtEnabled: true,
+      crtSettings: {
+        ...this.postProcess.crtSettings,
+        [effect]: value,
+      },
+    }
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   // Lifecycle
   // ─────────────────────────────────────────────────────────────────────────
@@ -223,6 +259,7 @@ export class CameraComponent extends Component {
       y: transform?.position?.[1] ?? 0,
       zoom: this.zoom,
       rotation: this.rotation,
+      postProcess: this.postProcess,
     }
 
     // Apply behaviors from sibling components

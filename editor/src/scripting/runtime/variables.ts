@@ -565,6 +565,27 @@ export class VariablesManager {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
+  // Play Mode Snapshot Support
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /** Get a snapshot of all global variables for play mode */
+  getSnapshot(): Record<string, unknown> {
+    return JSON.parse(JSON.stringify(this.globalStore.toRecord()))
+  }
+
+  /** Restore global variables from a snapshot */
+  restoreSnapshot(snapshot: Record<string, unknown>): void {
+    // Clear current global state except readonly builtin vars
+    const builtinReadonly = ['time', 'deltaTime', 'frameCount', 'mouseX', 'mouseY', 'mouseDown']
+
+    for (const [key, value] of Object.entries(snapshot)) {
+      if (!builtinReadonly.includes(key)) {
+        this.globalStore.set(key, value as ExprValue)
+      }
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
   // Context Building
   // ─────────────────────────────────────────────────────────────────────────
 

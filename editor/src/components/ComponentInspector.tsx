@@ -11,7 +11,7 @@ import {
   type ComponentMetadata,
 } from '../scripting/decorators'
 import type { Node, NodeComponent } from '../stores/engineState'
-import { Vec2Scrubber, Vec3Scrubber, ColorScrubber } from './ui/Scrubber'
+import { Vec2Scrubber, Vec3Scrubber, ColorScrubber, ToggleCheckbox, StackItem } from './ui/Scrubber'
 import { SearchablePopup, type SearchableItem } from './ui/Popup'
 
 // Special ID for "Create New Component" item
@@ -363,10 +363,13 @@ function ComponentCard({ component, onPropertyChange, onToggleEnabled }: Compone
 
   return (
     <div
-      className="rounded overflow-hidden"
+      className="rounded overflow-hidden transition-all"
       style={{
-        backgroundColor: theme.bgHover,
-        opacity: component.enabled ? 1 : 0.6,
+        // Consistent toggle style: outline + alpha fill when enabled, depressed when not
+        backgroundColor: component.enabled ? theme.accent + '15' : theme.bg,
+        border: `1px solid ${component.enabled ? theme.accent : theme.border}`,
+        boxShadow: component.enabled ? 'none' : 'inset 0 1px 2px rgba(0,0,0,0.15)',
+        opacity: component.enabled ? 1 : 0.7,
       }}
     >
       {/* Header */}
@@ -375,26 +378,25 @@ function ComponentCard({ component, onPropertyChange, onToggleEnabled }: Compone
         onClick={() => setExpanded(!expanded)}
       >
         <div className="flex items-center gap-2">
-          <span style={{ color: theme.accent }}>
-            {metadata?.icon || '▣'} {metadata?.name || componentType || 'Unknown'}
+          {/* Toggle checkbox using shared component */}
+          <ToggleCheckbox
+            checked={component.enabled}
+            onChange={(enabled) => onToggleEnabled(enabled)}
+          />
+          <span style={{ color: component.enabled ? theme.accent : theme.textMuted }}>
+            {metadata?.icon || '▣'}
+          </span>
+          <span className="text-xs" style={{ color: component.enabled ? theme.text : theme.textMuted }}>
+            {metadata?.name || componentType || 'Unknown'}
           </span>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            onClick={(e) => {
-              e.stopPropagation()
-              onToggleEnabled(!component.enabled)
-            }}
-            style={{ color: component.enabled ? theme.success : theme.textDim }}
-          >
-            {component.enabled ? '●' : '○'}
-          </button>
+        <div className="flex items-center gap-1">
           <span style={{ color: theme.textDim }}>{expanded ? '▾' : '▸'}</span>
         </div>
       </div>
 
       {/* Properties */}
-      {expanded && (
+      {expanded && component.enabled && (
         <div className="px-2 pb-2 space-y-2">
           {metadata && groupedProperties ? (
             // Render with metadata (grouped)
@@ -578,17 +580,15 @@ function PropertyField({ label, type, value, onChange, options }: PropertyFieldP
 
       case 'boolean':
         return (
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
+          <div className="flex items-center gap-2">
+            <ToggleCheckbox
               checked={Boolean(value)}
-              onChange={(e) => onChange(e.target.checked)}
-              className="accent-cyan-500"
+              onChange={(checked) => onChange(checked)}
             />
-            <span style={{ color: value ? theme.text : theme.textMuted }}>
+            <span className="text-xs" style={{ color: value ? theme.text : theme.textMuted }}>
               {value ? 'Yes' : 'No'}
             </span>
-          </label>
+          </div>
         )
 
       case 'color': {
@@ -698,13 +698,25 @@ function getComponentType(component: NodeComponent): string | null {
   if (component.script) {
     // Core component types are just their name
     const coreTypes = [
+      // Position/Rendering
       'Rect2D',
       'GlyphMap', 'GlyphImage', 'GlyphMapRenderer',  // Multi-char ASCII art
       'Glyph',           // Single character
       'Terrain',         // Grid of prefab IDs
       'Animator',        // Frame-based animation
+      // Physics/Interaction
       'Collider',        // Collision
       'Interactable',    // Can be activated
+      // Runtime components
+      'Camera',          // Virtual camera
+      'CameraTransposer', // Camera follow behavior
+      'CameraComposer',  // Camera framing
+      'CameraConfiner',  // Camera bounds
+      'CameraShake',     // Screen shake
+      'CameraLetterbox', // Cinematic bars
+      'Audio',           // Sound effects
+      'Behavior',        // Visual scripting
+      'Debug',           // Debug output
     ]
     if (coreTypes.includes(component.script)) {
       return component.script

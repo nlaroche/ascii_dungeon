@@ -1,0 +1,36 @@
+{
+  "version": "1.0.0",
+  "demos": [
+    {
+      "id": "simple-rpg",
+      "name": "Simple RPG Village",
+      "description": "A peaceful village with huts, NPCs, trees, and a campfire. Demonstrates components like Ascii, Camera, Audio, Light, Collider, and Interactable.",
+      "icon": "🏘",
+      "path": "simple-rpg",
+      "template": "isometric-rpg",
+      "features": [
+        "Player with camera follow",
+        "ASCII art buildings",
+        "NPCs with dialog",
+        "Animated campfire with lighting",
+        "Sound effects",
+        "Collision detection"
+      ],
+      "thumbnail": null
+    },
+    {
+      "id": "empty",
+      "name": "Empty Scene",
+      "description": "Start with a blank canvas - just a player and camera.",
+      "icon": "📄",
+      "path": null,
+      "template": "isometric-rpg",
+      "features": [
+        "Basic player setup",
+        "Camera ready",
+        "Clean slate"
+      ],
+      "thumbnail": null
+    }
+  ]
+}

@@ -4,10 +4,12 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { useTheme, useTemplate, useEngineState, useUIScale } from '../stores/useEngineState';
+import { useTheme, useTemplate, useEngineState, useUIScale, usePlayMode } from '../stores/useEngineState';
 import { useProject, RecentProject } from '../hooks/useProject';
 import { AVAILABLE_TEMPLATES, getTemplate } from '../lib/templates';
 import { ModeSwitch } from './ModeSwitch';
+import { PlayModeToolbarCompact } from './PlayModeToolbar';
+import { NewProjectDialog, DemoProject } from './NewProjectDialog';
 
 // UI Scale presets
 const UI_SCALE_PRESETS = [
@@ -69,6 +71,7 @@ interface MenuBarProps {
 export function MenuBar({ openPanels = [], onOpenPanel }: MenuBarProps) {
   const theme = useTheme();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+  const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const { currentId: currentTemplateId, applyTemplate, currentName, isCustomized } = useTemplate();
   const { scale: uiScale, setScale: setUIScale } = useUIScale();
@@ -77,12 +80,18 @@ export function MenuBar({ openPanels = [], onOpenPanel }: MenuBarProps) {
 
   const {
     createProject,
+    createProjectFromDemo,
     openProject,
     saveProject,
     hasProject,
     recentProjects,
     clearRecentProjects,
   } = useProject();
+
+  // Handle demo selection from dialog
+  const handleSelectDemo = useCallback((demo: DemoProject) => {
+    createProjectFromDemo(demo.id, demo.name);
+  }, [createProjectFromDemo]);
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -104,7 +113,7 @@ export function MenuBar({ openPanels = [], onOpenPanel }: MenuBarProps) {
           case 'n':
             if (e.shiftKey) {
               e.preventDefault();
-              createProject();
+              setShowNewProjectDialog(true);
             }
             break;
           case 'o':
@@ -121,7 +130,7 @@ export function MenuBar({ openPanels = [], onOpenPanel }: MenuBarProps) {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [createProject, openProject, saveProject, hasProject]);
+  }, [openProject, saveProject, hasProject]);
 
   // Build recent projects submenu
   const recentSubmenu: MenuItem[] = recentProjects.length > 0
@@ -190,7 +199,7 @@ export function MenuBar({ openPanels = [], onOpenPanel }: MenuBarProps) {
   // Menu definitions
   const menus: Record<string, MenuItem[]> = {
     File: [
-      { label: 'New Project', shortcut: 'Ctrl+Shift+N', action: createProject },
+      { label: 'New Project', shortcut: 'Ctrl+Shift+N', action: () => setShowNewProjectDialog(true) },
       { label: 'Open Project...', shortcut: 'Ctrl+O', action: () => openProject() },
       { label: 'Open Recent', submenu: recentSubmenu },
       { separator: true, label: '' },
@@ -266,6 +275,11 @@ export function MenuBar({ openPanels = [], onOpenPanel }: MenuBarProps) {
         ))}
       </div>
 
+      {/* Center - Play mode controls */}
+      <div className="flex items-center">
+        <PlayModeToolbarCompact />
+      </div>
+
       {/* Right side - branding and template */}
       <div className="flex items-center gap-2 pr-2">
         {/* Mode switch */}
@@ -296,6 +310,13 @@ export function MenuBar({ openPanels = [], onOpenPanel }: MenuBarProps) {
           <span style={{ color: theme.accent }}>◆</span> ascii_dungeon
         </span>
       </div>
+
+      {/* New Project Dialog */}
+      <NewProjectDialog
+        isOpen={showNewProjectDialog}
+        onClose={() => setShowNewProjectDialog(false)}
+        onSelectDemo={handleSelectDemo}
+      />
     </div>
   );
 }

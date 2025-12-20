@@ -1,0 +1,11 @@
+{
+  "name": "Simple RPG Village",
+  "version": "1.0.0",
+  "engine": "ascii-dungeon",
+  "description": "A simple RPG demo with a village, player movement, NPCs, and sound effects",
+  "template": "isometric-rpg",
+  "settings": {
+    "targetFPS": 60,
+    "resolution": [1280, 720]
+  }
+}

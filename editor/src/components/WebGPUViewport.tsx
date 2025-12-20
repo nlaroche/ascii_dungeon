@@ -3,6 +3,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { WebGPURenderer, Camera, Scene, Raycaster, GizmoInteraction, Terminal2DRenderer } from '../renderer'
+import { PostProcessPipeline } from '../renderer/PostProcessPipeline'
 import type { GizmoMode, GizmoAxis } from '../renderer'
 import { useEngineState, useNormalizedEntities } from '../stores/useEngineState'
 import type { Node, NormalizedNode, Transform } from '../stores/engineState'
@@ -27,6 +28,11 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
   // Terminal 2D renderer for ASCII grid mode
   const terminal2DRef = useRef<Terminal2DRenderer | null>(null)
   const terminalNeedsRefreshRef = useRef(false)  // Dirty flag for deferred refresh
+
+  // Post-processing pipeline for CRT effects
+  const postProcessRef = useRef<PostProcessPipeline | null>(null)
+  const intermediateTextureRef = useRef<GPUTexture | null>(null)
+  const timeRef = useRef(0)
 
   // 2D Editor state from global store
   const tool2D = useEngineState((s) => s.editor2D?.tool || 'pointer') as EditorTool2D
@@ -100,13 +106,14 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
   const cameraMode = useEngineState((s) => s.camera.mode)
   const cameraModeRef = useRef(cameraMode)
 
-  // Render pipeline settings for shadows and reflections
-  const shadowSettings = useEngineState((s) => s.renderPipeline.shadows)
-  const reflectionSettings = useEngineState((s) => s.renderPipeline.reflections)
-
   // Lighting and environment settings
   const lightingState = useEngineState((s) => s.lighting)
   const environmentState = useEngineState((s) => s.environment)
+
+  // Post-processing settings
+  const globalPostProcess = useEngineState((s) => s.renderPipeline.globalPostProcess)
+  const globalPostProcessRef = useRef(globalPostProcess)
+  globalPostProcessRef.current = globalPostProcess
 
   // Normalized entities for O(1) lookups (replaces tree traversal)
   const { nodes: normalizedNodes, getNode: getNormalizedNode } = useNormalizedEntities()
@@ -1529,28 +1536,6 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
     }
   }, [hoveredNode, cameraMode, setPath])
 
-  // Sync shadow settings to renderer
-  useEffect(() => {
-    if (!rendererRef.current || loading) return
-    rendererRef.current.updateShadowSettings({
-      enabled: shadowSettings.enabled,
-      type: shadowSettings.type,
-      resolution: shadowSettings.resolution,
-      softness: shadowSettings.softness,
-      bias: shadowSettings.bias,
-    })
-  }, [shadowSettings, loading])
-
-  // Sync reflection settings to renderer
-  useEffect(() => {
-    if (!rendererRef.current || loading) return
-    rendererRef.current.updateReflectionSettings({
-      enabled: reflectionSettings.enabled,
-      floorReflectivity: reflectionSettings.floorReflectivity,
-      waterReflectivity: reflectionSettings.waterReflectivity,
-    })
-  }, [reflectionSettings, loading])
-
   // Sync lighting settings to renderer
   useEffect(() => {
     if (!rendererRef.current || loading) return
@@ -1696,16 +1681,17 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
       // Get Glyph component for single character
       const glyphComp = node.components.find(c => c.script === 'Glyph')
       const char = glyphComp?.properties?.char as string | undefined
+      const emission = (glyphComp?.properties?.emission as number) ?? 0
 
       // If node has cells data in GlyphMap, load it at the global grid position
       if (cells && globalRect) {
         const [gridX, gridY] = worldToGrid(globalRect.x, globalRect.y)
-        terminal.loadAscii(cells, gridX, gridY)
+        terminal.loadAscii(cells, gridX, gridY, emission)
       }
       // If node has a single Glyph character, render it at the position
       else if (char && globalRect) {
         const [gridX, gridY] = worldToGrid(globalRect.x, globalRect.y)
-        terminal.setCellChar(gridX, gridY, char)
+        terminal.setCellChar(gridX, gridY, char, 0, emission)
       }
 
       // Process children with this node's global position as parent offset
@@ -1955,7 +1941,12 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
         // Load initial tilemap into terminal and center it
         loadTilemapToTerminal(terminal2D, true)
 
-        console.log('[WebGPUViewport] Terminal2D renderer initialized')
+        // Initialize post-processing pipeline
+        const postProcess = new PostProcessPipeline(renderer.device!, renderer.format)
+        await postProcess.init()
+        postProcessRef.current = postProcess
+
+        console.log('[WebGPUViewport] Terminal2D and PostProcessPipeline initialized')
 
         setLoading(false)
 
@@ -2048,13 +2039,62 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
             // Update zoom animation (smooth eased transition)
             terminal2DRef.current.updateZoomAnimation(deltaTime)
 
-            // 2D Terminal mode - render ASCII grid
-            const encoder = rendererRef.current.device!.createCommandEncoder()
-            const textureView = rendererRef.current.context!.getCurrentTexture().createView()
+            // Update time for post-processing effects
+            timeRef.current += deltaTime
 
-            terminal2DRef.current.render(encoder, textureView, canvas!.width, canvas!.height)
+            // 2D Terminal mode - render ASCII grid with post-processing
+            const device = rendererRef.current.device!
+            const encoder = device.createCommandEncoder()
+            const screenTexture = rendererRef.current.context!.getCurrentTexture()
+            const screenView = screenTexture.createView()
+            const width = canvas!.width
+            const height = canvas!.height
 
-            rendererRef.current.device!.queue.submit([encoder.finish()])
+            // Check if post-processing is needed
+            const postSettings = globalPostProcessRef.current
+            const postProcess = postProcessRef.current
+            const needsPostProcess = postSettings.enabled && postSettings.crtEnabled && postProcess
+
+            if (needsPostProcess) {
+              // Create or resize intermediate texture if needed
+              if (!intermediateTextureRef.current ||
+                  intermediateTextureRef.current.width !== width ||
+                  intermediateTextureRef.current.height !== height) {
+                intermediateTextureRef.current?.destroy()
+                intermediateTextureRef.current = device.createTexture({
+                  size: { width, height },
+                  format: rendererRef.current.format,
+                  usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING,
+                })
+              }
+
+              const intermediateView = intermediateTextureRef.current.createView()
+
+              // Render terminal to intermediate texture
+              terminal2DRef.current.render(encoder, intermediateView, width, height)
+
+              // Apply post-processing from intermediate to screen
+              postProcess.executeStack(
+                encoder,
+                intermediateView,
+                screenView,
+                {
+                  enabled: postSettings.enabled,
+                  crtEnabled: postSettings.crtEnabled,
+                  crtSettings: postSettings.crtSettings,
+                  effects: postSettings.effects || [],
+                  preset: postSettings.preset,
+                },
+                width,
+                height,
+                timeRef.current
+              )
+            } else {
+              // No post-processing - render directly to screen
+              terminal2DRef.current.render(encoder, screenView, width, height)
+            }
+
+            device.queue.submit([encoder.finish()])
           } else if (rendererRef.current && sceneRef.current && cameraRef.current) {
             // 3D mode - render voxels and glyphs
             rendererRef.current.render(sceneRef.current, cameraRef.current)

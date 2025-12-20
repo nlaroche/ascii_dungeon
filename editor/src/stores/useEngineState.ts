@@ -13,14 +13,10 @@ import {
   LogEntry,
   ChatMessage,
   Conversation,
-  PostEffect,
   SceneLight,
   DebugViewMode,
   SkyboxType,
   FogType,
-  ShadowType,
-  ShadowSettings,
-  ReflectionSettings,
   // Normalized entity types
   NormalizedNode,
   NormalizedComponent,
@@ -29,6 +25,9 @@ import {
   Transform,
   Node,
   NodeComponent,
+  // Play mode types
+  PlayModeState,
+  PlayModeStatus,
 } from './engineState';
 import type { TemplateDefinition } from '../lib/templates';
 import { entitySubscriptions, detectEntityChanges } from './subscriptions';
@@ -2105,69 +2104,27 @@ export function useTemplate() {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Hook for render pipeline settings
+ * Hook for render pipeline settings (simplified for 2D ASCII mode)
  */
 export function useRenderPipeline() {
   const pipeline = useEngineState((state) => state.renderPipeline);
   const setPath = useEngineState((state) => state.setPath);
-  const batchUpdate = useEngineState((state) => state.batchUpdate);
 
-  // Toggle render pass
-  const setPassEnabled = (passId: keyof typeof pipeline.passes, enabled: boolean) => {
-    setPath(['renderPipeline', 'passes', passId, 'enabled'], enabled, `${enabled ? 'Enable' : 'Disable'} ${passId} pass`);
+  // Global post-processing controls
+  const setPostProcessEnabled = (enabled: boolean) => {
+    setPath(['renderPipeline', 'globalPostProcess', 'enabled'], enabled, `${enabled ? 'Enable' : 'Disable'} post-processing`);
   };
 
-  // Update pass settings
-  const updatePass = <K extends keyof typeof pipeline.passes>(
-    passId: K,
-    settings: Partial<typeof pipeline.passes[K]>
-  ) => {
-    const updates = Object.entries(settings).map(([key, value]) => ({
-      path: ['renderPipeline', 'passes', passId, key] as StatePath,
-      value,
-    }));
-    batchUpdate(updates, `Update ${passId} pass`);
+  const setCRTEnabled = (enabled: boolean) => {
+    setPath(['renderPipeline', 'globalPostProcess', 'crtEnabled'], enabled, `${enabled ? 'Enable' : 'Disable'} CRT effects`);
   };
 
-  // Get post effect by ID
-  const getPostEffect = (id: string): PostEffect | undefined => {
-    return pipeline.postEffects.find((e) => e.id === id);
+  const setCRTSetting = (key: string, value: number) => {
+    setPath(['renderPipeline', 'globalPostProcess', 'crtSettings', key], value, `Set ${key}: ${value}`);
   };
 
-  // Toggle post effect
-  const setPostEffectEnabled = (id: string, enabled: boolean) => {
-    const idx = pipeline.postEffects.findIndex((e) => e.id === id);
-    if (idx !== -1) {
-      setPath(
-        ['renderPipeline', 'postEffects', idx, 'enabled'],
-        enabled,
-        `${enabled ? 'Enable' : 'Disable'} ${pipeline.postEffects[idx].name}`
-      );
-    }
-  };
-
-  // Update post effect settings
-  const updatePostEffect = (id: string, settings: Partial<PostEffect>) => {
-    const idx = pipeline.postEffects.findIndex((e) => e.id === id);
-    if (idx === -1) return;
-
-    const updates = Object.entries(settings).map(([key, value]) => ({
-      path: ['renderPipeline', 'postEffects', idx, key] as StatePath,
-      value,
-    }));
-    batchUpdate(updates, `Update ${pipeline.postEffects[idx].name}`);
-  };
-
-  // Reorder post effects
-  const reorderPostEffect = (id: string, newIndex: number) => {
-    const idx = pipeline.postEffects.findIndex((e) => e.id === id);
-    if (idx === -1 || idx === newIndex) return;
-
-    const effects = [...pipeline.postEffects];
-    const [removed] = effects.splice(idx, 1);
-    effects.splice(newIndex, 0, removed);
-
-    setPath(['renderPipeline', 'postEffects'], effects, `Reorder ${removed.name}`);
+  const setPreset = (preset: string) => {
+    setPath(['renderPipeline', 'globalPostProcess', 'preset'], preset, `Apply preset: ${preset}`);
   };
 
   // Set debug view
@@ -2180,88 +2137,16 @@ export function useRenderPipeline() {
     setPath(['renderPipeline', 'showStats'], !pipeline.showStats, `${pipeline.showStats ? 'Hide' : 'Show'} stats`);
   };
 
-  // Shadow controls
-  const setShadowEnabled = (enabled: boolean) => {
-    setPath(['renderPipeline', 'shadows', 'enabled'], enabled, `${enabled ? 'Enable' : 'Disable'} shadows`);
-  };
-
-  const setShadowType = (type: ShadowType) => {
-    setPath(['renderPipeline', 'shadows', 'type'], type, `Set shadow type: ${type}`);
-  };
-
-  const setShadowResolution = (resolution: number) => {
-    setPath(['renderPipeline', 'shadows', 'resolution'], resolution, `Set shadow resolution: ${resolution}`);
-  };
-
-  const setShadowSoftness = (softness: number) => {
-    setPath(['renderPipeline', 'shadows', 'softness'], softness, 'Set shadow softness');
-  };
-
-  const setShadowBias = (bias: number) => {
-    setPath(['renderPipeline', 'shadows', 'bias'], bias, 'Set shadow bias');
-  };
-
-  const updateShadows = (settings: Partial<ShadowSettings>) => {
-    const updates = Object.entries(settings).map(([key, value]) => ({
-      path: ['renderPipeline', 'shadows', key] as StatePath,
-      value,
-    }));
-    batchUpdate(updates, 'Update shadow settings');
-  };
-
-  // Reflection controls
-  const setReflectionsEnabled = (enabled: boolean) => {
-    setPath(['renderPipeline', 'reflections', 'enabled'], enabled, `${enabled ? 'Enable' : 'Disable'} reflections`);
-  };
-
-  const setReflectionType = (type: ReflectionSettings['type']) => {
-    setPath(['renderPipeline', 'reflections', 'type'], type, `Set reflection type: ${type}`);
-  };
-
-  const setFloorReflectivity = (reflectivity: number) => {
-    setPath(['renderPipeline', 'reflections', 'floorReflectivity'], reflectivity, 'Set floor reflectivity');
-  };
-
-  const setWaterReflectivity = (reflectivity: number) => {
-    setPath(['renderPipeline', 'reflections', 'waterReflectivity'], reflectivity, 'Set water reflectivity');
-  };
-
-  const updateReflections = (settings: Partial<ReflectionSettings>) => {
-    const updates = Object.entries(settings).map(([key, value]) => ({
-      path: ['renderPipeline', 'reflections', key] as StatePath,
-      value,
-    }));
-    batchUpdate(updates, 'Update reflection settings');
-  };
-
   return {
-    passes: pipeline.passes,
-    postEffects: pipeline.postEffects,
-    shadows: pipeline.shadows,
-    reflections: pipeline.reflections,
+    globalPostProcess: pipeline.globalPostProcess,
     debugView: pipeline.debugView,
     showStats: pipeline.showStats,
-    setPassEnabled,
-    updatePass,
-    getPostEffect,
-    setPostEffectEnabled,
-    updatePostEffect,
-    reorderPostEffect,
+    setPostProcessEnabled,
+    setCRTEnabled,
+    setCRTSetting,
+    setPreset,
     setDebugView,
     toggleStats,
-    // Shadows
-    setShadowEnabled,
-    setShadowType,
-    setShadowResolution,
-    setShadowSoftness,
-    setShadowBias,
-    updateShadows,
-    // Reflections
-    setReflectionsEnabled,
-    setReflectionType,
-    setFloorReflectivity,
-    setWaterReflectivity,
-    updateReflections,
   };
 }
 
@@ -2472,5 +2357,124 @@ export function useAscii() {
     setFontSize,
     setAnimate,
     setAnimationSpeed,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// usePlayMode - Play mode control hook
+// ─────────────────────────────────────────────────────────────────────────────
+
+import { PlayMode, PlayModeManager } from '../scripting/runtime/PlayModeManager';
+
+// Initialize PlayMode with store accessors
+queueMicrotask(() => {
+  PlayMode.setStoreAccessors(
+    () => ({
+      scene: useEngineState.getState().scene,
+      entities: useEngineState.getState().entities,
+    }),
+    (updates) => {
+      if (updates.scene) {
+        useEngineState.setState((state) => ({
+          ...state,
+          scene: { ...state.scene, ...updates.scene },
+        }));
+      }
+    }
+  );
+  console.log('[useEngineState] PlayMode store accessors initialized');
+});
+
+export function usePlayMode() {
+  const playMode = useEngineState((state) => state.playMode);
+  const setPath = useEngineState((state) => state.setPath);
+
+  const start = async () => {
+    await PlayMode.start();
+    // Sync state to store
+    useEngineState.setState((state) => ({
+      ...state,
+      playMode: {
+        ...state.playMode,
+        status: 'playing',
+        startTime: Date.now(),
+        frameCount: 0,
+        elapsedTime: 0,
+      },
+    }));
+  };
+
+  const stop = (applyChanges: boolean = false) => {
+    PlayMode.stop(applyChanges);
+    useEngineState.setState((state) => ({
+      ...state,
+      playMode: {
+        ...state.playMode,
+        status: 'stopped',
+        snapshot: null,
+      },
+    }));
+  };
+
+  const pause = () => {
+    PlayMode.pause();
+    useEngineState.setState((state) => ({
+      ...state,
+      playMode: {
+        ...state.playMode,
+        status: 'paused',
+      },
+    }));
+  };
+
+  const resume = () => {
+    PlayMode.resume();
+    useEngineState.setState((state) => ({
+      ...state,
+      playMode: {
+        ...state.playMode,
+        status: 'playing',
+      },
+    }));
+  };
+
+  const step = (count: number = 1) => {
+    PlayMode.stepFrame(count);
+  };
+
+  const toggle = () => {
+    if (playMode.status === 'stopped') {
+      start();
+    } else if (playMode.status === 'playing') {
+      pause();
+    } else {
+      resume();
+    }
+  };
+
+  return {
+    // State
+    status: playMode.status,
+    isPlaying: playMode.status === 'playing',
+    isPaused: playMode.status === 'paused',
+    isStopped: playMode.status === 'stopped',
+    isRunning: playMode.status !== 'stopped',
+    startTime: playMode.startTime,
+    frameCount: playMode.frameCount,
+    elapsedTime: playMode.elapsedTime,
+    hasSnapshot: playMode.snapshot !== null,
+
+    // Actions
+    start,
+    stop,
+    pause,
+    resume,
+    step,
+    toggle,
+
+    // Advanced
+    getStats: () => PlayMode.getStats(),
+    getEntityState: (id: string) => PlayMode.getEntityState(id),
+    getAllEntities: () => PlayMode.getAllEntities(),
   };
 }

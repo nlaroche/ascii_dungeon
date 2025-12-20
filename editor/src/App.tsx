@@ -24,6 +24,7 @@ import { PalettePanel } from './components/PalettePanel';
 import { DragOverlay } from './components/DragOverlay';
 import { getFloatingPanelId, isFloatingPanelWindow, isTauri } from './stores/useFloatingWindows';
 import { useCodeEditor } from './stores/useCodeEditor';
+import { RuntimeInspector } from './components/RuntimeInspector';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main App
@@ -157,6 +158,8 @@ function useFloatingPanelContent(tabId: string) {
       return <ConsolePanel />
     case 'render':
       return <RenderPipelinePanel />
+    case 'runtime':
+      return <RuntimeInspector />
     default:
       return <div className="p-4 text-zinc-500">Unknown panel: {tabId}</div>
   }
@@ -259,6 +262,9 @@ function AppContent() {
 
       case 'render':
         return <RenderPipelinePanel />;
+
+      case 'runtime':
+        return <RuntimeInspector />;
 
       // Deckbuilder panels
       case 'cards':

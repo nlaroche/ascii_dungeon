@@ -1,18 +1,60 @@
 // ═══════════════════════════════════════════════════════════════════════════
-// Render Pipeline Panel - Unified UI for render settings
+// Render Pipeline Panel - 2D ASCII post-processing effects stack
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { useState } from 'react'
-import {
-  useTheme,
-  useRenderPipeline,
-  useLighting,
-  useEnvironment,
-  useAscii,
-} from '../../stores/useEngineState'
-import { PALETTES } from '../../scripting/palettes'
-import { Scrubber, ColorScrubber } from '../ui/Scrubber'
-import type { PostEffect, SceneLight, DebugViewMode, ShadowType } from '../../stores/engineState'
+import { useTheme, useEngineState } from '../../stores/useEngineState'
+import { ToggleButton, StackItemScrubber } from '../ui/Scrubber'
+import type { CRTSettings } from '../../stores/engineState'
+import { DEFAULT_CRT_SETTINGS } from '../../stores/engineState'
+
+// Effect definition for the stack
+interface EffectDef {
+  id: keyof CRTSettings
+  name: string
+  description: string
+  min: number
+  max: number
+  step: number
+  precision?: number
+}
+
+// All available effects with their configurations
+const EFFECTS: EffectDef[] = [
+  { id: 'scanlines', name: 'Scanlines', description: 'CRT horizontal line effect', min: 0, max: 1, step: 0.05, precision: 2 },
+  { id: 'curvature', name: 'Curvature', description: 'CRT screen bend', min: 0, max: 1, step: 0.05, precision: 2 },
+  { id: 'bloom', name: 'Bloom', description: 'Glow around bright areas', min: 0, max: 1, step: 0.05, precision: 2 },
+  { id: 'vignette', name: 'Vignette', description: 'Darken screen edges', min: 0, max: 1, step: 0.05, precision: 2 },
+  { id: 'chromatic', name: 'Chromatic', description: 'Color fringing', min: 0, max: 1, step: 0.05, precision: 2 },
+  { id: 'noise', name: 'Noise', description: 'Film grain effect', min: 0, max: 1, step: 0.05, precision: 2 },
+  { id: 'flicker', name: 'Flicker', description: 'Screen brightness variation', min: 0, max: 1, step: 0.05, precision: 2 },
+  { id: 'pixelate', name: 'Pixelate', description: 'Reduce resolution', min: 0, max: 1, step: 0.05, precision: 2 },
+  { id: 'colorShift', name: 'Color Shift', description: 'Warm/cool tint', min: -1, max: 1, step: 0.1, precision: 1 },
+]
+
+// Preset definitions
+const PRESETS: Record<string, { name: string; settings: Partial<CRTSettings> }> = {
+  clean: { name: 'Clean', settings: {} },
+  crt: {
+    name: 'CRT Monitor',
+    settings: { scanlines: 0.6, curvature: 0.4, bloom: 0.3, noise: 0.15, chromatic: 0.3, flicker: 0.2, vignette: 0.5 },
+  },
+  neon: {
+    name: 'Neon Glow',
+    settings: { scanlines: 0.2, bloom: 0.8, noise: 0.05, chromatic: 0.5, vignette: 0.3, colorShift: 0.2 },
+  },
+  retro: {
+    name: 'Retro Terminal',
+    settings: { scanlines: 0.8, curvature: 0.5, bloom: 0.4, noise: 0.2, chromatic: 0.2, flicker: 0.3, vignette: 0.6, colorShift: -0.2 },
+  },
+  arcade: {
+    name: 'Arcade Cabinet',
+    settings: { scanlines: 0.5, curvature: 0.3, bloom: 0.5, noise: 0.1, chromatic: 0.4, flicker: 0.1, vignette: 0.7 },
+  },
+  minimal: {
+    name: 'Minimal',
+    settings: { scanlines: 0.2, bloom: 0.2, vignette: 0.2 },
+  },
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main Panel
@@ -26,140 +68,79 @@ export function RenderPipelinePanel() {
       className="h-full overflow-y-auto text-xs"
       style={{ backgroundColor: theme.bgPanel }}
     >
-      <AsciiSettingsSection />
-      <PostEffectsSection />
-      <DebugViewSection />
-      <ShadowsSection />
-      <ReflectionsSection />
-      <PassesSection />
-      <LightingSection />
-      <EnvironmentSection />
+      <MasterToggle />
+      <PresetsSection />
+      <EffectsStack />
     </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// ASCII Settings Section
+// Master Toggle - Enable/disable all post-processing
 // ─────────────────────────────────────────────────────────────────────────────
 
-function AsciiSettingsSection() {
+function MasterToggle() {
   const theme = useTheme()
-  const { palette, fontSize, animate, animationSpeed, setPalette, setFontSize, setAnimate, setAnimationSpeed } = useAscii()
-  const [expanded, setExpanded] = useState(true)
+  const enabled = useEngineState((s) => s.renderPipeline?.globalPostProcess?.enabled ?? false)
+  const setPath = useEngineState((s) => s.setPath)
 
   return (
-    <div className="p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center justify-between w-full mb-2"
+    <div
+      className="p-3 flex items-center justify-between"
+      style={{ borderBottom: `1px solid ${theme.border}` }}
+    >
+      <span className="font-medium" style={{ color: theme.text }}>
+        Post-Processing
+      </span>
+      <ToggleButton
+        active={enabled}
+        onClick={() => setPath(['renderPipeline', 'globalPostProcess', 'enabled'], !enabled)}
       >
-        <span className="uppercase tracking-wider" style={{ color: theme.textMuted }}>
-          {expanded ? '▼' : '▶'} ASCII Display
-        </span>
-      </button>
-
-      {expanded && (
-        <div className="space-y-3">
-          {/* Palette Selection */}
-          <div className="space-y-1">
-            <label style={{ color: theme.textMuted }}>Palette</label>
-            <div className="grid grid-cols-4 gap-1">
-              {Object.entries(PALETTES).map(([name, pal]) => (
-                <button
-                  key={name}
-                  onClick={() => setPalette(name)}
-                  className="px-1 py-1.5 text-xs rounded truncate"
-                  style={{
-                    backgroundColor: pal.bg,
-                    color: pal.chars[pal.chars.length - 1],
-                    border: palette === name ? `2px solid ${theme.accent}` : '2px solid transparent',
-                  }}
-                  title={pal.name}
-                >
-                  {name}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Font Size */}
-          <SliderInput
-            label="Font Size"
-            value={fontSize}
-            min={8}
-            max={24}
-            step={1}
-            onChange={setFontSize}
-          />
-
-          {/* Animation */}
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={animate}
-              onChange={(e) => setAnimate(e.target.checked)}
-              style={{ accentColor: theme.accent }}
-            />
-            <span style={{ color: theme.text }}>Animate</span>
-          </div>
-
-          {/* Animation Speed (only if animation enabled) */}
-          {animate && (
-            <SliderInput
-              label="Animation Speed"
-              value={animationSpeed}
-              min={0.1}
-              max={3}
-              step={0.1}
-              onChange={setAnimationSpeed}
-            />
-          )}
-        </div>
-      )}
+        {enabled ? 'ON' : 'OFF'}
+      </ToggleButton>
     </div>
   )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Debug View Section
+// Presets Section - Quick preset buttons
 // ─────────────────────────────────────────────────────────────────────────────
 
-function DebugViewSection() {
+function PresetsSection() {
   const theme = useTheme()
-  const { debugView, setDebugView, showStats, toggleStats } = useRenderPipeline()
+  const globalPostProcess = useEngineState((s) => s.renderPipeline?.globalPostProcess)
+  const setPath = useEngineState((s) => s.setPath)
 
-  const views: DebugViewMode[] = ['final', 'depth', 'normals', 'shadow', 'albedo']
+  if (!globalPostProcess?.enabled) return null
+
+  const applyPreset = (presetId: string) => {
+    const preset = PRESETS[presetId]
+    if (!preset) return
+
+    const newSettings = { ...DEFAULT_CRT_SETTINGS, ...preset.settings }
+    setPath(['renderPipeline', 'globalPostProcess'], {
+      ...globalPostProcess,
+      crtEnabled: presetId !== 'clean',
+      crtSettings: newSettings,
+      preset: presetId,
+    })
+  }
 
   return (
     <div className="p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
-      <div className="flex items-center justify-between mb-2">
-        <span className="uppercase tracking-wider" style={{ color: theme.textMuted }}>
-          Debug View
-        </span>
-        <button
-          onClick={toggleStats}
-          className="px-2 py-0.5 rounded text-xs"
-          style={{
-            backgroundColor: showStats ? theme.accent : theme.bgHover,
-            color: showStats ? theme.bg : theme.text,
-          }}
-        >
-          Stats
-        </button>
+      <div className="text-xs uppercase tracking-wider mb-2" style={{ color: theme.textMuted }}>
+        Presets
       </div>
-      <div className="flex gap-1 flex-wrap">
-        {views.map((view) => (
-          <button
-            key={view}
-            onClick={() => setDebugView(view)}
-            className="px-2 py-1 rounded capitalize"
-            style={{
-              backgroundColor: debugView === view ? theme.accent : theme.bgHover,
-              color: debugView === view ? theme.bg : theme.text,
-            }}
+      <div className="flex flex-wrap gap-1">
+        {Object.entries(PRESETS).map(([id, preset]) => (
+          <ToggleButton
+            key={id}
+            active={globalPostProcess.preset === id}
+            onClick={() => applyPreset(id)}
+            size="sm"
           >
-            {view}
-          </button>
+            {preset.name}
+          </ToggleButton>
         ))}
       </div>
     </div>
@@ -167,933 +148,74 @@ function DebugViewSection() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Shadows Section
+// Effects Stack - Toggleable list of effects using shared StackItemScrubber
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ShadowsSection() {
+function EffectsStack() {
   const theme = useTheme()
-  const {
-    shadows,
-    setShadowEnabled,
-    setShadowType,
-    setShadowResolution,
-    setShadowSoftness,
-    setShadowBias,
-  } = useRenderPipeline()
-  const [expanded, setExpanded] = useState(true)
+  const globalPostProcess = useEngineState((s) => s.renderPipeline?.globalPostProcess)
+  const setPath = useEngineState((s) => s.setPath)
 
-  const shadowTypes: ShadowType[] = ['pcf', 'vsm', 'pcss']
-  const resolutions = [512, 1024, 2048, 4096]
+  if (!globalPostProcess?.enabled) return null
 
-  return (
-    <div className="p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center justify-between w-full mb-2"
-      >
-        <span className="uppercase tracking-wider" style={{ color: theme.textMuted }}>
-          {expanded ? '▼' : '▶'} Shadows
-        </span>
-        <input
-          type="checkbox"
-          checked={shadows.enabled}
-          onChange={(e) => {
-            e.stopPropagation()
-            setShadowEnabled(e.target.checked)
-          }}
-          style={{ accentColor: theme.accent }}
-        />
-      </button>
+  const crt = globalPostProcess.crtSettings
 
-      {expanded && shadows.enabled && (
-        <div className="space-y-2 pl-2">
-          {/* Shadow Type */}
-          <div className="space-y-1">
-            <label style={{ color: theme.textMuted }}>Type</label>
-            <div className="flex gap-1">
-              {shadowTypes.map((type) => (
-                <button
-                  key={type}
-                  onClick={() => setShadowType(type)}
-                  className="px-2 py-1 rounded uppercase"
-                  style={{
-                    backgroundColor: shadows.type === type ? theme.accent : theme.bgHover,
-                    color: shadows.type === type ? theme.bg : theme.text,
-                  }}
-                >
-                  {type}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Resolution */}
-          <div className="space-y-1">
-            <label style={{ color: theme.textMuted }}>Resolution</label>
-            <select
-              value={shadows.resolution}
-              onChange={(e) => setShadowResolution(parseInt(e.target.value))}
-              className="w-full px-2 py-1 rounded"
-              style={{
-                backgroundColor: theme.bgHover,
-                color: theme.text,
-                border: `1px solid ${theme.border}`,
-              }}
-            >
-              {resolutions.map((res) => (
-                <option key={res} value={res}>{res}x{res}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Softness */}
-          <SliderInput
-            label="Softness"
-            value={shadows.softness}
-            min={0}
-            max={1}
-            step={0.05}
-            onChange={setShadowSoftness}
-          />
-
-          {/* Bias */}
-          <SliderInput
-            label="Bias"
-            value={shadows.bias}
-            min={0}
-            max={0.05}
-            step={0.001}
-            onChange={setShadowBias}
-          />
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Reflections Section
-// ─────────────────────────────────────────────────────────────────────────────
-
-function ReflectionsSection() {
-  const theme = useTheme()
-  const {
-    reflections,
-    setReflectionsEnabled,
-    setReflectionType,
-    setFloorReflectivity,
-    setWaterReflectivity,
-    updateReflections,
-  } = useRenderPipeline()
-  const [expanded, setExpanded] = useState(true)
-
-  const reflectionTypes = ['planar', 'ssr', 'cubemap'] as const
-
-  return (
-    <div className="p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center justify-between w-full mb-2"
-      >
-        <span className="uppercase tracking-wider" style={{ color: theme.textMuted }}>
-          {expanded ? '▼' : '▶'} Reflections
-        </span>
-        <input
-          type="checkbox"
-          checked={reflections.enabled}
-          onChange={(e) => {
-            e.stopPropagation()
-            setReflectionsEnabled(e.target.checked)
-          }}
-          style={{ accentColor: theme.accent }}
-        />
-      </button>
-
-      {expanded && reflections.enabled && (
-        <div className="space-y-2 pl-2">
-          {/* Reflection Type */}
-          <div className="space-y-1">
-            <label style={{ color: theme.textMuted }}>Type</label>
-            <div className="flex gap-1">
-              {reflectionTypes.map((type) => (
-                <button
-                  key={type}
-                  onClick={() => setReflectionType(type)}
-                  className="px-2 py-1 rounded capitalize"
-                  style={{
-                    backgroundColor: reflections.type === type ? theme.accent : theme.bgHover,
-                    color: reflections.type === type ? theme.bg : theme.text,
-                  }}
-                >
-                  {type}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Floor Reflectivity */}
-          <SliderInput
-            label="Floor"
-            value={reflections.floorReflectivity}
-            min={0}
-            max={1}
-            step={0.05}
-            onChange={setFloorReflectivity}
-          />
-
-          {/* Water Reflectivity */}
-          <SliderInput
-            label="Water"
-            value={reflections.waterReflectivity}
-            min={0}
-            max={1}
-            step={0.05}
-            onChange={setWaterReflectivity}
-          />
-
-          {/* SSR Settings (only show when SSR is selected) */}
-          {reflections.type === 'ssr' && (
-            <div className="space-y-2 mt-2 pt-2" style={{ borderTop: `1px solid ${theme.border}` }}>
-              <span className="text-xs" style={{ color: theme.textDim }}>SSR Settings</span>
-              <SliderInput
-                label="Max Steps"
-                value={reflections.ssrMaxSteps}
-                min={16}
-                max={128}
-                step={8}
-                onChange={(v) => updateReflections({ ssrMaxSteps: v })}
-              />
-              <SliderInput
-                label="Thickness"
-                value={reflections.ssrThickness}
-                min={0.1}
-                max={2}
-                step={0.1}
-                onChange={(v) => updateReflections({ ssrThickness: v })}
-              />
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Passes Section
-// ─────────────────────────────────────────────────────────────────────────────
-
-function PassesSection() {
-  const theme = useTheme()
-  const { passes, setPassEnabled } = useRenderPipeline()
-  const [expanded, setExpanded] = useState(false)
-
-  const passNames = Object.keys(passes) as Array<keyof typeof passes>
-
-  return (
-    <div className="p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center justify-between w-full mb-2"
-      >
-        <span className="uppercase tracking-wider" style={{ color: theme.textMuted }}>
-          {expanded ? '▼' : '▶'} Render Passes
-        </span>
-        <span style={{ color: theme.textDim }}>
-          {passNames.filter((p) => passes[p].enabled).length}/{passNames.length}
-        </span>
-      </button>
-
-      {expanded && (
-        <div className="space-y-1 pl-2">
-          {passNames.map((passId) => (
-            <div key={passId} className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={passes[passId].enabled}
-                onChange={(e) => setPassEnabled(passId, e.target.checked)}
-                className="accent-current"
-                style={{ accentColor: theme.accent }}
-              />
-              <span style={{ color: theme.text }} className="capitalize">
-                {passId}
-              </span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Post Effects Section
-// ─────────────────────────────────────────────────────────────────────────────
-
-function PostEffectsSection() {
-  const theme = useTheme()
-  const {
-    postEffects,
-    setPostEffectEnabled,
-    updatePostEffect,
-    reorderPostEffect,
-  } = useRenderPipeline()
-  const [expanded, setExpanded] = useState(true)
-  const [expandedEffect, setExpandedEffect] = useState<string | null>(null)
-  const [draggedId, setDraggedId] = useState<string | null>(null)
-
-  const handleDragStart = (id: string) => {
-    setDraggedId(id)
+  const isEffectEnabled = (id: keyof CRTSettings) => {
+    return crt[id] !== 0
   }
 
-  const handleDragOver = (e: React.DragEvent, targetId: string) => {
-    e.preventDefault()
-    if (draggedId && draggedId !== targetId) {
-      const targetIdx = postEffects.findIndex((e) => e.id === targetId)
-      reorderPostEffect(draggedId, targetIdx)
+  const toggleEffect = (id: keyof CRTSettings, enabled: boolean) => {
+    if (enabled) {
+      // Enable with a default value
+      const defaultValue = id === 'colorShift' ? 0.3 : 0.5
+      setPath(['renderPipeline', 'globalPostProcess', 'crtSettings', id], defaultValue)
+    } else {
+      // Disable
+      setPath(['renderPipeline', 'globalPostProcess', 'crtSettings', id], 0)
     }
+    // Clear preset since we're customizing
+    setPath(['renderPipeline', 'globalPostProcess', 'preset'], undefined)
   }
 
-  const handleDragEnd = () => {
-    setDraggedId(null)
+  const updateEffect = (id: keyof CRTSettings, value: number) => {
+    setPath(['renderPipeline', 'globalPostProcess', 'crtSettings', id], value)
+    setPath(['renderPipeline', 'globalPostProcess', 'preset'], undefined)
   }
-
-  const enabledCount = postEffects.filter((e) => e.enabled).length
 
   return (
-    <div className="p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center justify-between w-full mb-2"
+    <div className="p-3">
+      <div className="text-xs uppercase tracking-wider mb-3" style={{ color: theme.textMuted }}>
+        Effects Stack
+      </div>
+      <div className="space-y-1">
+        {EFFECTS.map((effect) => (
+          <StackItemScrubber
+            key={effect.id}
+            enabled={isEffectEnabled(effect.id)}
+            onToggle={(enabled) => toggleEffect(effect.id, enabled)}
+            title={effect.name}
+            value={crt[effect.id]}
+            onChange={(v) => updateEffect(effect.id, v)}
+            min={effect.min}
+            max={effect.max}
+            step={effect.step}
+            precision={effect.precision ?? 2}
+            description={effect.description}
+          />
+        ))}
+      </div>
+
+      {/* Reset button - depressed/inactive style */}
+      <ToggleButton
+        active={false}
+        onClick={() => {
+          setPath(['renderPipeline', 'globalPostProcess', 'crtSettings'], { ...DEFAULT_CRT_SETTINGS })
+          setPath(['renderPipeline', 'globalPostProcess', 'preset'], 'clean')
+        }}
+        className="w-full mt-3"
       >
-        <span className="uppercase tracking-wider" style={{ color: theme.textMuted }}>
-          {expanded ? '▼' : '▶'} Post Effects
-        </span>
-        <span style={{ color: theme.textDim }}>
-          {enabledCount}/{postEffects.length}
-        </span>
-      </button>
-
-      {expanded && (
-        <div className="space-y-1">
-          {postEffects.map((effect) => (
-            <PostEffectItem
-              key={effect.id}
-              effect={effect}
-              isExpanded={expandedEffect === effect.id}
-              isDragging={draggedId === effect.id}
-              onToggle={() => setPostEffectEnabled(effect.id, !effect.enabled)}
-              onExpandToggle={() =>
-                setExpandedEffect(expandedEffect === effect.id ? null : effect.id)
-              }
-              onUpdate={(settings) => updatePostEffect(effect.id, settings)}
-              onDragStart={() => handleDragStart(effect.id)}
-              onDragOver={(e) => handleDragOver(e, effect.id)}
-              onDragEnd={handleDragEnd}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function PostEffectItem({
-  effect,
-  isExpanded,
-  isDragging,
-  onToggle,
-  onExpandToggle,
-  onUpdate,
-  onDragStart,
-  onDragOver,
-  onDragEnd,
-}: {
-  effect: PostEffect
-  isExpanded: boolean
-  isDragging: boolean
-  onToggle: () => void
-  onExpandToggle: () => void
-  onUpdate: (settings: Partial<PostEffect>) => void
-  onDragStart: () => void
-  onDragOver: (e: React.DragEvent) => void
-  onDragEnd: () => void
-}) {
-  const theme = useTheme()
-
-  // Get editable properties (exclude id, name, enabled)
-  const editableProps = Object.entries(effect).filter(
-    ([key]) => !['id', 'name', 'enabled'].includes(key)
-  )
-
-  return (
-    <div
-      draggable
-      onDragStart={onDragStart}
-      onDragOver={onDragOver}
-      onDragEnd={onDragEnd}
-      className="rounded"
-      style={{
-        backgroundColor: isDragging ? theme.accentBg : theme.bgHover,
-        opacity: isDragging ? 0.5 : 1,
-      }}
-    >
-      <div className="flex items-center gap-1 px-2 py-1">
-        <span
-          className="cursor-grab select-none"
-          style={{ color: theme.textDim }}
-          title="Drag to reorder"
-        >
-          ≡
-        </span>
-        <input
-          type="checkbox"
-          checked={effect.enabled}
-          onChange={onToggle}
-          className="accent-current"
-          style={{ accentColor: theme.accent }}
-        />
-        <button
-          onClick={onExpandToggle}
-          className="flex-1 text-left"
-          style={{ color: effect.enabled ? theme.text : theme.textDim }}
-        >
-          {effect.name}
-        </button>
-        {editableProps.length > 0 && (
-          <span style={{ color: theme.textDim }}>
-            {isExpanded ? '▲' : '▼'}
-          </span>
-        )}
-      </div>
-
-      {isExpanded && editableProps.length > 0 && (
-        <div className="px-3 py-2 space-y-2" style={{ borderTop: `1px solid ${theme.border}` }}>
-          {editableProps.map(([key, value]) => (
-            <PropertyInput
-              key={key}
-              label={key}
-              value={value}
-              onChange={(newValue) => onUpdate({ [key]: newValue })}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Lighting Section
-// ─────────────────────────────────────────────────────────────────────────────
-
-function LightingSection() {
-  const theme = useTheme()
-  const {
-    sun,
-    ambient,
-    lights,
-    gi,
-    setSunEnabled,
-    setSunDirection,
-    setSunColor,
-    setSunIntensity,
-    setAmbientColor,
-    setAmbientIntensity,
-    addLight,
-    removeLight,
-    updateLight,
-    setGIEnabled,
-    setGIIntensity,
-  } = useLighting()
-  const [expanded, setExpanded] = useState(true)
-
-  const addNewLight = () => {
-    const id = `light_${Date.now()}`
-    addLight({
-      id,
-      type: 'point',
-      enabled: true,
-      position: [0, 2, 0],
-      color: [1, 1, 1],
-      intensity: 1,
-      range: 10,
-      castShadows: false,
-    })
-  }
-
-  return (
-    <div className="p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center justify-between w-full mb-2"
-      >
-        <span className="uppercase tracking-wider" style={{ color: theme.textMuted }}>
-          {expanded ? '▼' : '▶'} Lighting
-        </span>
-      </button>
-
-      {expanded && (
-        <div className="space-y-3">
-          {/* Sun */}
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={sun.enabled}
-                onChange={(e) => setSunEnabled(e.target.checked)}
-                style={{ accentColor: theme.accent }}
-              />
-              <span style={{ color: theme.text }}>Sun</span>
-            </div>
-            {sun.enabled && (
-              <div className="pl-4 space-y-1">
-                <SliderInput
-                  label="Intensity"
-                  value={sun.intensity}
-                  min={0}
-                  max={3}
-                  step={0.1}
-                  onChange={setSunIntensity}
-                />
-                <ColorInput
-                  label="Color"
-                  value={sun.color}
-                  onChange={(c) => setSunColor(c)}
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Ambient */}
-          <div className="space-y-1">
-            <span style={{ color: theme.text }}>Ambient</span>
-            <div className="pl-4 space-y-1">
-              <SliderInput
-                label="Intensity"
-                value={ambient.intensity}
-                min={0}
-                max={1}
-                step={0.05}
-                onChange={setAmbientIntensity}
-              />
-              <ColorInput
-                label="Color"
-                value={ambient.color}
-                onChange={(c) => setAmbientColor(c)}
-              />
-            </div>
-          </div>
-
-          {/* GI */}
-          <div className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={gi.enabled}
-              onChange={(e) => setGIEnabled(e.target.checked)}
-              style={{ accentColor: theme.accent }}
-            />
-            <span style={{ color: theme.text }}>Global Illumination</span>
-          </div>
-          {gi.enabled && (
-            <div className="pl-4">
-              <SliderInput
-                label="Intensity"
-                value={gi.intensity}
-                min={0}
-                max={2}
-                step={0.1}
-                onChange={setGIIntensity}
-              />
-            </div>
-          )}
-
-          {/* Scene Lights */}
-          <div>
-            <div className="flex items-center justify-between mb-1">
-              <span style={{ color: theme.textMuted }}>Scene Lights</span>
-              <button
-                onClick={addNewLight}
-                className="px-2 py-0.5 rounded"
-                style={{ backgroundColor: theme.bgHover, color: theme.text }}
-              >
-                + Add
-              </button>
-            </div>
-            <div className="space-y-1">
-              {lights.map((light) => (
-                <SceneLightItem
-                  key={light.id}
-                  light={light}
-                  onUpdate={(updates) => updateLight(light.id, updates)}
-                  onRemove={() => removeLight(light.id)}
-                />
-              ))}
-              {lights.length === 0 && (
-                <div style={{ color: theme.textDim }}>No scene lights</div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function SceneLightItem({
-  light,
-  onUpdate,
-  onRemove,
-}: {
-  light: SceneLight
-  onUpdate: (updates: Partial<SceneLight>) => void
-  onRemove: () => void
-}) {
-  const theme = useTheme()
-  const [expanded, setExpanded] = useState(false)
-
-  return (
-    <div className="rounded" style={{ backgroundColor: theme.bgHover }}>
-      <div className="flex items-center gap-1 px-2 py-1">
-        <input
-          type="checkbox"
-          checked={light.enabled}
-          onChange={(e) => onUpdate({ enabled: e.target.checked })}
-          style={{ accentColor: theme.accent }}
-        />
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="flex-1 text-left"
-          style={{ color: light.enabled ? theme.text : theme.textDim }}
-        >
-          {light.id} ({light.type})
-        </button>
-        <button
-          onClick={onRemove}
-          className="px-1"
-          style={{ color: theme.error }}
-          title="Remove light"
-        >
-          ×
-        </button>
-      </div>
-      {expanded && (
-        <div className="px-3 py-2 space-y-1" style={{ borderTop: `1px solid ${theme.border}` }}>
-          <SliderInput
-            label="Intensity"
-            value={light.intensity}
-            min={0}
-            max={5}
-            step={0.1}
-            onChange={(v) => onUpdate({ intensity: v })}
-          />
-          <SliderInput
-            label="Range"
-            value={light.range}
-            min={1}
-            max={50}
-            step={1}
-            onChange={(v) => onUpdate({ range: v })}
-          />
-          <ColorInput
-            label="Color"
-            value={light.color}
-            onChange={(c) => onUpdate({ color: c })}
-          />
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Environment Section
-// ─────────────────────────────────────────────────────────────────────────────
-
-function EnvironmentSection() {
-  const theme = useTheme()
-  const {
-    skybox,
-    fog,
-    timeOfDay,
-    setSkyType,
-    setSkyGradient,
-    setFogEnabled,
-    setFogDensity,
-    setFogColor,
-    setTimeOfDay,
-  } = useEnvironment()
-  const [expanded, setExpanded] = useState(true)
-
-  return (
-    <div className="p-3" style={{ borderBottom: `1px solid ${theme.border}` }}>
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center justify-between w-full mb-2"
-      >
-        <span className="uppercase tracking-wider" style={{ color: theme.textMuted }}>
-          {expanded ? '▼' : '▶'} Environment
-        </span>
-      </button>
-
-      {expanded && (
-        <div className="space-y-3">
-          {/* Time of Day */}
-          <SliderInput
-            label="Time of Day"
-            value={timeOfDay}
-            min={0}
-            max={1}
-            step={0.01}
-            onChange={setTimeOfDay}
-          />
-
-          {/* Sky Type */}
-          <div className="space-y-1">
-            <label style={{ color: theme.textMuted }}>Sky Type</label>
-            <select
-              value={skybox.type}
-              onChange={(e) => setSkyType(e.target.value as typeof skybox.type)}
-              className="w-full px-2 py-1 rounded"
-              style={{
-                backgroundColor: theme.bgHover,
-                color: theme.text,
-                border: `1px solid ${theme.border}`,
-              }}
-            >
-              <option value="gradient">Gradient</option>
-              <option value="procedural">Procedural</option>
-              <option value="cubemap">Cubemap</option>
-              <option value="hdri">HDRI</option>
-            </select>
-          </div>
-
-          {/* Sky Colors */}
-          {skybox.type === 'gradient' && (
-            <div className="space-y-1">
-              <ColorInput
-                label="Zenith"
-                value={skybox.gradient.zenith}
-                onChange={(c) => setSkyGradient({ zenith: c })}
-              />
-              <ColorInput
-                label="Horizon"
-                value={skybox.gradient.horizon}
-                onChange={(c) => setSkyGradient({ horizon: c })}
-              />
-              <ColorInput
-                label="Ground"
-                value={skybox.gradient.ground}
-                onChange={(c) => setSkyGradient({ ground: c })}
-              />
-            </div>
-          )}
-
-          {/* Fog */}
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={fog.enabled}
-                onChange={(e) => setFogEnabled(e.target.checked)}
-                style={{ accentColor: theme.accent }}
-              />
-              <span style={{ color: theme.text }}>Fog</span>
-            </div>
-            {fog.enabled && (
-              <div className="pl-4 space-y-1">
-                <SliderInput
-                  label="Density"
-                  value={fog.density}
-                  min={0}
-                  max={0.2}
-                  step={0.005}
-                  onChange={setFogDensity}
-                />
-                <ColorInput
-                  label="Color"
-                  value={fog.color}
-                  onChange={(c) => setFogColor(c)}
-                />
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Shared Input Components - Using Scrubber for drag-to-adjust controls
-// ─────────────────────────────────────────────────────────────────────────────
-
-function SliderInput({
-  label,
-  value,
-  min,
-  max,
-  step,
-  onChange,
-}: {
-  label: string
-  value: number
-  min: number
-  max: number
-  step: number
-  onChange: (value: number) => void
-}) {
-  // Calculate precision from step size
-  const precision = step < 0.01 ? 3 : step < 0.1 ? 2 : step < 1 ? 1 : 0
-
-  return (
-    <Scrubber
-      label={label}
-      value={value}
-      min={min}
-      max={max}
-      step={step}
-      precision={precision}
-      onChange={onChange}
-    />
-  )
-}
-
-function ColorInput({
-  label,
-  value,
-  onChange,
-}: {
-  label: string
-  value: [number, number, number]
-  onChange: (value: [number, number, number]) => void
-}) {
-  return (
-    <ColorScrubber
-      label={label}
-      value={value}
-      onChange={onChange}
-    />
-  )
-}
-
-// Known dropdown options for specific properties
-const DROPDOWN_OPTIONS: Record<string, string[]> = {
-  quality: ['low', 'medium', 'high'],
-  tonemapping: ['none', 'reinhard', 'aces', 'filmic'],
-  fogType: ['linear', 'exponential', 'exponential2'],
-}
-
-function PropertyInput({
-  label,
-  value,
-  onChange,
-}: {
-  label: string
-  value: unknown
-  onChange: (value: unknown) => void
-}) {
-  const theme = useTheme()
-
-  // Check if this property should be a dropdown
-  const dropdownOpts = DROPDOWN_OPTIONS[label]
-  if (dropdownOpts && typeof value === 'string') {
-    return (
-      <div className="flex items-center gap-2">
-        <span className="w-24 truncate capitalize" style={{ color: theme.textMuted }}>
-          {label}
-        </span>
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="flex-1 px-2 py-0.5 rounded"
-          style={{
-            backgroundColor: theme.bg,
-            color: theme.text,
-            border: `1px solid ${theme.border}`,
-          }}
-        >
-          {dropdownOpts.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt.charAt(0).toUpperCase() + opt.slice(1)}
-            </option>
-          ))}
-        </select>
-      </div>
-    )
-  }
-
-  if (typeof value === 'number') {
-    return (
-      <div className="flex items-center gap-2">
-        <span className="w-24 truncate capitalize" style={{ color: theme.textMuted }}>
-          {label}
-        </span>
-        <input
-          type="number"
-          value={value}
-          onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
-          step="0.1"
-          className="flex-1 px-2 py-0.5 rounded"
-          style={{
-            backgroundColor: theme.bg,
-            color: theme.text,
-            border: `1px solid ${theme.border}`,
-          }}
-        />
-      </div>
-    )
-  }
-
-  if (typeof value === 'string') {
-    return (
-      <div className="flex items-center gap-2">
-        <span className="w-24 truncate capitalize" style={{ color: theme.textMuted }}>
-          {label}
-        </span>
-        <input
-          type="text"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          className="flex-1 px-2 py-0.5 rounded"
-          style={{
-            backgroundColor: theme.bg,
-            color: theme.text,
-            border: `1px solid ${theme.border}`,
-          }}
-        />
-      </div>
-    )
-  }
-
-  if (Array.isArray(value) && value.length === 3 && typeof value[0] === 'number') {
-    return (
-      <ColorInput
-        label={label}
-        value={value as [number, number, number]}
-        onChange={(c) => onChange(c)}
-      />
-    )
-  }
-
-  if (Array.isArray(value) && value.length === 4 && typeof value[0] === 'number') {
-    // RGBA color
-    return (
-      <ColorInput
-        label={label}
-        value={[value[0], value[1], value[2]] as [number, number, number]}
-        onChange={(c) => onChange([...c, value[3]])}
-      />
-    )
-  }
-
-  // Fallback: display as text
-  return (
-    <div className="flex items-center gap-2">
-      <span className="w-24 truncate capitalize" style={{ color: theme.textMuted }}>
-        {label}
-      </span>
-      <span style={{ color: theme.text }}>{JSON.stringify(value)}</span>
+        Reset All Effects
+      </ToggleButton>
     </div>
   )
 }
