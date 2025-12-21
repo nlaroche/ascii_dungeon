@@ -2,7 +2,7 @@
 // Component Inspector - Renders component properties using decorator metadata
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import { useTheme, useSelection, useNodes, useEngineState } from '../stores/useEngineState'
 import {
   componentRegistry,
@@ -13,6 +13,7 @@ import {
 import type { Node, NodeComponent } from '../stores/engineState'
 import { Vec2Scrubber, Vec3Scrubber, ColorScrubber, ToggleCheckbox, StackItem } from './ui/Scrubber'
 import { SearchablePopup, type SearchableItem } from './ui/Popup'
+import { graphStorage, type GraphListEntry } from '../scripting/runtime/GraphStorage'
 
 // Special ID for "Create New Component" item
 const CREATE_NEW_COMPONENT_ID = '__create_new__'
@@ -96,7 +97,7 @@ function ComponentsSection({
   getNodePath: (nodeId: string) => number[] | null
 }) {
   const theme = useTheme()
-  const projectPath = useEngineState((s) => s.project.path)
+  const projectPath = useEngineState((s) => s.project.root)
   const [showAddMenu, setShowAddMenu] = useState(false)
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [newComponentName, setNewComponentName] = useState('')
@@ -529,6 +530,111 @@ function ComponentCard({ component, onPropertyChange, onToggleEnabled }: Compone
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Graph Picker Component
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface GraphPickerProps {
+  value: string
+  onChange: (graphId: string) => void
+}
+
+function GraphPicker({ value, onChange }: GraphPickerProps) {
+  const theme = useTheme()
+  const projectPath = useEngineState((s) => s.project.root)
+  const [graphs, setGraphs] = useState<GraphListEntry[]>([])
+  const [isLoading, setIsLoading] = useState(false)
+
+  // Load available graphs when component mounts or project changes
+  useEffect(() => {
+    console.log('[GraphPicker] projectPath:', projectPath)
+    if (!projectPath) {
+      console.log('[GraphPicker] No project path, skipping')
+      return
+    }
+
+    const loadGraphs = async () => {
+      setIsLoading(true)
+      try {
+        graphStorage.setBasePath(projectPath)
+        console.log('[GraphPicker] Looking in:', graphStorage.getBasePath())
+        const graphList = await graphStorage.list()
+        console.log('[GraphPicker] Found graphs:', graphList)
+        setGraphs(graphList)
+      } catch (e) {
+        console.error('[GraphPicker] Failed to load graphs:', e)
+      }
+      setIsLoading(false)
+    }
+
+    loadGraphs()
+  }, [projectPath])
+
+  // Extract graph ID from filename (remove .graph.json extension)
+  const getGraphId = (entry: GraphListEntry) => {
+    // entry.name is the display name from the graph metadata
+    // entry.path is the full path
+    // The graphId is typically the filename without extension
+    const filename = entry.path.split('/').pop() || entry.path
+    return filename.replace('.graph.json', '')
+  }
+
+  if (isLoading) {
+    return (
+      <span className="text-xs" style={{ color: theme.textDim }}>
+        Loading graphs...
+      </span>
+    )
+  }
+
+  return (
+    <div className="flex gap-1 items-center">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="flex-1 px-2 py-0.5 rounded text-xs"
+        style={{
+          backgroundColor: theme.bg,
+          color: theme.text,
+          border: `1px solid ${theme.border}`,
+        }}
+      >
+        <option value="">-- Select Graph --</option>
+        {graphs.map((entry) => (
+          <option key={entry.path} value={getGraphId(entry)}>
+            {entry.name}
+          </option>
+        ))}
+      </select>
+      {value && (
+        <button
+          onClick={() => {
+            // Find the full path and open in node editor
+            const entry = graphs.find(g => getGraphId(g) === value)
+            if (entry) {
+              window.dispatchEvent(new CustomEvent('dock-activate-tab', {
+                detail: { tabId: 'node-editor' }
+              }))
+              window.dispatchEvent(new CustomEvent('node-editor-open-graph', {
+                detail: { path: entry.path }
+              }))
+            }
+          }}
+          className="px-1.5 py-0.5 rounded text-xs"
+          style={{
+            backgroundColor: theme.bgHover,
+            color: theme.textMuted,
+            border: `1px solid ${theme.border}`,
+          }}
+          title="Edit in Node Editor"
+        >
+          ◎
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Property Field Renderer
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -654,6 +760,14 @@ function PropertyField({ label, type, value, onChange, options }: PropertyFieldP
               </option>
             ))}
           </select>
+        )
+
+      case 'graphPicker':
+        return (
+          <GraphPicker
+            value={String(value || '')}
+            onChange={(graphId) => onChange(graphId)}
+          />
         )
 
       default:

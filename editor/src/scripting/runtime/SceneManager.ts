@@ -51,6 +51,12 @@ export interface EntityQuery {
 // Scene Manager
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Store accessor type for updating Rect2D components
+type StoreAccessor = {
+  getState: () => { entities: { nodes: Record<string, { components: string[] }>; components: Record<string, { script: string; properties?: Record<string, unknown> }> } }
+  setPath: (path: (string | number)[], value: unknown) => void
+}
+
 export class SceneManager {
   private currentScene: SceneData | null = null
   private entities: Map<string, EntityData> = new Map()
@@ -60,6 +66,75 @@ export class SceneManager {
   private prefabs: Map<string, PrefabData> = new Map()
   private sceneLoaders: Map<string, () => Promise<SceneData> | SceneData> = new Map()
   private pendingDestroys: Map<string, number> = new Map() // entityId -> delay remaining
+  private storeAccessor: StoreAccessor | null = null
+
+  /**
+   * Set the store accessor for updating actual scene state.
+   */
+  setStoreAccessor(accessor: StoreAccessor): void {
+    this.storeAccessor = accessor
+  }
+
+  /**
+   * Find the Rect2D component for an entity and update its position.
+   * Updates BOTH the entities map AND the scene tree for proper reactivity.
+   */
+  private updateRect2D(entityId: string, x: number, y: number): boolean {
+    if (!this.storeAccessor) return false
+
+    const state = this.storeAccessor.getState()
+    const node = state.entities.nodes[entityId]
+    if (!node) return false
+
+    // Find the Rect2D component ID
+    let rectCompId: string | null = null
+    for (const compId of node.components) {
+      const comp = state.entities.components[compId]
+      if (comp?.script === 'Rect2D') {
+        rectCompId = compId
+        break
+      }
+    }
+
+    if (!rectCompId) return false
+
+    // Update the entities map
+    this.storeAccessor.setPath(['entities', 'components', rectCompId, 'properties', 'x'], x)
+    this.storeAccessor.setPath(['entities', 'components', rectCompId, 'properties', 'y'], y)
+
+    // Also update the scene tree directly (for GameViewPanel which reads from rootNode)
+    // Find the node in the tree and update its Rect2D component
+    const rootNode = (state as unknown as { scene: { rootNode: { children: Array<{ id: string; components: Array<{ id: string; script: string; properties?: Record<string, unknown> }> }> } } }).scene?.rootNode
+    if (rootNode) {
+      const findAndUpdate = (children: Array<{ id: string; children?: unknown[]; components: Array<{ id: string; script: string; properties?: Record<string, unknown> }> }>, path: (string | number)[]): boolean => {
+        for (let i = 0; i < children.length; i++) {
+          const child = children[i]
+          if (child.id === entityId) {
+            // Found the node, now find the Rect2D component
+            for (let j = 0; j < child.components.length; j++) {
+              if (child.components[j].script === 'Rect2D') {
+                // Update via setPath for proper reactivity
+                const compPath = [...path, i, 'components', j, 'properties']
+                this.storeAccessor!.setPath([...compPath, 'x'], x)
+                this.storeAccessor!.setPath([...compPath, 'y'], y)
+                return true
+              }
+            }
+          }
+          // Recurse into children
+          if (child.children && Array.isArray(child.children)) {
+            if (findAndUpdate(child.children as typeof children, [...path, i, 'children'])) {
+              return true
+            }
+          }
+        }
+        return false
+      }
+      findAndUpdate(rootNode.children as typeof rootNode.children, ['scene', 'rootNode', 'children'])
+    }
+
+    return true
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // Scene Loading
@@ -461,6 +536,25 @@ export class SceneManager {
    * Translate entity by offset.
    */
   translate(entityId: string, dx: number, dy: number): void {
+    // Try to update the actual Rect2D component in the store
+    if (this.storeAccessor) {
+      const state = this.storeAccessor.getState()
+      const node = state.entities.nodes[entityId]
+      if (node) {
+        // Find the Rect2D component and get current position
+        for (const compId of node.components) {
+          const comp = state.entities.components[compId]
+          if (comp?.script === 'Rect2D') {
+            const currentX = (comp.properties?.x as number) ?? 0
+            const currentY = (comp.properties?.y as number) ?? 0
+            this.updateRect2D(entityId, currentX + dx, currentY + dy)
+            return
+          }
+        }
+      }
+    }
+
+    // Fallback to internal entity tracking
     const entity = this.entities.get(entityId)
     if (entity) {
       const pos = entity.position ?? { x: 0, y: 0 }

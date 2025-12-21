@@ -535,13 +535,13 @@ export class Scene {
 
     // Recursively process all nodes with inherited transforms
     const processNode = (node: Node, parentWorldTransform: WorldTransform) => {
-      // Compute world transform for this node
-      const localTransform = node.transform || { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }
-      const worldTransform = computeWorldTransform(parentWorldTransform, localTransform as {
-        position: [number, number, number]
-        rotation: [number, number, number]
-        scale: [number, number, number]
-      })
+      // Compute world transform for this node (handle partial transforms)
+      const localTransform = {
+        position: node.transform?.position || [0, 0, 0] as [number, number, number],
+        rotation: node.transform?.rotation || [0, 0, 0] as [number, number, number],
+        scale: node.transform?.scale || [1, 1, 1] as [number, number, number],
+      }
+      const worldTransform = computeWorldTransform(parentWorldTransform, localTransform)
 
       // Check for floor generator component (builtin)
       const floorComp = node.components.find(c => c.script === 'builtin:floor_generator')
@@ -772,7 +772,12 @@ export class Scene {
       node: NormalizedNode,
       parentWorld: { position: [number, number, number]; rotation: [number, number, number]; scale: [number, number, number] }
     ) => {
-      const localTransform = node.transform || { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1] }
+      // Ensure all transform properties have defaults (handles partial transforms)
+      const localTransform = {
+        position: node.transform?.position || [0, 0, 0] as [number, number, number],
+        rotation: node.transform?.rotation || [0, 0, 0] as [number, number, number],
+        scale: node.transform?.scale || [1, 1, 1] as [number, number, number],
+      }
 
       // Scale: multiply component-wise
       const worldScale: [number, number, number] = [

@@ -320,8 +320,8 @@ export const entityExecutors: Record<string, NodeExecutor> = {
     return true
   },
 
-  'translate': ({ entityId, dx, dy }) => {
-    Scene.translate(entityId as string, dx as number, dy as number)
+  'translate': ({ entity, dx, dy }) => {
+    Scene.translate(entity as string, dx as number, dy as number)
     return true
   },
 

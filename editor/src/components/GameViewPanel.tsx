@@ -52,8 +52,10 @@ export function GameViewPanel() {
   }, [globalPostProcess])
 
   // Find active camera and its bounds
+  // Note: We read directly from store to ensure we get latest state during animation loop
   const findActiveCamera = useCallback((): CameraBounds | null => {
-    if (!rootNode) return null
+    const currentRootNode = useEngineState.getState().scene.rootNode
+    if (!currentRootNode) return null
 
     const findCamera = (node: Node): CameraBounds | null => {
       // Check if this node has a Camera component
@@ -79,8 +81,8 @@ export function GameViewPanel() {
       return null
     }
 
-    return findCamera(rootNode)
-  }, [rootNode])
+    return findCamera(currentRootNode)
+  }, [])
 
   // Pack RGB color to uint32
   const packColor = (rgb: [number, number, number]): number => {
@@ -91,8 +93,10 @@ export function GameViewPanel() {
   }
 
   // Load scene into terminal (camera-clipped)
+  // Note: We read directly from store to ensure we get latest state during animation loop
   const loadSceneToTerminal = useCallback((terminal: Terminal2DRenderer, cameraBounds: CameraBounds) => {
-    if (!rootNode) return
+    const currentRootNode = useEngineState.getState().scene.rootNode
+    if (!currentRootNode) return
 
     terminal.clear()
 
@@ -182,8 +186,8 @@ export function GameViewPanel() {
       node.children.forEach(processNode)
     }
 
-    processNode(rootNode)
-  }, [rootNode])
+    processNode(currentRootNode)
+  }, [])
 
   // Initialize WebGPU - wait for container to have valid size
   useEffect(() => {
@@ -250,6 +254,7 @@ export function GameViewPanel() {
       // Initialize post-process pipeline
       try {
         const postProcess = new PostProcessPipeline(device, format)
+        await postProcess.init()
         postProcessRef.current = postProcess
       } catch (err) {
         console.error('[GameView] PostProcess init failed:', err)
@@ -362,12 +367,12 @@ export function GameViewPanel() {
 
       // Check if we need post-processing
       const postProcess = postProcessRef.current
-      const globalPost = globalPostProcessRef.current
-      const hasPostProcess = postProcess && globalPost?.enabled && globalPost.effects.some(e => e.enabled)
+      const postSettings = globalPostProcessRef.current
+      const needsPostProcess = postSettings?.enabled && postSettings?.crtEnabled && postProcess
 
       let targetView: GPUTextureView
 
-      if (hasPostProcess && width > 0 && height > 0) {
+      if (needsPostProcess && width > 0 && height > 0) {
         // Ensure intermediate texture exists with valid dimensions
         if (!intermediateTextureRef.current ||
             intermediateTextureRef.current.width !== width ||
@@ -393,15 +398,15 @@ export function GameViewPanel() {
       terminal.render(encoder, targetView, width, height)
 
       // Apply post-processing
-      if (hasPostProcess && postProcess && intermediateTextureRef.current) {
+      if (needsPostProcess && postProcess && intermediateTextureRef.current) {
         const screenView = context.getCurrentTexture().createView()
-        postProcess.executeGlobalStack(
+        postProcess.executeStack(
           encoder,
           intermediateTextureRef.current.createView(),
           screenView,
+          postSettings!,
           width,
           height,
-          globalPost!.effects,
           timeRef.current
         )
       }

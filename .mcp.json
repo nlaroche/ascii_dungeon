@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ascii-dungeon-engine": {
+      "command": "node",
+      "args": ["engine-mcp/dist/index.js"],
+      "cwd": "D:\\repos\\ascii_dungeon"
+    }
+  }
+}

@@ -13,6 +13,7 @@ import * as patternTools from './tools/patterns.js';
 import * as consistencyTools from './tools/consistency.js';
 import * as runtimeTools from './tools/runtime.js';
 import * as docsTools from './tools/docs.js';
+import * as playModeTools from './tools/playMode.js';
 // Cache for dependency graph (expensive to compute)
 let cachedGraph = null;
 const server = new Server({
@@ -151,6 +152,30 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             { name: 'search_docs', description: 'Search documentation for a term', inputSchema: { type: 'object', properties: { query: { type: 'string' } }, required: ['query'] } },
             { name: 'get_quick_reference', description: 'Get quick reference for common tasks', inputSchema: { type: 'object', properties: { task: { type: 'string', description: 'Task: create-component, create-node, add-camera-shake, spawn-entity' } }, required: ['task'] } },
             { name: 'list_quick_references', description: 'List available quick reference guides', inputSchema: { type: 'object', properties: {} } },
+            // Play mode control tools
+            { name: 'start_play_mode', description: 'Start play mode execution - begins scene simulation', inputSchema: { type: 'object', properties: {} } },
+            { name: 'stop_play_mode', description: 'Stop play mode execution', inputSchema: { type: 'object', properties: { apply: { type: 'boolean', description: 'If true, keep runtime changes instead of restoring snapshot' } } } },
+            { name: 'pause_play_mode', description: 'Pause play mode execution', inputSchema: { type: 'object', properties: {} } },
+            { name: 'resume_play_mode', description: 'Resume play mode execution', inputSchema: { type: 'object', properties: {} } },
+            { name: 'step_frame', description: 'Step forward by N frames (while paused)', inputSchema: { type: 'object', properties: { count: { type: 'number', description: 'Number of frames to step', default: 1 } } } },
+            // Play mode query tools
+            { name: 'get_play_mode_status', description: 'Get current play mode status', inputSchema: { type: 'object', properties: {} } },
+            { name: 'get_play_mode_stats', description: 'Get performance statistics (FPS, entity count, etc.)', inputSchema: { type: 'object', properties: {} } },
+            { name: 'get_runtime_entities', description: 'Get all entities in the running scene', inputSchema: { type: 'object', properties: { hasComponent: { type: 'string', description: 'Filter by component type' } } } },
+            { name: 'get_runtime_entity_state', description: 'Get state of a specific entity', inputSchema: { type: 'object', properties: { entityId: { type: 'string' } }, required: ['entityId'] } },
+            { name: 'get_recent_events', description: 'Get recent game events', inputSchema: { type: 'object', properties: { limit: { type: 'number', default: 20 } } } },
+            { name: 'get_runtime_variables', description: 'Get variable values', inputSchema: { type: 'object', properties: { scope: { type: 'string', enum: ['global', 'scene'] } } } },
+            // Input injection tools
+            { name: 'inject_key_press', description: 'Inject a key press event', inputSchema: { type: 'object', properties: { key: { type: 'string' }, shift: { type: 'boolean' }, ctrl: { type: 'boolean' }, alt: { type: 'boolean' } }, required: ['key'] } },
+            { name: 'inject_key_release', description: 'Inject a key release event', inputSchema: { type: 'object', properties: { key: { type: 'string' } }, required: ['key'] } },
+            { name: 'inject_key_tap', description: 'Inject a full key tap (press + release)', inputSchema: { type: 'object', properties: { key: { type: 'string' }, holdMs: { type: 'number', default: 50 } }, required: ['key'] } },
+            { name: 'inject_mouse_click', description: 'Inject a mouse click', inputSchema: { type: 'object', properties: { button: { type: 'number', default: 0 }, x: { type: 'number' }, y: { type: 'number' } }, required: ['x', 'y'] } },
+            // Debugging tools
+            { name: 'set_breakpoint', description: 'Set a breakpoint', inputSchema: { type: 'object', properties: { type: { type: 'string', enum: ['event', 'frame', 'variable'] }, eventType: { type: 'string' }, frameNumber: { type: 'number' }, variableName: { type: 'string' } }, required: ['type'] } },
+            { name: 'remove_breakpoint', description: 'Remove a breakpoint', inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] } },
+            { name: 'get_breakpoints', description: 'Get all breakpoints', inputSchema: { type: 'object', properties: {} } },
+            { name: 'connect_to_editor', description: 'Connect to the editor play mode bridge', inputSchema: { type: 'object', properties: {} } },
+            { name: 'is_connected_to_editor', description: 'Check if connected to editor', inputSchema: { type: 'object', properties: {} } },
         ],
     };
 });
@@ -344,6 +369,79 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 break;
             case 'list_quick_references':
                 result = docsTools.listQuickReferences();
+                break;
+            // Play mode control tools
+            case 'start_play_mode':
+                result = await playModeTools.startPlayMode();
+                break;
+            case 'stop_play_mode':
+                result = await playModeTools.stopPlayMode(args?.apply);
+                break;
+            case 'pause_play_mode':
+                result = await playModeTools.pausePlayMode();
+                break;
+            case 'resume_play_mode':
+                result = await playModeTools.resumePlayMode();
+                break;
+            case 'step_frame':
+                result = await playModeTools.stepFrame(args?.count);
+                break;
+            // Play mode query tools
+            case 'get_play_mode_status':
+                result = await playModeTools.getPlayModeStatus();
+                break;
+            case 'get_play_mode_stats':
+                result = await playModeTools.getPlayModeStats();
+                break;
+            case 'get_runtime_entities':
+                result = await playModeTools.getEntities(args?.hasComponent ? { hasComponent: args.hasComponent } : undefined);
+                break;
+            case 'get_runtime_entity_state':
+                result = await playModeTools.getEntityState(args?.entityId);
+                break;
+            case 'get_recent_events':
+                result = await playModeTools.getRecentEvents(args?.limit);
+                break;
+            case 'get_runtime_variables':
+                result = await playModeTools.getVariables(args?.scope);
+                break;
+            // Input injection tools
+            case 'inject_key_press':
+                result = await playModeTools.injectKeyPress(args?.key, {
+                    shift: args?.shift,
+                    ctrl: args?.ctrl,
+                    alt: args?.alt,
+                });
+                break;
+            case 'inject_key_release':
+                result = await playModeTools.injectKeyRelease(args?.key);
+                break;
+            case 'inject_key_tap':
+                result = await playModeTools.injectKeyTap(args?.key, args?.holdMs);
+                break;
+            case 'inject_mouse_click':
+                result = await playModeTools.injectMouseClick(args?.button || 0, args?.x, args?.y);
+                break;
+            // Debugging tools
+            case 'set_breakpoint':
+                result = await playModeTools.setBreakpoint({
+                    type: args?.type,
+                    eventType: args?.eventType,
+                    frameNumber: args?.frameNumber,
+                    variableName: args?.variableName,
+                });
+                break;
+            case 'remove_breakpoint':
+                result = await playModeTools.removeBreakpoint(args?.id);
+                break;
+            case 'get_breakpoints':
+                result = await playModeTools.getBreakpoints();
+                break;
+            case 'connect_to_editor':
+                result = await playModeTools.connectToEditor();
+                break;
+            case 'is_connected_to_editor':
+                result = playModeTools.isConnectedToEditor();
                 break;
             default:
                 throw new Error(`Unknown tool: ${name}`);

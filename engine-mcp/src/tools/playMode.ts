@@ -95,13 +95,13 @@ class PlayModeBridgeClient {
           this.connectionPromise = null;
         });
 
-        this.ws.on('error', (error) => {
+        this.ws.on('error', (error: Error) => {
           console.error('[PlayModeBridgeClient] Connection error:', error);
           this.connectionPromise = null;
           reject(error);
         });
 
-        this.ws.on('message', (data) => {
+        this.ws.on('message', (data: Buffer) => {
           try {
             const message = JSON.parse(data.toString());
             this.handleMessage(message);

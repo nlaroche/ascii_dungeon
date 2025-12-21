@@ -321,3 +321,23 @@ export type {
   HotReloadResult,
   HotReloadOptions,
 } from './HotReload'
+
+// Play Mode Manager
+export {
+  PlayModeManager,
+  PlayMode,
+  startPlayMode,
+  stopPlayMode,
+  pausePlayMode,
+  resumePlayMode,
+  stepPlayMode,
+  getPlayModeStatus,
+  isPlayModeRunning,
+} from './PlayModeManager'
+export type {
+  PlayModeStatus,
+  SceneSnapshot,
+  PlayModeState,
+  PlayModeStats,
+  EntityRuntimeState,
+} from './PlayModeManager'

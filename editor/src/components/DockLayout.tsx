@@ -33,6 +33,7 @@ interface DockablePanelProps {
 // API for programmatically manipulating the dock
 export interface DockAPI {
   addTab: (tabId: string, targetPanel?: string) => void;
+  activateTab: (tabId: string) => void;
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -108,6 +109,7 @@ const TEMPLATE_LAYOUTS: Record<string, () => LayoutData> = {
               tabs: [
                 { id: 'scene', title: 'Scene', group: 'default' },
                 { id: 'game', title: 'Game', group: 'default' },
+                { id: 'node-editor', title: 'Node Editor', group: 'default' },
                 { id: 'code', title: 'Code', group: 'default' },
               ],
               activeId: 'scene',
@@ -457,6 +459,57 @@ export function DockableLayout({ renderContent, onLayoutChange, onDockReady }: D
     return () => window.removeEventListener('floating-panel-redock', handleRedock as EventListener);
   }, []);
 
+  // Activate a tab by ID - find its panel and set it as active
+  // If the tab doesn't exist in the layout, add it first
+  const activateTab = useCallback((tabId: string) => {
+    if (!dockRef.current) return;
+
+    const panel = findPanelWithTab(tabId);
+    if (panel) {
+      // Update the panel's active tab
+      dockRef.current.updateTab(tabId, { id: tabId }, true);
+      console.log('[DockLayout] Activated tab:', tabId);
+    } else {
+      // Tab not in layout - add it to a center panel
+      console.log('[DockLayout] Tab not in layout, adding:', tabId);
+      const def = TAB_DEFINITIONS[tabId] || { icon: '○', label: tabId };
+      const newTab: TabData = {
+        id: tabId,
+        title: (
+          <span className="dock-tab-title">
+            <span className="dock-tab-icon">{def.icon}</span>
+            <span>{def.label}</span>
+          </span>
+        ),
+        group: 'default',
+      };
+
+      // Find the center panel (usually has 'scene' tab)
+      const scenePanel = findPanelWithTab('scene');
+      if (scenePanel) {
+        dockRef.current.dockMove(newTab, scenePanel, 'middle');
+        // Activate after a small delay to let the dock update
+        setTimeout(() => {
+          dockRef.current?.updateTab(tabId, { id: tabId }, true);
+        }, 50);
+      } else {
+        // Fallback: float the tab
+        dockRef.current.dockMove(newTab, null, 'float');
+      }
+    }
+  }, [findPanelWithTab]);
+
+  // Listen for global tab activation events
+  useEffect(() => {
+    const handleActivateTab = (e: CustomEvent<{ tabId: string }>) => {
+      console.log('[DockLayout] Received dock-activate-tab event for:', e.detail.tabId);
+      activateTab(e.detail.tabId);
+    };
+
+    window.addEventListener('dock-activate-tab', handleActivateTab as EventListener);
+    return () => window.removeEventListener('dock-activate-tab', handleActivateTab as EventListener);
+  }, [activateTab]);
+
   // Create and expose the dock API
   useEffect(() => {
     if (!onDockReady || !dockRef.current) return;
@@ -475,10 +528,11 @@ export function DockableLayout({ renderContent, onLayoutChange, onDockReady }: D
         // Try to find a panel to add to
         dockRef.current.dockMove(newTab, null, 'float');
       },
+      activateTab,
     };
 
     onDockReady(api);
-  }, [onDockReady]);
+  }, [onDockReady, activateTab]);
 
   // Tab group configuration
   const groups: Record<string, TabGroup> = {

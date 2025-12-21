@@ -36,7 +36,17 @@ interface FloatingWindowsState {
   windows: Map<string, FloatingWindow>
 
   // Create a native floating window for a tab
-  createFloatingWindow: (tabId: string, title: string, x: number, y: number, width: number, height: number) => Promise<void>
+  // Optional graphPath and projectRoot are for opening node-editor with a specific graph
+  createFloatingWindow: (
+    tabId: string,
+    title: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    graphPath?: string,
+    projectRoot?: string
+  ) => Promise<void>
 
   // Close a floating window
   closeFloatingWindow: (tabId: string) => Promise<void>
@@ -51,7 +61,7 @@ interface FloatingWindowsState {
 export const useFloatingWindows = create<FloatingWindowsState>((set, get) => ({
   windows: new Map(),
 
-  createFloatingWindow: async (tabId, title, x, y, width, height) => {
+  createFloatingWindow: async (tabId, title, x, y, width, height, graphPath, projectRoot) => {
     if (!isTauri()) {
       console.warn('[FloatingWindows] Not in Tauri, cannot create native window')
       return
@@ -65,6 +75,8 @@ export const useFloatingWindows = create<FloatingWindowsState>((set, get) => ({
         y,
         width: Math.max(200, width),
         height: Math.max(150, height),
+        graphPath: graphPath || null,
+        projectRoot: projectRoot || null,
       })
 
       set(state => {

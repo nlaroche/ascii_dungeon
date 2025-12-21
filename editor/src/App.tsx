@@ -5,7 +5,7 @@
 
 import { useEffect, useCallback, useRef, useState } from 'react';
 import Editor from '@monaco-editor/react';
-import { useEngineState, useTheme, useChat, useTemplate, useUIScale } from './stores/useEngineState';
+import { useEngineState, useTheme, useChat, useTemplate, useUIScale, useRenderPipeline } from './stores/useEngineState';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { ThemeProvider } from './components/ui';
@@ -22,7 +22,8 @@ import { EntitiesPanel, ModeAwarePropertiesPanel } from './components/ModeAwareP
 import { RenderPipelinePanel } from './components/render';
 import { PalettePanel } from './components/PalettePanel';
 import { DragOverlay } from './components/DragOverlay';
-import { getFloatingPanelId, isFloatingPanelWindow, isTauri } from './stores/useFloatingWindows';
+import { getFloatingPanelId, isFloatingPanelWindow, isTauri, useFloatingWindows } from './stores/useFloatingWindows';
+import { setPendingGraph } from './stores/useNodeEditor';
 import { useCodeEditor } from './stores/useCodeEditor';
 import { RuntimeInspector } from './components/RuntimeInspector';
 import { GameViewPanel } from './components/GameViewPanel';
@@ -371,7 +372,9 @@ function TemplatePlaceholder({ icon, title, description }: { icon: string; title
 function FileTree() {
   const theme = useTheme();
   const selectedFile = useEngineState((s) => s.project.selectedFile);
+  const projectRoot = useEngineState((s) => s.project.root);
   const setPath = useEngineState((s) => s.setPath);
+  const { createFloatingWindow, isFloating } = useFloatingWindows();
 
   const {
     hasProject,
@@ -385,6 +388,8 @@ function FileTree() {
   // Get file icon based on extension
   const getFileIcon = (name: string, isDir: boolean) => {
     if (isDir) return '▸';
+    // Special case for graph files
+    if (name.endsWith('.graph.json')) return '◎';
     const ext = name.split('.').pop()?.toLowerCase();
     switch (ext) {
       case 'lua': return '◈';
@@ -401,6 +406,32 @@ function FileTree() {
       detail: { path }
     }));
   }, []);
+
+  // Open graph file in node editor (spawns in its own floating window)
+  const openInNodeEditor = useCallback(async (path: string) => {
+    console.log('[FileTree] Opening graph in node editor:', path);
+
+    // Check if running in Tauri and node-editor not already floating
+    if (isTauri() && !isFloating('node-editor')) {
+      // Spawn node editor in a new floating window
+      // Pass the graph path and project root via URL params (more reliable than localStorage)
+      const width = 1000;
+      const height = 700;
+      const x = Math.round((window.screen.width - width) / 2);
+      const y = Math.round((window.screen.height - height) / 2);
+
+      console.log('[FileTree] Creating floating window for node-editor with graph:', path);
+      await createFloatingWindow('node-editor', 'Node Editor', x, y, width, height, path, projectRoot || undefined);
+    } else {
+      // In the same window - use DOM event
+      window.dispatchEvent(new CustomEvent('dock-activate-tab', {
+        detail: { tabId: 'node-editor' }
+      }));
+      window.dispatchEvent(new CustomEvent('node-editor-open-graph', {
+        detail: { path }
+      }));
+    }
+  }, [createFloatingWindow, isFloating, projectRoot]);
 
   // Render a file entry recursively
   const renderEntry = (entry: FileEntry, depth: number = 0) => {
@@ -419,9 +450,15 @@ function FileTree() {
             }
           }}
           onDoubleClick={() => {
+            console.log('[FileTree] Double-click on:', entry.name, 'isDir:', entry.isDirectory);
             if (!entry.isDirectory) {
-              // Open in code editor on double-click
-              openInCodeEditor(entry.path);
+              // Open .graph.json files in node editor, others in code editor
+              if (entry.name.endsWith('.graph.json')) {
+                console.log('[FileTree] Detected graph file:', entry.name);
+                openInNodeEditor(entry.path);
+              } else {
+                openInCodeEditor(entry.path);
+              }
             }
           }}
           className="py-1 cursor-pointer rounded transition-colors flex items-center gap-1"
@@ -522,6 +559,10 @@ function SceneView() {
   const tool2D = useEngineState((s) => s.editor2D?.tool || 'pointer');
   const showGrid = useEngineState((s) => s.editor2D?.showGrid ?? true);
   const zoom = useEngineState((s) => s.editor2D?.zoom ?? 100);
+
+  // Post-processing toggle
+  const { globalPostProcess, setCRTEnabled } = useRenderPipeline();
+  const postProcessEnabled = globalPostProcess.enabled && globalPostProcess.crtEnabled;
 
   // Force 2D mode on mount
   useEffect(() => {
@@ -628,6 +669,20 @@ function SceneView() {
         >
           <span style={{ fontSize: '10px' }}>▦</span>
           Grid
+        </button>
+
+        {/* Post-processing toggle */}
+        <button
+          onClick={() => setCRTEnabled(!postProcessEnabled)}
+          className="px-2 py-1 rounded text-xs transition-colors flex items-center gap-1"
+          style={{
+            backgroundColor: postProcessEnabled ? theme.bgHover : 'transparent',
+            color: postProcessEnabled ? theme.text : theme.textDim,
+          }}
+          title={postProcessEnabled ? 'Disable post-processing effects' : 'Enable post-processing effects'}
+        >
+          <span style={{ fontSize: '10px' }}>✦</span>
+          FX
         </button>
 
         <div className="flex-1" />

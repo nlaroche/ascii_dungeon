@@ -155,9 +155,11 @@ export class GraphRuntime {
   private graph: LogicGraph
   private nodeMap: Map<string, GraphNode> = new Map()
   private outgoingEdges: Map<string, Map<string, GraphEdge[]>> = new Map() // nodeId -> pinName -> edges
+  private incomingEdges: Map<string, Map<string, GraphEdge>> = new Map() // nodeId -> pinName -> edge
   private signalHandlers: Map<string, SignalNode[]> = new Map() // signal -> nodes
   private watchHandlers: Map<string, VariableNode[]> = new Map() // variable -> watch nodes
   private eventUnsubscribers: (() => void)[] = []
+  private _signalLogCount: Record<string, number> = {} // Debug counter
 
   constructor(graph: LogicGraph) {
     this.graph = graph
@@ -184,8 +186,9 @@ export class GraphRuntime {
       }
     }
 
-    // Index outgoing edges
+    // Index edges
     for (const edge of this.graph.edges) {
+      // Outgoing edges
       if (!this.outgoingEdges.has(edge.from)) {
         this.outgoingEdges.set(edge.from, new Map())
       }
@@ -194,6 +197,116 @@ export class GraphRuntime {
         pinMap.set(edge.fromPin, [])
       }
       pinMap.get(edge.fromPin)!.push(edge)
+
+      // Incoming edges (for data input resolution)
+      if (!this.incomingEdges.has(edge.to)) {
+        this.incomingEdges.set(edge.to, new Map())
+      }
+      this.incomingEdges.get(edge.to)!.set(edge.toPin, edge)
+    }
+  }
+
+  /**
+   * Get incoming edge to a node's input pin
+   */
+  getIncomingEdge(nodeId: string, pinName: string): GraphEdge | undefined {
+    return this.incomingEdges.get(nodeId)?.get(pinName)
+  }
+
+  /**
+   * Resolve an input value from an incoming edge
+   */
+  async resolveInputFromEdge(
+    nodeId: string,
+    pinName: string,
+    ctx: GraphExecutionContext
+  ): Promise<ExprValue> {
+    const edge = this.getIncomingEdge(nodeId, pinName)
+    if (!edge) return null
+
+    const sourceNode = this.nodeMap.get(edge.from)
+    if (!sourceNode) return null
+
+    return await this.executeDataNode(sourceNode, edge.fromPin, ctx)
+  }
+
+  /**
+   * Execute a data node (produces values, not flow control)
+   */
+  private async executeDataNode(
+    node: GraphNode,
+    outputPin: string,
+    ctx: GraphExecutionContext
+  ): Promise<ExprValue> {
+    const exprCtx = this.buildExprContext(ctx)
+
+    if (node.type === 'action') {
+      const actionNode = node as ActionNode
+      // Resolve inputs from static values first
+      const inputs: Record<string, ExprValue> = {}
+      for (const [key, value] of Object.entries(actionNode.inputs || {})) {
+        if (value !== undefined) {
+          inputs[key] = resolveValue(value, exprCtx)
+        }
+      }
+
+      // Then resolve any inputs from incoming data edges
+      // Edge connections OVERRIDE static defaults - this is important!
+      const flowPins = ['flow', 'in', 'out']
+      for (const [pinName, edge] of this.incomingEdges.get(node.id) || []) {
+        if (!flowPins.includes(pinName)) {
+          const value = await this.resolveInputFromEdge(node.id, pinName, ctx)
+          if (value !== undefined) {
+            inputs[pinName] = value
+          }
+        }
+      }
+
+      return this.executeBuiltInDataNode(actionNode.method, inputs, outputPin, ctx)
+    }
+
+    if (node.type === 'variable') {
+      const varNode = node as VariableNode
+      if (varNode.operation === 'get') {
+        return this.getVariableByName(varNode.variable, ctx)
+      }
+    }
+
+    return null
+  }
+
+  /**
+   * Execute built-in data nodes (random, compare, get-self, etc.)
+   */
+  private executeBuiltInDataNode(
+    nodeType: string,
+    inputs: Record<string, ExprValue>,
+    outputPin: string,
+    _ctx: GraphExecutionContext
+  ): ExprValue {
+    switch (nodeType) {
+      case 'random': {
+        const min = Number(inputs.min ?? 0)
+        const max = Number(inputs.max ?? 1)
+        return min + Math.random() * (max - min)
+      }
+      case 'compare': {
+        const a = Number(inputs.a ?? 0)
+        const b = Number(inputs.b ?? 0)
+        switch (outputPin) {
+          case 'less': return a < b
+          case 'equal': return a === b
+          case 'greater': return a > b
+          case 'lessEqual': return a <= b
+          case 'greaterEqual': return a >= b
+          default: return a < b
+        }
+      }
+      case 'get-self': {
+        return _ctx.nodeId
+      }
+      default:
+        return null
     }
   }
 
@@ -390,8 +503,11 @@ export class GraphRuntime {
 
     const result = await this.executeNode(node, ctx, inputData)
 
-    // Follow outgoing 'out' edge by default
-    const outEdges = this.getOutgoingEdges(nodeId, 'out')
+    // Follow outgoing flow edges (check both 'flow' and 'out' for compatibility)
+    let outEdges = this.getOutgoingEdges(nodeId, 'flow')
+    if (outEdges.length === 0) {
+      outEdges = this.getOutgoingEdges(nodeId, 'out')
+    }
     for (const edge of outEdges) {
       await this.executeFromNode(edge.to, ctx)
     }
@@ -407,6 +523,9 @@ export class GraphRuntime {
     ctx: GraphExecutionContext,
     inputData?: Record<string, unknown>
   ): Promise<ExprValue> {
+    // Debug: log node execution
+    console.log(`[Graph] Executing node: ${node.id} (${node.type})`, node)
+
     switch (node.type) {
       case 'signal':
         // Signal nodes don't execute - they're entry points
@@ -440,6 +559,33 @@ export class GraphRuntime {
     node: ActionNode,
     ctx: GraphExecutionContext
   ): Promise<ExprValue> {
+    // Resolve inputs first
+    const exprCtx = this.buildExprContext(ctx)
+    const resolvedInputs: Record<string, ExprValue> = {}
+    for (const [key, value] of Object.entries(node.inputs)) {
+      // Skip flow/nodeTypeId - these aren't actual inputs
+      if (key === 'flow' || key === 'nodeTypeId') continue
+      resolvedInputs[key] = resolveValue(value, exprCtx)
+    }
+
+    // Also resolve inputs from incoming data edges
+    // Edge connections OVERRIDE static defaults - this is important!
+    // Skip flow control pins (flow, in, out)
+    const flowPins = ['flow', 'in', 'out']
+    for (const [pinName, edge] of this.incomingEdges.get(node.id) || []) {
+      if (!flowPins.includes(pinName)) {
+        const value = await this.resolveInputFromEdge(node.id, pinName, ctx)
+        if (value !== undefined) {
+          resolvedInputs[pinName] = value
+        }
+      }
+    }
+
+    // Handle built-in actions
+    if (node.component === 'Builtin') {
+      return this.executeBuiltinAction(node.method, resolvedInputs, ctx)
+    }
+
     const component = ctx.components.get(node.component)
     if (!component) {
       console.warn(`[Graph] Component not found: ${node.component}`)
@@ -450,13 +596,6 @@ export class GraphRuntime {
     if (typeof method !== 'function') {
       console.warn(`[Graph] Method not found: ${node.component}.${node.method}`)
       return null
-    }
-
-    // Resolve inputs
-    const exprCtx = this.buildExprContext(ctx)
-    const resolvedInputs: Record<string, ExprValue> = {}
-    for (const [key, value] of Object.entries(node.inputs)) {
-      resolvedInputs[key] = resolveValue(value, exprCtx)
     }
 
     try {
@@ -491,6 +630,178 @@ export class GraphRuntime {
   }
 
   /**
+   * Execute a built-in action (translate, print, etc.)
+   */
+  private executeBuiltinAction(
+    method: string,
+    inputs: Record<string, ExprValue>,
+    ctx: GraphExecutionContext
+  ): ExprValue {
+    switch (method) {
+      case 'translate': {
+        const dx = Number(inputs.dx) || 0
+        const dy = Number(inputs.dy) || 0
+        const entityId = inputs.entity as string || ctx.nodeId
+
+        console.log(`[Graph] translate entity=${entityId} dx=${dx} dy=${dy}`)
+
+        // Update via global state if available
+        if (typeof window !== 'undefined' && (window as any).__engineState) {
+          const store = (window as any).__engineState
+          const storeState = store.getState?.()
+          const rootNode = storeState?.scene?.rootNode
+          const setPath = storeState?.setPath
+
+          if (rootNode && setPath) {
+            // Find node in tree
+            const findNode = (node: any): any => {
+              if (node.id === entityId) return node
+              for (const child of node.children || []) {
+                const found = findNode(child)
+                if (found) return found
+              }
+              return null
+            }
+
+            // Find path to node
+            const findPath = (node: any, id: string, path: number[] = []): number[] | null => {
+              if (node.id === id) return path
+              for (let i = 0; i < (node.children?.length || 0); i++) {
+                const result = findPath(node.children[i], id, [...path, i])
+                if (result) return result
+              }
+              return null
+            }
+
+            const targetNode = findNode(rootNode)
+            const nodePath = findPath(rootNode, entityId)
+
+            if (targetNode && nodePath) {
+              // Find the Rect2D component to get current position
+              const rect2DIndex = targetNode.components?.findIndex(
+                (c: any) => c.script === 'Rect2D'
+              ) ?? -1
+
+              if (rect2DIndex >= 0) {
+                const rect2D = targetNode.components[rect2DIndex]
+                const currentX = (rect2D.properties?.x as number) ?? 0
+                const currentY = (rect2D.properties?.y as number) ?? 0
+
+                const newX = currentX + dx
+                const newY = currentY + dy
+
+                // Build state path to Rect2D component properties
+                const statePath: (string | number)[] = ['scene', 'rootNode']
+                for (const idx of nodePath) {
+                  statePath.push('children', idx)
+                }
+                statePath.push('components', rect2DIndex, 'properties')
+
+                // Update Rect2D x and y properties (what the renderer uses)
+                setPath([...statePath, 'x'], newX, `Translate ${entityId} X`, 'script')
+                setPath([...statePath, 'y'], newY, `Translate ${entityId} Y`, 'script')
+
+                console.log(`[Graph] Moved ${entityId} from (${currentX},${currentY}) to (${newX},${newY}) via Rect2D`)
+              } else {
+                console.warn(`[Graph] Entity ${entityId} has no Rect2D component`)
+              }
+            } else {
+              console.warn(`[Graph] Entity not found for translate: ${entityId}`)
+            }
+          }
+        }
+
+        return true
+      }
+
+      case 'move-entity': {
+        const x = Number(inputs.x) || 0
+        const y = Number(inputs.y) || 0
+        const entityId = inputs.entity as string || ctx.nodeId
+
+        console.log(`[Graph] move-entity entity=${entityId} to x=${x} y=${y}`)
+
+        if (typeof window !== 'undefined' && (window as any).__engineState) {
+          const store = (window as any).__engineState
+          const storeState = store.getState?.()
+          const rootNode = storeState?.scene?.rootNode
+          const setPath = storeState?.setPath
+
+          if (rootNode && setPath) {
+            // Find node in tree
+            const findNode = (node: any): any => {
+              if (node.id === entityId) return node
+              for (const child of node.children || []) {
+                const found = findNode(child)
+                if (found) return found
+              }
+              return null
+            }
+
+            const findPath = (node: any, id: string, path: number[] = []): number[] | null => {
+              if (node.id === id) return path
+              for (let i = 0; i < (node.children?.length || 0); i++) {
+                const result = findPath(node.children[i], id, [...path, i])
+                if (result) return result
+              }
+              return null
+            }
+
+            const targetNode = findNode(rootNode)
+            const nodePath = findPath(rootNode, entityId)
+
+            if (targetNode && nodePath) {
+              // Find the Rect2D component
+              const rect2DIndex = targetNode.components?.findIndex(
+                (c: any) => c.script === 'Rect2D'
+              ) ?? -1
+
+              if (rect2DIndex >= 0) {
+                // Build state path to Rect2D component properties
+                const statePath: (string | number)[] = ['scene', 'rootNode']
+                for (const idx of nodePath) {
+                  statePath.push('children', idx)
+                }
+                statePath.push('components', rect2DIndex, 'properties')
+
+                // Update Rect2D x and y properties (what the renderer uses)
+                setPath([...statePath, 'x'], x, `Move ${entityId} X`, 'script')
+                setPath([...statePath, 'y'], y, `Move ${entityId} Y`, 'script')
+
+                console.log(`[Graph] Moved ${entityId} to (${x},${y}) via Rect2D`)
+              } else {
+                console.warn(`[Graph] Entity ${entityId} has no Rect2D component`)
+              }
+            }
+          }
+        }
+
+        return true
+      }
+
+      case 'print':
+      case 'log': {
+        const message = String(inputs.message || inputs.text || '')
+        console.log(`[Graph:${ctx.nodeId}]`, message)
+        return true
+      }
+
+      case 'emit-signal': {
+        const signalName = String(inputs.signal || inputs.name || '')
+        const data = inputs.data
+        if (ctx.eventBus && signalName) {
+          ctx.eventBus.emit(signalName, data)
+        }
+        return true
+      }
+
+      default:
+        console.warn(`[Graph] Unknown built-in action: ${method}`)
+        return null
+    }
+  }
+
+  /**
    * Execute a branch node
    */
   private async executeBranchNode(
@@ -500,8 +811,17 @@ export class GraphRuntime {
     const exprCtx = this.buildExprContext(ctx)
 
     if (node.kind === 'if') {
-      const condition = resolveValue(node.condition, exprCtx)
+      // Resolve condition - either from node property or incoming edge
+      let condition: ExprValue
+      if (node.condition !== undefined) {
+        condition = resolveValue(node.condition, exprCtx)
+      } else {
+        // Try to get condition from incoming edge
+        condition = await this.resolveInputFromEdge(node.id, 'condition', ctx)
+      }
+
       const branch = condition ? 'true' : 'false'
+      console.log(`[Graph] Branch condition=${condition}, taking ${branch} path`)
 
       const edges = this.getOutgoingEdges(node.id, branch)
       for (const edge of edges) {
@@ -512,7 +832,12 @@ export class GraphRuntime {
     }
 
     if (node.kind === 'switch') {
-      const value = resolveValue(node.value, exprCtx)
+      let value: ExprValue
+      if (node.value !== undefined) {
+        value = resolveValue(node.value, exprCtx)
+      } else {
+        value = await this.resolveInputFromEdge(node.id, 'value', ctx)
+      }
       const valueStr = String(value)
 
       // Check if value matches a case
@@ -710,6 +1035,16 @@ export class GraphRuntime {
    */
   async triggerSignal(signal: string, ctx: GraphExecutionContext, data?: unknown): Promise<void> {
     const handlers = this.getSignalHandlers(signal)
+
+    // Debug: log first few signal triggers
+    if (!this._signalLogCount[signal]) this._signalLogCount[signal] = 0
+    if (this._signalLogCount[signal] < 3) {
+      console.log(`[GraphRuntime] triggerSignal "${signal}" -> ${handlers.length} handlers, node=${ctx.nodeId}`)
+      if (handlers.length === 0) {
+        console.log(`[GraphRuntime] Available signals:`, Array.from(this.signalHandlers.keys()))
+      }
+      this._signalLogCount[signal]++
+    }
 
     // Create a synthetic event
     const event = createGameEvent({

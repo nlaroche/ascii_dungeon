@@ -217,6 +217,25 @@ function treeNodeToNormalized(
   componentsMap: Record<string, NormalizedComponent>,
   nodeOrder: string[]
 ): void {
+  // Handle legacy position format: node.position: { x, y, z } object at node level
+  // Convert to new format: node.transform.position: [x, y, z] array
+  let transform = node.transform;
+  const legacyPos = (node as unknown as { position?: { x?: number; y?: number; z?: number } }).position;
+  if (!transform && legacyPos && typeof legacyPos === 'object' && 'x' in legacyPos) {
+    // Create transform from legacy position
+    transform = {
+      position: [legacyPos.x ?? 0, legacyPos.y ?? 0, legacyPos.z ?? 0],
+      rotation: [0, 0, 0],
+      scale: [1, 1, 1],
+    };
+  } else if (transform && !transform.position && legacyPos && typeof legacyPos === 'object' && 'x' in legacyPos) {
+    // Transform exists but no position - use legacy
+    transform = {
+      ...transform,
+      position: [legacyPos.x ?? 0, legacyPos.y ?? 0, legacyPos.z ?? 0],
+    };
+  }
+
   // Create normalized node
   const normalizedNode: NormalizedNode = {
     id: node.id,
@@ -225,7 +244,7 @@ function treeNodeToNormalized(
     parentId,
     childIds: node.children.map((c) => c.id),
     componentIds: node.components.map((c) => c.id),
-    transform: node.transform,
+    transform,
     visual: node.visual,
     meta: node.meta,
   };
@@ -1113,6 +1132,11 @@ export const useEngineState = create<EngineStateStore>()(
     },
   }))
 );
+
+// Expose store globally for graph runtime access
+if (typeof window !== 'undefined') {
+  (window as any).__engineState = useEngineState;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Entity Sync Subscription
@@ -2373,6 +2397,7 @@ queueMicrotask(() => {
     () => ({
       scene: useEngineState.getState().scene,
       entities: useEngineState.getState().entities,
+      project: useEngineState.getState().project,
     }),
     (updates) => {
       if (updates.scene) {
@@ -2381,6 +2406,10 @@ queueMicrotask(() => {
           scene: { ...state.scene, ...updates.scene },
         }));
       }
+    },
+    // Pass setPath for direct entity property updates during play mode
+    (path, value) => {
+      useEngineState.getState().setPath(path, value, 'Runtime update', 'script');
     }
   );
   console.log('[useEngineState] PlayMode store accessors initialized');

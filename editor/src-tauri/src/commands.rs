@@ -805,6 +805,8 @@ pub async fn create_floating_window(
     y: i32,
     width: u32,
     height: u32,
+    graph_path: Option<String>,
+    project_root: Option<String>,
 ) -> Result<FloatingWindowResult, String> {
     let window_label = format!("float_{}", tab_id);
 
@@ -817,7 +819,17 @@ pub async fn create_floating_window(
     }
 
     // Build the URL with tab_id as query param so the window knows what to render
-    let url = format!("index.html?floating_panel={}", tab_id);
+    // Also include optional graph_path and project_root for node-editor
+    let mut url = format!("index.html?floating_panel={}", tab_id);
+    if let Some(ref path) = graph_path {
+        // URL-encode the path to handle special characters
+        let encoded = urlencoding::encode(path);
+        url.push_str(&format!("&graph_path={}", encoded));
+    }
+    if let Some(ref root) = project_root {
+        let encoded = urlencoding::encode(root);
+        url.push_str(&format!("&project_root={}", encoded));
+    }
 
     // Create the window
     let window = WebviewWindowBuilder::new(

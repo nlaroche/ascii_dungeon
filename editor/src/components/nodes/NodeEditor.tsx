@@ -8,8 +8,8 @@ import {
   Controls,
   Background,
   BackgroundVariant,
-  useNodesState,
-  useEdgesState,
+  applyNodeChanges,
+  applyEdgeChanges,
   addEdge,
   Connection,
   Edge,
@@ -18,6 +18,8 @@ import {
   MarkerType,
   NodeTypes,
   OnSelectionChangeFunc,
+  NodeChange,
+  EdgeChange,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
@@ -27,8 +29,9 @@ import { ExecutionControls } from './ExecutionControls';
 import { NodePropertyInspector } from './NodePropertyInspector';
 import { VariableInspector } from './VariableInspector';
 import { GraphRunner } from '../../scripting/runtime/GraphRunner';
-import { graphStorage, GraphListEntry, SavedGraph } from '../../scripting/runtime/GraphStorage';
+import { graphStorage, GraphListEntry } from '../../scripting/runtime/GraphStorage';
 import { useGraphHistory, useGraphClipboard } from './useGraphHistory';
+import { useNodeEditorStore, consumePendingGraph } from '../../stores/useNodeEditor';
 import {
   getAllNodeTypes,
   getNodesByCategory,
@@ -37,36 +40,6 @@ import {
   PORT_COLORS,
 } from '../../lib/nodes/types';
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Initial demo nodes
-// ─────────────────────────────────────────────────────────────────────────────
-
-const initialNodes: Node[] = [
-  {
-    id: '1',
-    type: 'custom',
-    position: { x: 100, y: 100 },
-    data: { nodeTypeId: 'on-start' } as CustomNodeData,
-  },
-  {
-    id: '2',
-    type: 'custom',
-    position: { x: 350, y: 100 },
-    data: { nodeTypeId: 'print', inputs: { message: 'Hello World!' } } as CustomNodeData,
-  },
-];
-
-const initialEdges: Edge[] = [
-  {
-    id: 'e1-2',
-    source: '1',
-    sourceHandle: 'flow',
-    target: '2',
-    targetHandle: 'flow',
-    type: 'smoothstep',
-    markerEnd: { type: MarkerType.ArrowClosed },
-  },
-];
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Category Icons
@@ -97,10 +70,15 @@ function NodePalette({ onAddNode: _ }: NodePaletteProps) {
   const categories: NodeCategory[] = ['event', 'action', 'condition', 'data', 'flow', 'custom'];
 
   const filteredNodes = useMemo(() => {
+    const allNodes = getAllNodeTypes();
     let nodes = getNodesByCategory(selectedCategory);
+    console.log('[NodePalette] Category:', selectedCategory, 'Found:', nodes.length, 'All types:', allNodes.length);
+    if (allNodes.length === 0) {
+      console.warn('[NodePalette] No node types registered! Check types.ts initialization.');
+    }
     if (searchQuery) {
       const query = searchQuery.toLowerCase();
-      nodes = getAllNodeTypes().filter(
+      nodes = allNodes.filter(
         (n) =>
           n.name.toLowerCase().includes(query) ||
           n.description.toLowerCase().includes(query)
@@ -213,12 +191,45 @@ function NodePalette({ onAddNode: _ }: NodePaletteProps) {
 
 export function NodeEditor() {
   const theme = useTheme();
-  const projectPath = useEngineState((s) => s.project.path);
+  const projectPath = useEngineState((s) => s.project.root);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
-  const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes);
-  const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges);
-  const [nodeIdCounter, setNodeIdCounter] = useState(3);
-  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+
+  // Use zustand store for persistent state across window floating
+  const {
+    nodes,
+    edges,
+    nodeIdCounter,
+    selectedNodeIds,
+    currentGraphName,
+    currentGraphPath,
+    hasUnsavedChanges,
+    setNodes,
+    setEdges,
+    setNodeIdCounter,
+    setCurrentGraph,
+    setHasUnsavedChanges,
+    setSelectedNodeIds,
+    loadGraph,
+    newGraph,
+    markSaved,
+  } = useNodeEditorStore();
+
+  // Create change handlers for react-flow integration
+  const onNodesChange = useCallback(
+    (changes: NodeChange[]) => {
+      setNodes((nds) => applyNodeChanges(changes, nds));
+    },
+    [setNodes]
+  );
+
+  const onEdgesChange = useCallback(
+    (changes: EdgeChange[]) => {
+      setEdges((eds) => applyEdgeChanges(changes, eds));
+    },
+    [setEdges]
+  );
+
+  // UI state (local - doesn't need persistence)
   const [showInspector, setShowInspector] = useState(true);
   const [inspectorTab, setInspectorTab] = useState<'properties' | 'variables'>('properties');
   const [graphRunner] = useState(() => new GraphRunner());
@@ -227,10 +238,7 @@ export function NodeEditor() {
   const { canUndo, canRedo, pushState, undo, redo } = useGraphHistory();
   const { hasClipboard, copy, paste, cut } = useGraphClipboard();
 
-  // Graph file state
-  const [currentGraphName, setCurrentGraphName] = useState<string>('Untitled');
-  const [currentGraphPath, setCurrentGraphPath] = useState<string | null>(null);
-  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  // Dialog state (local)
   const [showFileMenu, setShowFileMenu] = useState(false);
   const [showLoadDialog, setShowLoadDialog] = useState(false);
   const [savedGraphs, setSavedGraphs] = useState<GraphListEntry[]>([]);
@@ -244,11 +252,84 @@ export function NodeEditor() {
     }
   }, [projectPath]);
 
-  // Track unsaved changes and push to history
+  // Check for pending graph on mount (from URL params or localStorage)
   useEffect(() => {
-    setHasUnsavedChanges(true);
+    const loadPendingGraph = async () => {
+      // First check URL params (passed when opening floating window)
+      const urlParams = new URLSearchParams(window.location.search);
+      const graphPathFromUrl = urlParams.get('graph_path');
+      const projectRootFromUrl = urlParams.get('project_root');
+
+      console.log('[NodeEditor] URL params - graph_path:', graphPathFromUrl, 'project_root:', projectRootFromUrl);
+
+      let graphPath = graphPathFromUrl;
+      let graphProjectRoot = projectRootFromUrl;
+
+      // Fall back to localStorage if no URL params
+      if (!graphPath) {
+        const pending = consumePendingGraph();
+        if (pending) {
+          graphPath = pending.path;
+          graphProjectRoot = pending.projectRoot;
+          console.log('[NodeEditor] Found pending graph in localStorage:', graphPath);
+        }
+      }
+
+      if (graphPath) {
+        console.log('[NodeEditor] Loading graph:', graphPath, 'project:', graphProjectRoot);
+        try {
+          // Set the project root for graphStorage if provided
+          if (graphProjectRoot) {
+            graphStorage.setBasePath(graphProjectRoot);
+          }
+          const { graph, nodes: loadedNodes, edges: loadedEdges } = await graphStorage.load(graphPath);
+          console.log('[NodeEditor] Loaded graph:', graph.name, 'nodes:', loadedNodes.length, 'edges:', loadedEdges.length);
+          loadGraph(loadedNodes, loadedEdges, graph.name, graphPath);
+        } catch (err) {
+          console.error('[NodeEditor] Failed to load graph:', err);
+        }
+      } else {
+        console.log('[NodeEditor] No pending graph found');
+      }
+    };
+    loadPendingGraph();
+  }, [loadGraph]);
+
+  // Push to history when nodes/edges change (hasUnsavedChanges is set by store)
+  useEffect(() => {
     pushState(nodes, edges);
   }, [nodes, edges, pushState]);
+
+  // File operations - defined before keyboard shortcuts useEffect that uses them
+  const handleNewGraph = useCallback(() => {
+    if (hasUnsavedChanges && !confirm('Discard unsaved changes?')) return;
+    newGraph();
+    setShowFileMenu(false);
+  }, [hasUnsavedChanges, newGraph]);
+
+  const handleSave = useCallback(async () => {
+    if (!projectPath) {
+      alert('Please open a project first');
+      return;
+    }
+
+    if (!currentGraphPath) {
+      setShowSaveDialog(true);
+      setSaveFileName(currentGraphName.replace(/[^a-zA-Z0-9_-]/g, '_'));
+      return;
+    }
+
+    try {
+      const filename = currentGraphPath.split('/').pop() || 'graph.graph.json';
+      await graphStorage.save(nodes, edges, filename, { name: currentGraphName });
+      markSaved();
+      console.log('[NodeEditor] Graph saved:', currentGraphPath);
+    } catch (e) {
+      console.error('[NodeEditor] Failed to save graph:', e);
+      alert('Failed to save graph: ' + (e instanceof Error ? e.message : String(e)));
+    }
+    setShowFileMenu(false);
+  }, [projectPath, currentGraphPath, currentGraphName, nodes, edges, markSaved]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -322,42 +403,6 @@ export function NodeEditor() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [nodes, edges, selectedNodeIds, undo, redo, copy, cut, paste, handleSave, setNodes, setEdges]);
 
-  // File operations
-  const handleNewGraph = useCallback(() => {
-    if (hasUnsavedChanges && !confirm('Discard unsaved changes?')) return;
-    setNodes([]);
-    setEdges([]);
-    setCurrentGraphName('Untitled');
-    setCurrentGraphPath(null);
-    setHasUnsavedChanges(false);
-    setNodeIdCounter(1);
-    setShowFileMenu(false);
-  }, [hasUnsavedChanges, setNodes, setEdges]);
-
-  const handleSave = useCallback(async () => {
-    if (!projectPath) {
-      alert('Please open a project first');
-      return;
-    }
-
-    if (!currentGraphPath) {
-      setShowSaveDialog(true);
-      setSaveFileName(currentGraphName.replace(/[^a-zA-Z0-9_-]/g, '_'));
-      return;
-    }
-
-    try {
-      const filename = currentGraphPath.split('/').pop() || 'graph.graph.json';
-      await graphStorage.save(nodes, edges, filename, { name: currentGraphName });
-      setHasUnsavedChanges(false);
-      console.log('[NodeEditor] Graph saved:', currentGraphPath);
-    } catch (e) {
-      console.error('[NodeEditor] Failed to save graph:', e);
-      alert('Failed to save graph: ' + (e instanceof Error ? e.message : String(e)));
-    }
-    setShowFileMenu(false);
-  }, [projectPath, currentGraphPath, currentGraphName, nodes, edges]);
-
   const handleSaveAs = useCallback(async (filename: string) => {
     if (!projectPath) {
       alert('Please open a project first');
@@ -369,16 +414,15 @@ export function NodeEditor() {
 
     try {
       const path = await graphStorage.save(nodes, edges, fullFilename, { name: filename });
-      setCurrentGraphPath(path);
-      setCurrentGraphName(filename);
-      setHasUnsavedChanges(false);
+      setCurrentGraph(filename, path);
+      markSaved();
       setShowSaveDialog(false);
       console.log('[NodeEditor] Graph saved as:', path);
     } catch (e) {
       console.error('[NodeEditor] Failed to save graph:', e);
       alert('Failed to save graph: ' + (e instanceof Error ? e.message : String(e)));
     }
-  }, [projectPath, nodes, edges]);
+  }, [projectPath, nodes, edges, setCurrentGraph, markSaved]);
 
   const handleOpenLoadDialog = useCallback(async () => {
     if (!projectPath) {
@@ -401,19 +445,14 @@ export function NodeEditor() {
 
     try {
       const { graph, nodes: loadedNodes, edges: loadedEdges } = await graphStorage.load(entry.path);
-      setNodes(loadedNodes);
-      setEdges(loadedEdges);
-      setCurrentGraphName(graph.name);
-      setCurrentGraphPath(entry.path);
-      setHasUnsavedChanges(false);
-      setNodeIdCounter(Math.max(...loadedNodes.map((n) => parseInt(n.id) || 0), 0) + 1);
+      loadGraph(loadedNodes, loadedEdges, graph.name, entry.path);
       setShowLoadDialog(false);
       console.log('[NodeEditor] Graph loaded:', entry.path);
     } catch (e) {
       console.error('[NodeEditor] Failed to load graph:', e);
       alert('Failed to load graph: ' + (e instanceof Error ? e.message : String(e)));
     }
-  }, [hasUnsavedChanges, setNodes, setEdges]);
+  }, [hasUnsavedChanges, loadGraph]);
 
   const handleDelete = useCallback(async (entry: GraphListEntry) => {
     if (!confirm(`Delete "${entry.name}"?`)) return;
@@ -429,6 +468,26 @@ export function NodeEditor() {
       console.error('[NodeEditor] Failed to delete graph:', e);
     }
   }, [currentGraphPath, handleNewGraph]);
+
+  // Listen for DOM events to open a graph file (same-window communication)
+  useEffect(() => {
+    const handleOpenGraph = async (e: CustomEvent<{ path: string }>) => {
+      const { path } = e.detail;
+      console.log('[NodeEditor] Opening graph from file:', path);
+
+      try {
+        const { graph, nodes: loadedNodes, edges: loadedEdges } = await graphStorage.load(path);
+        loadGraph(loadedNodes, loadedEdges, graph.name, path);
+        console.log('[NodeEditor] Graph loaded from file:', path);
+      } catch (err) {
+        console.error('[NodeEditor] Failed to load graph from file:', err);
+        alert('Failed to load graph: ' + (err instanceof Error ? err.message : String(err)));
+      }
+    };
+
+    window.addEventListener('node-editor-open-graph', handleOpenGraph as EventListener);
+    return () => window.removeEventListener('node-editor-open-graph', handleOpenGraph as EventListener);
+  }, [loadGraph]);
 
   // Handle selection changes
   const onSelectionChange: OnSelectionChangeFunc = useCallback(({ nodes: selectedNodes }) => {
@@ -475,9 +534,9 @@ export function NodeEditor() {
         data: { nodeTypeId: nodeType.id } as CustomNodeData,
       };
       setNodes((nds) => [...nds, newNode]);
-      setNodeIdCounter((c) => c + 1);
+      setNodeIdCounter(nodeIdCounter + 1);
     },
-    [nodeIdCounter, setNodes]
+    [nodeIdCounter, setNodes, setNodeIdCounter]
   );
 
   // Handle drop from palette

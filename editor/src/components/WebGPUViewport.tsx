@@ -110,7 +110,7 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
   const lightingState = useEngineState((s) => s.lighting)
   const environmentState = useEngineState((s) => s.environment)
 
-  // Post-processing settings
+  // Post-processing settings ref (for render loop)
   const globalPostProcess = useEngineState((s) => s.renderPipeline.globalPostProcess)
   const globalPostProcessRef = useRef(globalPostProcess)
   globalPostProcessRef.current = globalPostProcess

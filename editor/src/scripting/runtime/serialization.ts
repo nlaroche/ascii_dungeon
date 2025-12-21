@@ -595,14 +595,28 @@ function reactFlowNodeToGraphNode(node: ReactFlowNode): GraphNode {
     position: [node.position.x, node.position.y] as [number, number],
   }
 
-  const rfType = node.type || ''
+  // Use nodeTypeId from data if type is "custom", otherwise use type directly
+  const rfType = (node.type === 'custom' && node.data?.nodeTypeId)
+    ? (node.data.nodeTypeId as string)
+    : (node.type || '')
 
   // Signal nodes (event nodes)
-  if (rfType.startsWith('on-') || rfType === 'Init' || rfType === 'Update' || rfType === 'Dispose') {
+  // Map common node type IDs to their signal names
+  const signalMap: Record<string, string> = {
+    'on-start': 'Init',
+    'on-update': 'Update',
+    'on-dispose': 'Dispose',
+    'Init': 'Init',
+    'Update': 'Update',
+    'Dispose': 'Dispose',
+  }
+
+  if (rfType.startsWith('on-') || signalMap[rfType]) {
+    const signalName = signalMap[rfType] || rfType
     return {
       ...base,
       type: 'signal',
-      signal: rfType,
+      signal: signalName,
     }
   }
 
@@ -661,6 +675,51 @@ function reactFlowNodeToGraphNode(node: ReactFlowNode): GraphNode {
     }
   }
 
+  // Built-in action nodes (translate, print, move-entity, etc.)
+  const builtinActions = [
+    'translate', 'move-entity', 'print', 'log', 'spawn-entity', 'destroy-entity',
+    'play-sound', 'play-animation', 'set-property', 'get-property',
+    'emit-signal', 'add-component', 'remove-component',
+  ]
+
+  // Built-in data nodes (random, compare, get-self, etc.)
+  const builtinDataNodes = [
+    'random', 'compare', 'get-self', 'get-position', 'get-property',
+    'math-add', 'math-subtract', 'math-multiply', 'math-divide',
+    'distance', 'direction', 'normalize',
+  ]
+
+  // Extract inputs correctly - they may be nested in data.inputs
+  const extractInputs = (data: Record<string, unknown>): Record<string, unknown> => {
+    // If data has an 'inputs' property that's an object, use that
+    if (data.inputs && typeof data.inputs === 'object' && !Array.isArray(data.inputs)) {
+      return data.inputs as Record<string, unknown>
+    }
+    // Otherwise filter out nodeTypeId and use the rest
+    const { nodeTypeId, ...rest } = data
+    return rest
+  }
+
+  if (builtinActions.includes(rfType)) {
+    return {
+      ...base,
+      type: 'action',
+      component: 'Builtin',
+      method: rfType,
+      inputs: extractInputs(node.data),
+    }
+  }
+
+  if (builtinDataNodes.includes(rfType)) {
+    return {
+      ...base,
+      type: 'action',
+      component: '',
+      method: rfType,
+      inputs: extractInputs(node.data),
+    }
+  }
+
   // Default: Action node with component.method format
   const [component, method] = rfType.includes('.') ? rfType.split('.') : ['', rfType]
   return {
@@ -668,6 +727,6 @@ function reactFlowNodeToGraphNode(node: ReactFlowNode): GraphNode {
     type: 'action',
     component: component || node.data.component as string || '',
     method: method || '',
-    inputs: node.data,
+    inputs: extractInputs(node.data),
   }
 }

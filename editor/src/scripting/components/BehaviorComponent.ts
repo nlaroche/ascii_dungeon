@@ -43,10 +43,10 @@ export class BehaviorComponent extends Component {
   // ─────────────────────────────────────────────────────────────────────────
 
   @property({
-    type: 'string',
-    label: 'Graph ID',
+    type: 'graphPicker',
+    label: 'Graph',
     group: 'Graph',
-    tooltip: 'ID of the logic graph to execute'
+    tooltip: 'Select a logic graph to execute'
   })
   graphId: string = ''
 
@@ -101,6 +101,7 @@ export class BehaviorComponent extends Component {
   private isRunning: boolean = false
   private updateTimer: number = 0
   private updateInterval: number = 0
+  private _updateCount: number = 0  // Debug counter
 
   // Component bridge - maps component instances for action calls
   private componentBridge: Map<string, ComponentInstance> = new Map()
@@ -123,6 +124,9 @@ export class BehaviorComponent extends Component {
     description: 'Load a logic graph by ID'
   })
   loadGraph(graphId: string): boolean {
+    console.log(`[Behavior] loadGraph called with: "${graphId}"`)
+    console.log(`[Behavior] Registry has graphs:`, BehaviorGraphRegistry.getAll().map(g => g.graphId))
+
     // Get graph from registry (would come from asset system)
     const graph = BehaviorGraphRegistry.get(graphId)
     if (!graph) {
@@ -131,6 +135,7 @@ export class BehaviorComponent extends Component {
       return false
     }
 
+    console.log(`[Behavior] Found graph with ${graph.nodes.length} nodes, ${graph.edges.length} edges`)
     this.graph = graph
     this.graphId = graphId
     return this.initializeRuntime()
@@ -273,13 +278,22 @@ export class BehaviorComponent extends Component {
 
   @lifecycle('Execute:Init')
   onInit(): void {
+    console.log(`[Behavior] onInit called for entity ${this.node?.id}, graphId=${this.graphId}, autoStart=${this.autoStart}`)
+
     // Build component bridge from sibling components
     this.buildComponentBridge()
 
     // Auto-load and start if configured
     if (this.graphId && this.autoStart) {
-      this.loadGraph(this.graphId)
-      this.start()
+      console.log(`[Behavior] Loading graph: ${this.graphId}`)
+      const loaded = this.loadGraph(this.graphId)
+      console.log(`[Behavior] Graph loaded: ${loaded}`)
+      if (loaded) {
+        this.start()
+        console.log(`[Behavior] Graph started, isRunning=${this.isRunning}`)
+      }
+    } else {
+      console.log(`[Behavior] Skipping auto-load: graphId=${this.graphId}, autoStart=${this.autoStart}`)
     }
   }
 
@@ -296,8 +310,14 @@ export class BehaviorComponent extends Component {
    * Called each frame - triggers Update signal
    */
   onUpdate(deltaTime: number): void {
-    if (!this.isRunning || !this.runtime || !this.context) return
-    if (!this.receiveUpdates) return
+    // Debug: log first few updates
+    if (this._updateCount < 3) {
+      console.log(`[Behavior] onUpdate called for ${this.node?.id}, dt=${deltaTime.toFixed(4)}, isRunning=${this.isRunning}, receiveUpdates=${this.receiveUpdates}`)
+      this._updateCount++
+    }
+
+    if (!this.isRunning || !this.receiveUpdates) return
+    if (!this.runtime || !this.context) return
 
     // Rate limiting
     if (this.updateInterval > 0) {

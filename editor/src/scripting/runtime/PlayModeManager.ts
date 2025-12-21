@@ -6,8 +6,22 @@
 import { RuntimeManager, Runtime } from './RuntimeManager'
 import { GameEventBus, createGameEvent } from './events'
 import { GlobalVariables } from './variables'
-import { BehaviorComponent, ComponentInstanceRegistry } from '../components/BehaviorComponent'
+import { BehaviorComponent, ComponentInstanceRegistry, BehaviorGraphRegistry } from '../components/BehaviorComponent'
+import type { LogicGraph, VariableDef } from './graph'
+import { PlayerControllerComponent } from '../components/PlayerControllerComponent'
+import { graphStorage } from './GraphStorage'
+import { reactFlowToGraph } from './serialization'
+import { Scene } from './SceneManager'
 import type { Node, EntityMaps, NormalizedNode, NormalizedComponent } from '../../stores/engineState'
+
+// Runtime component interface for script components
+interface RuntimeComponent {
+  setStoreAccessor: (accessor: () => { entities: { components: Record<string, { properties?: Record<string, unknown> }> } }) => void
+  onInit?: () => void
+  onUpdate?: (deltaTime: number) => void
+  onDispose?: () => void
+  node?: Node
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -74,6 +88,9 @@ export class PlayModeManager {
   // Active behavior instances
   private activeBehaviors: Map<string, BehaviorComponent> = new Map()
 
+  // Active runtime script components (PlayerController, WanderAI, etc.)
+  private activeRuntimeComponents: Map<string, RuntimeComponent> = new Map()
+
   // Listeners for state changes
   private listeners: Set<PlayModeListener> = new Set()
 
@@ -82,7 +99,7 @@ export class PlayModeManager {
   private stepsRemaining: number = 0
 
   // Store reference for state access (injected)
-  private getStoreState: (() => { scene: { rootNode: Node }; entities: EntityMaps }) | null = null
+  private getStoreState: (() => { scene: { rootNode: Node }; entities: EntityMaps; project: { root: string } }) | null = null
   private setStoreState: ((updates: Partial<{ scene: { rootNode: Node } }>) => void) | null = null
 
   static getInstance(): PlayModeManager {
@@ -104,11 +121,20 @@ export class PlayModeManager {
    * Inject store accessors for state management
    */
   setStoreAccessors(
-    getState: () => { scene: { rootNode: Node }; entities: EntityMaps },
-    setState: (updates: Partial<{ scene: { rootNode: Node } }>) => void
+    getState: () => { scene: { rootNode: Node }; entities: EntityMaps; project: { root: string } },
+    setState: (updates: Partial<{ scene: { rootNode: Node } }>) => void,
+    setPath?: (path: (string | number)[], value: unknown) => void
   ): void {
     this.getStoreState = getState
     this.setStoreState = setState
+
+    // Also set up the Scene manager with store access for entity transforms
+    if (setPath) {
+      Scene.setStoreAccessor({
+        getState: () => getState() as { entities: { nodes: Record<string, { components: string[] }>; components: Record<string, { script: string; properties?: Record<string, unknown> }> } },
+        setPath
+      })
+    }
   }
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -149,8 +175,14 @@ export class PlayModeManager {
     this.state.frameCount = 0
     this.state.elapsedTime = 0
 
+    // Load graph files from project into registry
+    await this.loadProjectGraphs()
+
     // Initialize all behavior components in the scene
     await this.initializeSceneBehaviors(rootNode)
+
+    // Initialize runtime script components (PlayerController, WanderAI, etc.)
+    this.initializeRuntimeComponents(rootNode)
 
     // Start the runtime
     this.runtime.start()
@@ -185,6 +217,9 @@ export class PlayModeManager {
 
     // Dispose all behavior instances
     this.disposeSceneBehaviors()
+
+    // Dispose runtime script components
+    this.disposeRuntimeComponents()
 
     // Restore snapshot or apply changes
     if (!applyChanges && this.state.snapshot && this.setStoreState) {
@@ -391,6 +426,52 @@ export class PlayModeManager {
     }
   }
 
+  /**
+   * Load all graph files from the project's graphs/ folder into BehaviorGraphRegistry
+   */
+  private async loadProjectGraphs(): Promise<void> {
+    try {
+      // Get project root and set basePath for graphStorage
+      const projectRoot = this.getStoreState?.().project?.root
+      if (!projectRoot) {
+        console.warn('[PlayMode] No project root set, cannot load graphs')
+        return
+      }
+      graphStorage.setBasePath(projectRoot)
+
+      // List all graph files
+      const graphList = await graphStorage.list()
+      console.log(`[PlayMode] Loading ${graphList.length} graph files from ${projectRoot}...`)
+
+      for (const entry of graphList) {
+        try {
+          const { graph, nodes, edges } = await graphStorage.load(entry.path)
+
+          // Convert saved graph format to LogicGraph
+          const logicGraph = reactFlowToGraph(nodes, edges, graph.id)
+
+          // Add variables from the saved graph
+          if (graph.variables && Array.isArray(graph.variables)) {
+            logicGraph.variables = graph.variables.map(v => ({
+              name: v.name,
+              type: v.type as VariableDef['type'],
+              scope: v.scope,
+              default: v.defaultValue,
+            }))
+          }
+
+          // Register in the behavior graph registry
+          BehaviorGraphRegistry.register(logicGraph)
+          console.log(`[PlayMode] Loaded graph: ${graph.name} (${graph.id})`)
+        } catch (e) {
+          console.warn(`[PlayMode] Failed to load graph ${entry.path}:`, e)
+        }
+      }
+    } catch (e) {
+      console.warn('[PlayMode] Failed to list project graphs:', e)
+    }
+  }
+
   private async initializeSceneBehaviors(rootNode: Node): Promise<void> {
     // Walk the tree and find all nodes with Behavior components
     const behaviorNodes = this.findBehaviorNodes(rootNode)
@@ -401,18 +482,37 @@ export class PlayModeManager {
       const behaviorComp = node.components.find(c => c.script === 'Behavior')
       if (!behaviorComp) continue
 
+      console.log(`[PlayMode] Initializing behavior for node: ${node.name} (${node.id})`)
+      console.log(`[PlayMode] Behavior component properties:`, behaviorComp.properties)
+
       // Create behavior instance
       try {
         const behavior = new BehaviorComponent()
-        behavior.setEntityId(node.id)
-        behavior.setGraphData(behaviorComp.properties.graph as Record<string, unknown>)
+
+        // Set node reference - this also calls onAttach internally
+        behavior._setNode(node)
+        console.log(`[PlayMode] Node reference set, node.id=${behavior.getNode()?.id}`)
+
+        // Check if this is a graphId reference or inline graph
+        if (behaviorComp.properties?.graphId) {
+          // Graph file reference - set properties and let onInit load it
+          behavior.graphId = behaviorComp.properties.graphId as string
+          behavior.autoStart = (behaviorComp.properties.autoStart as boolean) ?? true
+          behavior.receiveUpdates = (behaviorComp.properties.receiveUpdates as boolean) ?? true
+          console.log(`[PlayMode] Set graphId=${behavior.graphId}, autoStart=${behavior.autoStart}`)
+        } else if (behaviorComp.properties?.graph) {
+          // Inline graph definition - convert and load
+          const inlineGraph = behaviorComp.properties.graph as LogicGraph
+          behavior.loadInlineGraph(inlineGraph)
+          console.log(`[PlayMode] Loaded inline graph`)
+        } else {
+          console.log(`[PlayMode] No graphId or graph property found`)
+        }
 
         // Register with runtime
         this.runtime.registerBehavior(behavior)
         this.activeBehaviors.set(node.id, behavior)
-
-        // Call lifecycle: Attach
-        behavior.onAttach?.()
+        console.log(`[PlayMode] Behavior registered`)
       } catch (error) {
         console.error(`[PlayMode] Failed to initialize behavior for ${node.id}:`, error)
       }
@@ -444,6 +544,7 @@ export class PlayModeManager {
   private findBehaviorNodes(node: Node): Node[] {
     const results: Node[] = []
 
+    // Find nodes with Behavior components
     const hasBehavior = node.components.some(c => c.script === 'Behavior')
     if (hasBehavior) {
       results.push(node)
@@ -460,6 +561,15 @@ export class PlayModeManager {
     this.state.frameCount++
     this.state.elapsedTime += deltaTime
 
+    // Update runtime script components
+    for (const [id, component] of this.activeRuntimeComponents) {
+      try {
+        component.onUpdate?.(deltaTime)
+      } catch (error) {
+        console.error(`[PlayMode] Runtime component update error (${id}):`, error)
+      }
+    }
+
     // Handle step mode
     if (this.stepRequested) {
       this.stepsRemaining--
@@ -467,9 +577,90 @@ export class PlayModeManager {
         this.stepRequested = false
         this.runtime.pause()
         this.state.status = 'paused'
-        this.notifyListeners()
       }
     }
+
+    // Notify listeners of time/frame updates
+    this.notifyListeners()
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Runtime Components (PlayerController, WanderAI, etc.)
+  // ─────────────────────────────────────────────────────────────────────────
+
+  private initializeRuntimeComponents(rootNode: Node): void {
+    const runtimeNodes = this.findRuntimeComponentNodes(rootNode)
+    console.log(`[PlayMode] Found ${runtimeNodes.length} nodes with runtime components`)
+
+    for (const { node, scriptName, compData } of runtimeNodes) {
+      try {
+        let component: RuntimeComponent | null = null
+
+        // Create the appropriate component instance
+        switch (scriptName) {
+          case 'PlayerController': {
+            const pc = new PlayerControllerComponent()
+            // Copy properties from scene data
+            if (compData.properties) {
+              pc.moveSpeed = (compData.properties.moveSpeed as number) ?? 5
+              pc.gridSnap = (compData.properties.gridSnap as boolean) ?? true
+              pc.moveCooldown = (compData.properties.moveCooldown as number) ?? 0.15
+            }
+            component = pc
+            break
+          }
+          // Note: Behavior components are handled by initializeSceneBehaviors
+          // which uses the graph registry for visual scripting graphs
+        }
+
+        if (component) {
+          // Set node reference and store accessor
+          (component as { node?: Node }).node = node
+          component.setStoreAccessor(() => this.getStoreState!())
+
+          // Call init lifecycle
+          component.onInit?.()
+
+          // Store the active component
+          const key = `${node.id}:${scriptName}`
+          this.activeRuntimeComponents.set(key, component)
+          console.log(`[PlayMode] Initialized ${scriptName} on ${node.name}`)
+        }
+      } catch (error) {
+        console.error(`[PlayMode] Failed to initialize ${scriptName} on ${node.name}:`, error)
+      }
+    }
+  }
+
+  private disposeRuntimeComponents(): void {
+    for (const [key, component] of this.activeRuntimeComponents) {
+      try {
+        component.onDispose?.()
+      } catch (error) {
+        console.error(`[PlayMode] Runtime component dispose error (${key}):`, error)
+      }
+    }
+    this.activeRuntimeComponents.clear()
+  }
+
+  private findRuntimeComponentNodes(node: Node): Array<{ node: Node; scriptName: string; compData: { properties?: Record<string, unknown> } }> {
+    const results: Array<{ node: Node; scriptName: string; compData: { properties?: Record<string, unknown> } }> = []
+
+    // Check for runtime script components (game-specific scripts)
+    // Note: Behavior components use visual scripting and are handled separately
+    const runtimeScripts = ['PlayerController']
+    for (const comp of node.components) {
+      if (runtimeScripts.includes(comp.script)) {
+        results.push({ node, scriptName: comp.script, compData: comp })
+      }
+    }
+
+    // Recurse into children
+    for (const child of node.children) {
+      results.push(...this.findRuntimeComponentNodes(child))
+    }
+
+    return results
   }
 }
 

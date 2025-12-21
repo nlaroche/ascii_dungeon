@@ -1,5 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // Custom Node Component - Renders nodes in the flow editor
+// Clean, readable design with consistent styling
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { memo, useMemo } from 'react';
@@ -18,55 +19,73 @@ export interface CustomNodeData extends Record<string, unknown> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Port Component
+// Port Row Component - Single port with label
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface PortProps {
+interface PortRowProps {
   port: NodePortDefinition;
   type: 'input' | 'output';
-  index: number;
-  total: number;
+  value?: unknown;
 }
 
-function Port({ port, type, index, total }: PortProps) {
+function PortRow({ port, type, value }: PortRowProps) {
   const theme = useTheme();
   const color = PORT_COLORS[port.type] || PORT_COLORS.any;
   const isFlow = port.type === 'flow';
 
-  // Calculate vertical position based on index
-  const topPercent = total === 1 ? 50 : 20 + (index / (total - 1)) * 60;
-
   return (
-    <>
+    <div
+      className="relative flex items-center gap-2 py-0.5"
+      style={{
+        justifyContent: type === 'input' ? 'flex-start' : 'flex-end',
+        paddingLeft: type === 'input' ? 12 : 4,
+        paddingRight: type === 'output' ? 12 : 4,
+      }}
+    >
       <Handle
         type={type === 'input' ? 'target' : 'source'}
         position={type === 'input' ? Position.Left : Position.Right}
         id={port.id}
         style={{
-          top: `${topPercent}%`,
-          width: isFlow ? 10 : 8,
-          height: isFlow ? 10 : 8,
+          position: 'absolute',
+          [type === 'input' ? 'left' : 'right']: -4,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          width: isFlow ? 8 : 6,
+          height: isFlow ? 8 : 6,
           backgroundColor: isFlow ? 'transparent' : color,
-          border: `2px solid ${color}`,
-          borderRadius: isFlow ? 2 : '50%',
+          border: `1.5px solid ${color}`,
+          borderRadius: isFlow ? 1 : '50%',
         }}
       />
-      {port.label && (
-        <div
-          className="absolute text-[10px] whitespace-nowrap"
-          style={{
-            top: `${topPercent}%`,
-            transform: 'translateY(-50%)',
-            [type === 'input' ? 'left' : 'right']: 16,
-            color: theme.textMuted,
-          }}
-        >
-          {port.label}
-          {port.required && <span style={{ color: theme.error }}>*</span>}
-        </div>
+      {type === 'input' ? (
+        <>
+          <span className="text-[10px]" style={{ color: theme.textMuted }}>
+            {port.label || port.id}
+            {port.required && <span style={{ color: theme.error }}> *</span>}
+          </span>
+          {value !== undefined && (
+            <span className="text-[10px] ml-auto" style={{ color: theme.accent }}>
+              {formatValue(value)}
+            </span>
+          )}
+        </>
+      ) : (
+        <span className="text-[10px]" style={{ color: theme.textMuted }}>
+          {port.label || port.id}
+        </span>
       )}
-    </>
+    </div>
   );
+}
+
+// Format value for display
+function formatValue(value: unknown): string {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value.length > 12 ? value.slice(0, 12) + '…' : value;
+  if (typeof value === 'number') return String(Math.round(value * 100) / 100);
+  if (typeof value === 'boolean') return value ? '✓' : '✗';
+  return String(value).slice(0, 10);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -83,87 +102,97 @@ function CustomNodeComponent({ data, selected }: NodeProps) {
       <div
         className="px-3 py-2 rounded text-xs"
         style={{
-          backgroundColor: theme.error,
-          color: '#fff',
+          backgroundColor: '#1a1a1a',
+          border: `2px solid ${theme.error}`,
+          color: theme.error,
         }}
       >
-        Unknown: {nodeData.nodeTypeId}
+        ⚠ Unknown: {nodeData.nodeTypeId}
       </div>
     );
   }
 
-  const borderColor = selected ? theme.accent : nodeType.color;
+  // Separate flow and data ports
+  const inputFlowPorts = nodeType.inputs.filter(p => p.type === 'flow');
+  const inputDataPorts = nodeType.inputs.filter(p => p.type !== 'flow');
+  const outputFlowPorts = nodeType.outputs.filter(p => p.type === 'flow');
+  const outputDataPorts = nodeType.outputs.filter(p => p.type !== 'flow');
 
   return (
     <div
-      className="relative rounded-lg overflow-hidden"
+      className="rounded overflow-hidden"
       style={{
-        minWidth: 140,
-        backgroundColor: theme.bgPanel,
-        border: `2px solid ${borderColor}`,
-        boxShadow: selected ? `0 0 0 2px ${theme.accent}40` : 'none',
+        minWidth: 120,
+        maxWidth: 200,
+        backgroundColor: '#1e1e1e',
+        border: `1.5px solid ${selected ? theme.accent : '#333'}`,
+        boxShadow: selected ? `0 0 8px ${theme.accent}40` : '0 2px 4px rgba(0,0,0,0.3)',
       }}
     >
       {/* Header */}
       <div
-        className="px-3 py-1.5 flex items-center gap-2"
+        className="px-2 py-1 flex items-center gap-1.5"
         style={{
-          backgroundColor: nodeType.color + '20',
-          borderBottom: `1px solid ${theme.border}`,
+          backgroundColor: '#252525',
+          borderBottom: '1px solid #333',
         }}
       >
-        <span style={{ color: nodeType.color }}>{nodeType.icon}</span>
-        <span className="text-xs font-medium" style={{ color: theme.text }}>
+        {/* Category color indicator */}
+        <div
+          className="w-1.5 h-3 rounded-sm"
+          style={{ backgroundColor: nodeType.color }}
+        />
+        <span className="text-[10px]" style={{ color: nodeType.color }}>
+          {nodeType.icon}
+        </span>
+        <span className="text-[11px] font-medium truncate" style={{ color: '#e0e0e0' }}>
           {nodeData.label || nodeType.name}
         </span>
       </div>
 
-      {/* Body with ports */}
-      <div
-        className="relative px-3 py-3"
-        style={{
-          minHeight: Math.max(nodeType.inputs.length, nodeType.outputs.length) * 24 + 16,
-        }}
-      >
-        {/* Input ports */}
-        {nodeType.inputs.map((port, i) => (
-          <Port
-            key={port.id}
-            port={port}
-            type="input"
-            index={i}
-            total={nodeType.inputs.length}
-          />
-        ))}
-
-        {/* Output ports */}
-        {nodeType.outputs.map((port, i) => (
-          <Port
-            key={port.id}
-            port={port}
-            type="output"
-            index={i}
-            total={nodeType.outputs.length}
-          />
-        ))}
-
-        {/* Input values (for data nodes) */}
-        {nodeData.inputs && Object.keys(nodeData.inputs).length > 0 && (
-          <div className="space-y-1 mt-1">
-            {Object.entries(nodeData.inputs).map(([key, value]) => (
-              <div key={key} className="text-[10px]" style={{ color: theme.textMuted }}>
-                {key}: <span style={{ color: theme.accent }}>{String(value)}</span>
-              </div>
+      {/* Flow ports row (if any) */}
+      {(inputFlowPorts.length > 0 || outputFlowPorts.length > 0) && (
+        <div
+          className="flex justify-between px-1"
+          style={{ backgroundColor: '#1a1a1a', borderBottom: '1px solid #2a2a2a' }}
+        >
+          <div>
+            {inputFlowPorts.map((port) => (
+              <PortRow key={port.id} port={port} type="input" />
             ))}
           </div>
-        )}
-      </div>
+          <div>
+            {outputFlowPorts.map((port) => (
+              <PortRow key={port.id} port={port} type="output" />
+            ))}
+          </div>
+        </div>
+      )}
 
-      {/* Category indicator */}
-      <div
-        className="absolute bottom-0 left-0 right-0 h-0.5"
-        style={{ backgroundColor: nodeType.color }}
-      />
+      {/* Data ports */}
+      {(inputDataPorts.length > 0 || outputDataPorts.length > 0) && (
+        <div className="py-1">
+          {/* Input data ports */}
+          {inputDataPorts.map((port) => (
+            <PortRow
+              key={port.id}
+              port={port}
+              type="input"
+              value={nodeData.inputs?.[port.id]}
+            />
+          ))}
+          {/* Output data ports */}
+          {outputDataPorts.map((port) => (
+            <PortRow key={port.id} port={port} type="output" />
+          ))}
+        </div>
+      )}
+
+      {/* Empty node body spacer */}
+      {inputDataPorts.length === 0 && outputDataPorts.length === 0 &&
+       inputFlowPorts.length === 0 && outputFlowPorts.length === 0 && (
+        <div className="py-2" />
+      )}
     </div>
   );
 }

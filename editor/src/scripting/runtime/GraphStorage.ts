@@ -194,7 +194,9 @@ export class GraphStorage {
     edges: Edge[]
   }> {
     const fs = await getFileSystem()
-    const path = filename.includes('/') ? filename : `${this.basePath}/${filename}`
+    // Check for both forward and backward slashes (Windows compatibility)
+    const isAbsolutePath = filename.includes('/') || filename.includes('\\')
+    const path = isAbsolutePath ? filename : `${this.basePath}/${filename}`
 
     const content = await fs.readFile(path)
     const graph = JSON.parse(content) as SavedGraph
