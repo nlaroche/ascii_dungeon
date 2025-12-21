@@ -18,6 +18,7 @@ import {
   EventPhase,
 } from './events'
 import { SeededRandom } from './lifecycle'
+import { executeScriptNode, NodeExecutorContext } from './nodeExecutors'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Graph Data Types
@@ -584,6 +585,38 @@ export class GraphRuntime {
     // Handle built-in actions
     if (node.component === 'Builtin') {
       return this.executeBuiltinAction(node.method, resolvedInputs, ctx)
+    }
+
+    // Handle Script nodes
+    if (node.component === 'Script' && node.method === 'execute') {
+      const code = resolvedInputs.code as string || ''
+      if (!code) {
+        console.warn('[Graph] Script node has no code')
+        return null
+      }
+
+      // Build executor context
+      const execCtx: NodeExecutorContext = {
+        nodeId: node.id,
+        selfEntityId: ctx.nodeId,
+        variables: {
+          ...ctx.globalVars,
+          ...ctx.sceneVars,
+          ...ctx.nodeVars,
+          ...ctx.localVars,
+        },
+      }
+
+      // Create emit function for the script
+      const emitSignal = (signal: string, data?: ExprValue) => {
+        if (ctx.eventBus) {
+          ctx.eventBus.emit(signal, data)
+        }
+      }
+
+      // Execute the script code
+      const result = await executeScriptNode(code, resolvedInputs, execCtx, emitSignal)
+      return result
     }
 
     const component = ctx.components.get(node.component)

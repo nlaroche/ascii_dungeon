@@ -6,7 +6,7 @@
 import { memo, useMemo } from 'react';
 import { Handle, Position, NodeProps } from '@xyflow/react';
 import { useTheme } from '../../stores/useEngineState';
-import { getNodeType, PORT_COLORS, NodePortDefinition } from '../../lib/nodes/types';
+import { getNodeType, PORT_COLORS, NodePortDefinition, ScriptNodeData } from '../../lib/nodes/types';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -112,11 +112,33 @@ function CustomNodeComponent({ data, selected }: NodeProps) {
     );
   }
 
+  // For Script nodes, merge custom inputs/outputs with base ports
+  const isScriptNode = nodeData.nodeTypeId === 'script';
+  const scriptData = isScriptNode ? (nodeData as unknown as ScriptNodeData) : null;
+
+  // Get all inputs (base + custom for script nodes)
+  const allInputs = useMemo(() => {
+    const baseInputs = [...nodeType.inputs];
+    if (scriptData?.customInputs) {
+      return [...baseInputs, ...scriptData.customInputs];
+    }
+    return baseInputs;
+  }, [nodeType.inputs, scriptData?.customInputs]);
+
+  // Get all outputs (base + custom for script nodes)
+  const allOutputs = useMemo(() => {
+    const baseOutputs = [...nodeType.outputs];
+    if (scriptData?.customOutputs) {
+      return [...baseOutputs, ...scriptData.customOutputs];
+    }
+    return baseOutputs;
+  }, [nodeType.outputs, scriptData?.customOutputs]);
+
   // Separate flow and data ports
-  const inputFlowPorts = nodeType.inputs.filter(p => p.type === 'flow');
-  const inputDataPorts = nodeType.inputs.filter(p => p.type !== 'flow');
-  const outputFlowPorts = nodeType.outputs.filter(p => p.type === 'flow');
-  const outputDataPorts = nodeType.outputs.filter(p => p.type !== 'flow');
+  const inputFlowPorts = allInputs.filter(p => p.type === 'flow');
+  const inputDataPorts = allInputs.filter(p => p.type !== 'flow');
+  const outputFlowPorts = allOutputs.filter(p => p.type === 'flow');
+  const outputDataPorts = allOutputs.filter(p => p.type !== 'flow');
 
   return (
     <div

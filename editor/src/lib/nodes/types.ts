@@ -1831,7 +1831,70 @@ export const BUILT_IN_NODES: NodeTypeDefinition[] = [
     inputs: [{ id: 'value', label: 'Value', type: 'any', required: true }],
     outputs: [{ id: 'result', label: 'Result', type: 'boolean' }],
   },
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Script Node - Custom TypeScript code with flexible signals/inputs/outputs
+  // ─────────────────────────────────────────────────────────────────────────
+  {
+    id: 'script',
+    name: 'Script',
+    category: 'custom',
+    description: 'Custom TypeScript code block with configurable inputs, outputs, and signal handlers',
+    icon: '{ }',
+    color: '#6366f1',
+    inputs: [
+      { id: 'flow', label: '', type: 'flow' },
+    ],
+    outputs: [
+      { id: 'flow', label: '', type: 'flow' },
+    ],
+    // Script nodes have additional properties stored in node.data:
+    // - code: string (the TypeScript code)
+    // - customInputs: NodePortDefinition[] (user-defined inputs)
+    // - customOutputs: NodePortDefinition[] (user-defined outputs)
+    // - listenSignals: string[] (signals this script listens to)
+    // - emitSignals: string[] (signals this script can emit)
+  },
 ];
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Script Node Extended Definition
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface ScriptNodeData {
+  nodeTypeId: 'script';
+  code: string;
+  customInputs: NodePortDefinition[];
+  customOutputs: NodePortDefinition[];
+  listenSignals: string[];
+  emitSignals: string[];
+}
+
+export function createDefaultScriptData(): ScriptNodeData {
+  return {
+    nodeTypeId: 'script',
+    code: `// Custom script node
+// Available in scope:
+//   inputs: Record<string, any> - resolved input values
+//   ctx: GraphExecutionContext - execution context
+//   self: string - entity ID this behavior is attached to
+//   emit(signal: string, data?: any) - emit a custom signal
+//   Scene, Events, Timers - built-in APIs
+
+// Example: Move entity when a custom signal is received
+// if (inputs.trigger) {
+//   Scene.translate(self, inputs.dx ?? 1, inputs.dy ?? 0);
+//   emit('moved', { entity: self });
+// }
+
+return inputs;
+`,
+    customInputs: [],
+    customOutputs: [],
+    listenSignals: [],
+    emitSignals: [],
+  };
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Node Registry

@@ -20,6 +20,8 @@ import {
   OnSelectionChangeFunc,
   NodeChange,
   EdgeChange,
+  useReactFlow,
+  ReactFlowProvider,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 
@@ -39,6 +41,7 @@ import {
   NodeCategory,
   PORT_COLORS,
 } from '../../lib/nodes/types';
+import { autoLayout } from './autoLayout';
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -62,10 +65,15 @@ interface NodePaletteProps {
   onAddNode: (nodeType: NodeTypeDefinition, position: { x: number; y: number }) => void;
 }
 
-function NodePalette({ onAddNode: _ }: NodePaletteProps) {
+// Global state for custom drag (shared between palette and canvas)
+let draggedNodeType: NodeTypeDefinition | null = null;
+let dragPreviewElement: HTMLDivElement | null = null;
+
+function NodePalette({ onAddNode }: NodePaletteProps) {
   const theme = useTheme();
   const [selectedCategory, setSelectedCategory] = useState<NodeCategory>('event');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isDragging, setIsDragging] = useState(false);
 
   const categories: NodeCategory[] = ['event', 'action', 'condition', 'data', 'flow', 'custom'];
 
@@ -87,9 +95,60 @@ function NodePalette({ onAddNode: _ }: NodePaletteProps) {
     return nodes;
   }, [selectedCategory, searchQuery]);
 
-  const handleDragStart = (e: DragEvent, nodeType: NodeTypeDefinition) => {
-    e.dataTransfer.setData('application/reactflow', JSON.stringify(nodeType));
-    e.dataTransfer.effectAllowed = 'move';
+  // Custom mouse-based drag (works in Tauri floating windows)
+  const handleMouseDown = (e: React.MouseEvent, nodeType: NodeTypeDefinition) => {
+    e.preventDefault();
+    console.log('[NodePalette] Mouse drag start:', nodeType.id);
+
+    draggedNodeType = nodeType;
+    setIsDragging(true);
+
+    // Create drag preview
+    const preview = document.createElement('div');
+    preview.className = 'fixed pointer-events-none z-[9999] px-3 py-2 rounded text-xs';
+    preview.style.cssText = `
+      background: ${theme.bgPanel};
+      border: 2px solid ${nodeType.color};
+      color: ${theme.text};
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+      transform: translate(-50%, -50%);
+    `;
+    preview.innerHTML = `<span style="color:${nodeType.color}">${nodeType.icon}</span> ${nodeType.name}`;
+    preview.style.left = `${e.clientX}px`;
+    preview.style.top = `${e.clientY}px`;
+    document.body.appendChild(preview);
+    dragPreviewElement = preview;
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (dragPreviewElement) {
+        dragPreviewElement.style.left = `${moveEvent.clientX}px`;
+        dragPreviewElement.style.top = `${moveEvent.clientY}px`;
+      }
+    };
+
+    const handleMouseUp = (upEvent: MouseEvent) => {
+      console.log('[NodePalette] Mouse drag end at:', upEvent.clientX, upEvent.clientY);
+
+      // Clean up
+      if (dragPreviewElement) {
+        dragPreviewElement.remove();
+        dragPreviewElement = null;
+      }
+      setIsDragging(false);
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+
+      // Check if dropped on canvas - dispatch custom event
+      if (draggedNodeType) {
+        window.dispatchEvent(new CustomEvent('node-palette-drop', {
+          detail: { nodeType: draggedNodeType, x: upEvent.clientX, y: upEvent.clientY }
+        }));
+        draggedNodeType = null;
+      }
+    };
+
+    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mouseup', handleMouseUp);
   };
 
   return (
@@ -149,13 +208,13 @@ function NodePalette({ onAddNode: _ }: NodePaletteProps) {
           filteredNodes.map((nodeType) => (
             <div
               key={nodeType.id}
-              draggable
-              onDragStart={(e) => handleDragStart(e, nodeType)}
-              className="px-2 py-1.5 rounded cursor-grab transition-colors hover:opacity-80"
+              onMouseDown={(e) => handleMouseDown(e, nodeType)}
+              className="px-2 py-1.5 rounded cursor-grab transition-colors hover:opacity-80 select-none"
               style={{
-                backgroundColor: theme.bgHover,
+                backgroundColor: isDragging ? theme.bg : theme.bgHover,
                 borderLeft: `3px solid ${nodeType.color}`,
               }}
+              title="Drag onto canvas"
             >
               <div className="flex items-center gap-2">
                 <span style={{ color: nodeType.color }}>{nodeType.icon}</span>
@@ -179,7 +238,7 @@ function NodePalette({ onAddNode: _ }: NodePaletteProps) {
         className="px-2 py-1.5 text-[10px]"
         style={{ borderTop: `1px solid ${theme.border}`, color: theme.textDim }}
       >
-        Drag nodes onto the canvas
+        Drag nodes onto canvas
       </div>
     </div>
   );
@@ -189,10 +248,13 @@ function NodePalette({ onAddNode: _ }: NodePaletteProps) {
 // Main Node Editor Component
 // ─────────────────────────────────────────────────────────────────────────────
 
-export function NodeEditor() {
+// Inner component that can use useReactFlow hook
+function NodeEditorInner() {
   const theme = useTheme();
   const projectPath = useEngineState((s) => s.project.root);
   const reactFlowWrapper = useRef<HTMLDivElement>(null);
+  const reactFlowInstance = useReactFlow();
+  const { screenToFlowPosition } = reactFlowInstance;
 
   // Use zustand store for persistent state across window floating
   const {
@@ -469,6 +531,14 @@ export function NodeEditor() {
     }
   }, [currentGraphPath, handleNewGraph]);
 
+  // Auto-layout handler
+  const handleAutoLayout = useCallback(() => {
+    if (nodes.length === 0) return;
+    const layoutedNodes = autoLayout(nodes, edges);
+    setNodes(layoutedNodes);
+    setHasUnsavedChanges(true);
+  }, [nodes, edges, setNodes, setHasUnsavedChanges]);
+
   // Listen for DOM events to open a graph file (same-window communication)
   useEffect(() => {
     const handleOpenGraph = async (e: CustomEvent<{ path: string }>) => {
@@ -527,45 +597,88 @@ export function NodeEditor() {
   // Add a new node
   const addNode = useCallback(
     (nodeType: NodeTypeDefinition, position: { x: number; y: number }) => {
+      console.log('[NodeEditor] addNode called:', nodeType.id, 'at', position, 'counter:', nodeIdCounter);
       const newNode: Node = {
         id: String(nodeIdCounter),
         type: 'custom',
         position,
         data: { nodeTypeId: nodeType.id } as CustomNodeData,
       };
-      setNodes((nds) => [...nds, newNode]);
+      console.log('[NodeEditor] Creating node:', newNode);
+      setNodes((nds) => {
+        console.log('[NodeEditor] Current nodes:', nds.length, '-> adding new node');
+        return [...nds, newNode];
+      });
       setNodeIdCounter(nodeIdCounter + 1);
     },
     [nodeIdCounter, setNodes, setNodeIdCounter]
   );
 
-  // Handle drop from palette
-  const onDrop = useCallback(
-    (event: DragEvent) => {
-      event.preventDefault();
+  // Use native DOM event listeners for drag/drop (works better in Tauri)
+  useEffect(() => {
+    const wrapper = reactFlowWrapper.current;
+    if (!wrapper) return;
 
-      const data = event.dataTransfer.getData('application/reactflow');
-      if (!data) return;
+    let lastLogTime = 0;
 
-      const nodeType = JSON.parse(data) as NodeTypeDefinition;
+    const handleDragOver = (e: globalThis.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.dataTransfer) {
+        e.dataTransfer.dropEffect = 'move';
+      }
+      // Log once per second
+      if (Date.now() - lastLogTime > 1000) {
+        console.log('[NodeEditor] Native dragover event');
+        lastLogTime = Date.now();
+      }
+    };
 
-      // Get the position relative to the react flow container
-      const reactFlowBounds = reactFlowWrapper.current?.getBoundingClientRect();
-      if (!reactFlowBounds) return;
+    const handleDrop = (e: globalThis.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('[NodeEditor] Native drop event');
 
-      const position = {
-        x: event.clientX - reactFlowBounds.left - 70,
-        y: event.clientY - reactFlowBounds.top - 20,
-      };
+      const data = e.dataTransfer?.getData('application/reactflow');
+      console.log('[NodeEditor] Drop data:', data);
+      if (!data) {
+        console.log('[NodeEditor] No data in drop');
+        return;
+      }
 
-      addNode(nodeType, position);
-    },
-    [addNode]
-  );
+      try {
+        const nodeType = JSON.parse(data) as NodeTypeDefinition;
+        const position = screenToFlowPosition({
+          x: e.clientX,
+          y: e.clientY,
+        });
+        position.x -= 70;
+        position.y -= 20;
+        console.log('[NodeEditor] Adding node at:', position);
+        addNode(nodeType, position);
+      } catch (err) {
+        console.error('[NodeEditor] Error parsing drop data:', err);
+      }
+    };
 
+    // Add listeners with capture phase to intercept before React
+    wrapper.addEventListener('dragover', handleDragOver, true);
+    wrapper.addEventListener('drop', handleDrop, true);
+
+    return () => {
+      wrapper.removeEventListener('dragover', handleDragOver, true);
+      wrapper.removeEventListener('drop', handleDrop, true);
+    };
+  }, [screenToFlowPosition, addNode]);
+
+  // Keep React handlers as fallback
   const onDragOver = useCallback((event: DragEvent) => {
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
+  }, []);
+
+  const onDrop = useCallback((event: DragEvent) => {
+    event.preventDefault();
   }, []);
 
   // Custom edge style
@@ -583,7 +696,12 @@ export function NodeEditor() {
       <NodePalette onAddNode={addNode} />
 
       {/* Flow Canvas */}
-      <div ref={reactFlowWrapper} className="flex-1 h-full">
+      <div
+        ref={reactFlowWrapper}
+        className="flex-1 h-full"
+        onDrop={onDrop}
+        onDragOver={onDragOver}
+      >
         <ReactFlow
           nodes={nodes}
           edges={edges}
@@ -690,6 +808,22 @@ export function NodeEditor() {
 
               {/* Execution Controls */}
               <ExecutionControls nodes={nodes} edges={edges} graphRunner={graphRunner} />
+
+              {/* Auto Layout Button */}
+              <button
+                onClick={handleAutoLayout}
+                className="px-3 py-1.5 rounded text-xs flex items-center gap-1"
+                style={{
+                  backgroundColor: theme.bgPanel,
+                  border: `1px solid ${theme.border}`,
+                  color: theme.text,
+                }}
+                title="Auto-arrange nodes (layered layout)"
+                disabled={nodes.length === 0}
+              >
+                <span style={{ color: theme.accent }}>⊞</span>
+                Layout
+              </button>
 
               {/* Stats */}
               <div
@@ -928,6 +1062,15 @@ export function NodeEditor() {
         />
       )}
     </div>
+  );
+}
+
+// Wrapper component with ReactFlowProvider
+export function NodeEditor() {
+  return (
+    <ReactFlowProvider>
+      <NodeEditorInner />
+    </ReactFlowProvider>
   );
 }
 

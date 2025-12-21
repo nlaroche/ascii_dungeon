@@ -534,6 +534,70 @@ export const arrayExecutors: Record<string, NodeExecutor> = {
 }
 
 // -----------------------------------------------------------------------------
+// Script Node Executor - Execute custom TypeScript/JavaScript code
+// -----------------------------------------------------------------------------
+
+export interface ScriptNodeInputs {
+  code: string
+  customInputs: Record<string, ExprValue>
+  listenSignals: string[]
+  emitSignals: string[]
+}
+
+/**
+ * Execute a script node with custom code.
+ * The code has access to:
+ * - inputs: The resolved input values
+ * - ctx: The execution context
+ * - self: The entity ID this behavior is attached to
+ * - emit(signal, data): Function to emit a custom signal
+ * - Scene, Timers: Built-in APIs
+ */
+export function executeScriptNode(
+  code: string,
+  inputs: Record<string, ExprValue>,
+  ctx: NodeExecutorContext,
+  emitSignal: (signal: string, data?: ExprValue) => void
+): ExprValue | Promise<ExprValue> {
+  try {
+    // Create a function from the code with access to various utilities
+    const fn = new Function(
+      'inputs',
+      'ctx',
+      'self',
+      'emit',
+      'Scene',
+      'Timers',
+      'console',
+      `
+      try {
+        ${code}
+      } catch (e) {
+        console.error('[Script] Runtime error:', e);
+        return null;
+      }
+      `
+    )
+
+    // Execute with bound context
+    const result = fn(
+      inputs,
+      ctx,
+      ctx.selfEntityId,
+      emitSignal,
+      Scene,
+      Timers,
+      console
+    )
+
+    return result ?? inputs
+  } catch (e) {
+    console.error('[Script] Compilation error:', e)
+    return null
+  }
+}
+
+// -----------------------------------------------------------------------------
 // Debug Executors
 // -----------------------------------------------------------------------------
 
