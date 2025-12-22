@@ -98,9 +98,10 @@ export function migrateLegacyComponent(legacy: NodeComponent): SerializedCompone
   }
 
   // Handle script references (map to types based on script name)
+  // NOTE: player_controller is now a behavior graph (builtin:player-movement)
   const scriptName = legacy.script.split('/').pop()?.replace('.lua', '') || ''
   const scriptTypeMap: Record<string, string> = {
-    'player_controller': 'PlayerController',
+    'player_controller': 'Behavior', // Use behavior graph instead
     'health': 'Health',
     'enemy_ai': 'AI',
     'flicker': 'Light',

@@ -1271,3 +1271,121 @@ pub async fn create_category_folder(path: String, name: String, icon: Option<Str
     println!("[Palette] Created category folder: {}", path);
     Ok(())
 }
+
+/// Open a file or folder in VS Code
+#[tauri::command]
+pub async fn open_in_external_editor(path: String) -> Result<(), String> {
+    let path_buf = PathBuf::from(&path);
+
+    // Try VS Code first, then fall back to other editors
+    #[cfg(target_os = "windows")]
+    {
+        let result = Command::new("cmd")
+            .args(["/C", "code", &path])
+            .spawn();
+
+        match result {
+            Ok(_) => {
+                println!("[Editor] Opened in VS Code: {}", path);
+                return Ok(());
+            }
+            Err(_) => {
+                // Try opening with default app
+                Command::new("cmd")
+                    .args(["/C", "start", "", &path])
+                    .spawn()
+                    .map_err(|e| format!("Failed to open file: {}", e))?;
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let result = Command::new("code")
+            .arg(&path)
+            .spawn();
+
+        match result {
+            Ok(_) => {
+                println!("[Editor] Opened in VS Code: {}", path);
+                return Ok(());
+            }
+            Err(_) => {
+                Command::new("open")
+                    .arg(&path)
+                    .spawn()
+                    .map_err(|e| format!("Failed to open file: {}", e))?;
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let result = Command::new("code")
+            .arg(&path)
+            .spawn();
+
+        match result {
+            Ok(_) => {
+                println!("[Editor] Opened in VS Code: {}", path);
+                return Ok(());
+            }
+            Err(_) => {
+                Command::new("xdg-open")
+                    .arg(&path)
+                    .spawn()
+                    .map_err(|e| format!("Failed to open file: {}", e))?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Reveal a file or folder in the system file explorer
+#[tauri::command]
+pub async fn reveal_in_file_explorer(path: String) -> Result<(), String> {
+    let path_buf = PathBuf::from(&path);
+
+    // Get the parent directory for files, or the path itself for directories
+    let reveal_path = if path_buf.is_file() {
+        path_buf.parent().map(|p| p.to_path_buf()).unwrap_or(path_buf.clone())
+    } else {
+        path_buf.clone()
+    };
+
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows, use explorer to select the file
+        if path_buf.is_file() {
+            Command::new("explorer")
+                .args(["/select,", &path])
+                .spawn()
+                .map_err(|e| format!("Failed to reveal in explorer: {}", e))?;
+        } else {
+            Command::new("explorer")
+                .arg(&reveal_path)
+                .spawn()
+                .map_err(|e| format!("Failed to reveal in explorer: {}", e))?;
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .args(["-R", &path])
+            .spawn()
+            .map_err(|e| format!("Failed to reveal in Finder: {}", e))?;
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        Command::new("xdg-open")
+            .arg(&reveal_path.to_string_lossy().to_string())
+            .spawn()
+            .map_err(|e| format!("Failed to reveal in file manager: {}", e))?;
+    }
+
+    println!("[Explorer] Revealed: {}", path);
+    Ok(())
+}

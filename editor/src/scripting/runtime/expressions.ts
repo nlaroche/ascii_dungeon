@@ -103,7 +103,14 @@ function tokenize(expr: string): Token[] {
       continue
     }
 
-    // Multi-character operators
+    // Multi-character operators (check 3-char first, then 2-char)
+    const threeChar = expr.slice(i, i + 3)
+    if (['===', '!=='].includes(threeChar)) {
+      // Treat === and !== as == and != for simplicity
+      tokens.push({ type: 'operator', value: threeChar.slice(0, 2) })
+      i += 3
+      continue
+    }
     const twoChar = expr.slice(i, i + 2)
     if (['==', '!=', '<=', '>=', '&&', '||'].includes(twoChar)) {
       tokens.push({ type: 'operator', value: twoChar })
@@ -496,16 +503,16 @@ function evaluate(node: ASTNode, ctx: ExprContext): ExprValue {
         return ctx.self as ExprValue
       }
       const value = ctx.variables[node.name]
-      if (value === undefined) {
-        throw new Error(`Undefined variable: '${node.name}'`)
-      }
-      return value
+      // Return undefined for missing variables instead of throwing
+      // This allows graceful handling of optional/unset variables
+      return value ?? null
     }
 
     case 'member': {
       const object = evaluate(node.object, ctx)
+      // Return null for null/undefined access (like optional chaining)
       if (object === null || object === undefined) {
-        throw new Error(`Cannot access property of null/undefined`)
+        return null
       }
 
       let key: string | number

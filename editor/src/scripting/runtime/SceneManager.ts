@@ -519,6 +519,12 @@ export class SceneManager {
    * Set entity position.
    */
   setPosition(entityId: string, x: number, y: number): void {
+    // Update the Rect2D component in the store (what the renderer uses)
+    if (this.storeAccessor) {
+      this.updateRect2D(entityId, x, y)
+    }
+
+    // Also update internal entity tracking
     const entity = this.entities.get(entityId)
     if (entity) {
       entity.position = { x, y }

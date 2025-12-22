@@ -251,19 +251,36 @@ export class CameraComponent extends Component {
 
   /** Get the computed camera output (position from transform + behaviors) */
   getOutput(): CameraOutput {
-    const transform = this.getTransform()
+    const node = this.getNode()
 
-    // Start with base position (Transform uses position: [x, y, z])
+    // Get world position (includes parent transforms) via entity resolver
+    // Fall back to local transform if resolver not available
+    let baseX = 0
+    let baseY = 0
+
+    if (node) {
+      const worldPos = CameraBrain.getInstance().getEntityPosition(node.id)
+      if (worldPos) {
+        baseX = worldPos.x
+        baseY = worldPos.y
+      } else {
+        // Fallback to local transform
+        const transform = this.getTransform()
+        baseX = transform?.position?.[0] ?? 0
+        baseY = transform?.position?.[1] ?? 0
+      }
+    }
+
+    // Start with world position
     let output: CameraOutput = {
-      x: transform?.position?.[0] ?? 0,
-      y: transform?.position?.[1] ?? 0,
+      x: baseX,
+      y: baseY,
       zoom: this.zoom,
       rotation: this.rotation,
       postProcess: this.postProcess,
     }
 
     // Apply behaviors from sibling components
-    const node = this.getNode()
     if (node) {
       // Find and apply transposer
       const transposer = CameraBrain.getInstance().getTransposer(node.id)

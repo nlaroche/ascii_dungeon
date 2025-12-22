@@ -28,6 +28,7 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
   // Terminal 2D renderer for ASCII grid mode
   const terminal2DRef = useRef<Terminal2DRenderer | null>(null)
   const terminalNeedsRefreshRef = useRef(false)  // Dirty flag for deferred refresh
+  const hasCenteredOnContentRef = useRef(false)  // Track if we've centered on content
 
   // Post-processing pipeline for CRT effects
   const postProcessRef = useRef<PostProcessPipeline | null>(null)
@@ -1638,24 +1639,57 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
       return { x: globalX, y: globalY, width, height }
     }
 
-    // Track content bounds for centering (from first child with Rect2D)
+    // Track content bounds for centering
+    // Look for ScreenLayer or Terrain nodes, or any node with a large Rect2D
     let contentBounds: { x: number; y: number; width: number; height: number } | null = null
 
-    // Find content bounds from root's first child with Rect2D
-    for (const child of rootNode.children) {
-      if (child.meta?.visible === false) continue
-      const globalRect = getGlobalRect(child, 0, 0)
-      if (globalRect) {
-        const [gridX, gridY] = worldToGrid(globalRect.x, globalRect.y)
-        contentBounds = {
-          x: gridX,
-          y: gridY,
-          width: globalRect.width,
-          height: globalRect.height,
+    // Helper to find main content bounds - prioritize ScreenLayer, Terrain, or largest Rect2D
+    const findContentBounds = (nodes: Node[], parentX = 0, parentY = 0): { x: number; y: number; width: number; height: number; nodeName?: string } | null => {
+      let bestBounds: { x: number; y: number; width: number; height: number; nodeName?: string } | null = null
+      let bestArea = 0
+
+      for (const child of nodes) {
+        if (child.meta?.visible === false) continue
+
+        // Check if this is ScreenLayer or Terrain - high priority
+        if (child.name === 'ScreenLayer' || child.name === 'Terrain' || child.name === 'World Floor') {
+          const globalRect = getGlobalRect(child, parentX, parentY)
+          if (globalRect && globalRect.width > 1 && globalRect.height > 1) {
+            const [gridX, gridY] = worldToGrid(globalRect.x, globalRect.y)
+            console.log(`[WebGPUViewport] Found content node "${child.name}" at world (${globalRect.x}, ${globalRect.y}) → grid (${gridX}, ${gridY})`)
+            return { x: gridX, y: gridY, width: globalRect.width, height: globalRect.height, nodeName: child.name }
+          }
         }
-        break
+
+        // Check for large Rect2D
+        const globalRect = getGlobalRect(child, parentX, parentY)
+        if (globalRect) {
+          const area = globalRect.width * globalRect.height
+          if (area > bestArea && globalRect.width > 10 && globalRect.height > 10) {
+            const [gridX, gridY] = worldToGrid(globalRect.x, globalRect.y)
+            console.log(`[WebGPUViewport] Found large node "${child.name}" at world (${globalRect.x}, ${globalRect.y}), area=${area}`)
+            bestBounds = { x: gridX, y: gridY, width: globalRect.width, height: globalRect.height, nodeName: child.name }
+            bestArea = area
+          }
+        }
+
+        // Recursively check children
+        const childResult = findContentBounds(child.children, globalRect?.x ?? parentX, globalRect?.y ?? parentY)
+        if (childResult) {
+          // Always prefer named content nodes (World Floor, Terrain, ScreenLayer) over generic large nodes
+          const isNamedContent = childResult.nodeName === 'World Floor' || childResult.nodeName === 'Terrain' || childResult.nodeName === 'ScreenLayer'
+          const childArea = childResult.width * childResult.height
+          if (isNamedContent || childArea > bestArea) {
+            bestBounds = childResult
+            bestArea = childArea
+          }
+        }
       }
+
+      return bestBounds
     }
+
+    contentBounds = findContentBounds(rootNode.children)
 
     // Set game bounds gizmo to content bounds (shows the main area being edited)
     // Will be replaced by Camera component bounds later
@@ -1734,19 +1768,43 @@ export function WebGPUViewport({ className = '' }: WebGPUViewportProps) {
     }
 
     // Center the viewport on the content bounds
+    console.log('[WebGPUViewport] loadTilemapToTerminal:', {
+      centerOnGameBounds,
+      hasCanvas: !!canvasRef.current,
+      contentBounds,
+      canvasSize: canvasRef.current ? { w: canvasRef.current.width, h: canvasRef.current.height } : null
+    })
     if (centerOnGameBounds && canvasRef.current && contentBounds) {
       terminal.centerOnBounds(canvasRef.current.width, canvasRef.current.height, contentBounds)
+      // Mark that we've successfully centered on content
+      hasCenteredOnContentRef.current = true
+      console.log('[WebGPUViewport] Centered on bounds:', contentBounds, 'from node:', (contentBounds as any).nodeName)
     }
   }, [])
 
   // Sync tilemap changes to terminal (deferred to render loop to avoid flickering)
   useEffect(() => {
+    console.log('[WebGPUViewport] Sync effect:', {
+      hasTerminal: !!terminal2DRef.current,
+      cameraMode,
+      hasCentered: hasCenteredOnContentRef.current,
+      childCount: rootNode.children.length,
+      hasCanvas: !!canvasRef.current
+    })
     if (terminal2DRef.current && cameraMode === '2d') {
-      // Just mark as needing refresh - the render loop will do the actual update
-      // This prevents multiple clear+draw cycles between frames
-      terminalNeedsRefreshRef.current = true
+      // If we haven't centered yet and the scene now has content, center immediately
+      // This handles the case where the project loads after the terminal is initialized
+      if (!hasCenteredOnContentRef.current && rootNode.children.length > 0 && canvasRef.current) {
+        hasCenteredOnContentRef.current = true
+        // Load and center in one call - don't use the deferred refresh
+        loadTilemapToTerminal(terminal2DRef.current, true)
+        console.log('[WebGPUViewport] Centered on initial content load')
+      } else {
+        // Normal case: just mark as needing refresh - the render loop will do the actual update
+        terminalNeedsRefreshRef.current = true
+      }
     }
-  }, [normalizedNodes, rootNode, cameraMode])
+  }, [normalizedNodes, rootNode, cameraMode, loadTilemapToTerminal])
 
   // Handle recenter requests (from button or keyboard)
   useEffect(() => {

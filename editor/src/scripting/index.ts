@@ -1,5 +1,6 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // Scripting System - TypeScript component system for ASCII Dungeon
+// Includes: WorldManager, EdgeTrigger, GameData for world map system
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Core
@@ -54,13 +55,6 @@ export type {
   CameraTransitionEvent,
   CameraShakeEvent,
 } from './components/CameraComponent'
-export {
-  BehaviorComponent,
-  BehaviorGraphRegistry,
-  ComponentInstanceRegistry,
-} from './components/BehaviorComponent'
-export type { GraphReference, ExecutionMode } from './components/BehaviorComponent'
-
 // Palettes
 export * from './palettes'
 
@@ -80,7 +74,12 @@ import { InteractableComponent } from './components/InteractableComponent'
 import { AudioComponent } from './components/AudioComponent'
 import { DebugComponent } from './components/DebugComponent'
 import { CameraComponent, CameraTransposerComponent, CameraComposerComponent, CameraConfinerComponent, CameraShakeComponent, CameraLetterboxComponent } from './components/CameraComponent'
-import { BehaviorComponent } from './components/BehaviorComponent'
+import { WanderAIComponent } from './components/WanderAIComponent'
+import { TickWanderAIComponent } from './components/TickWanderAIComponent'
+import { PlayerControllerComponent } from './components/PlayerControllerComponent'
+import { WorldManagerComponent } from './components/WorldManagerComponent'
+import { EdgeTriggerComponent } from './components/EdgeTriggerComponent'
+import { GameDataComponent } from './components/GameDataComponent'
 
 export const BUILTIN_COMPONENTS = {
   Ascii: AsciiComponent,
@@ -97,7 +96,12 @@ export const BUILTIN_COMPONENTS = {
   CameraConfiner: CameraConfinerComponent,
   CameraShake: CameraShakeComponent,
   CameraLetterbox: CameraLetterboxComponent,
-  Behavior: BehaviorComponent,
+  WanderAI: WanderAIComponent,
+  TickWanderAI: TickWanderAIComponent,
+  PlayerController: PlayerControllerComponent,
+  WorldManager: WorldManagerComponent,
+  EdgeTrigger: EdgeTriggerComponent,
+  GameData: GameDataComponent,
 } as const
 
 export type BuiltinComponentName = keyof typeof BUILTIN_COMPONENTS

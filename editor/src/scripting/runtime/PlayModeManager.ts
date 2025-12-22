@@ -9,9 +9,13 @@ import { GlobalVariables } from './variables'
 import { BehaviorComponent, ComponentInstanceRegistry, BehaviorGraphRegistry } from '../components/BehaviorComponent'
 import type { LogicGraph, VariableDef } from './graph'
 import { PlayerControllerComponent } from '../components/PlayerControllerComponent'
+import { TickWanderAIComponent } from '../components/TickWanderAIComponent'
 import { graphStorage } from './GraphStorage'
 import { reactFlowToGraph } from './serialization'
 import { Scene } from './SceneManager'
+import { TransformCache } from './TransformCache'
+import { CameraBrain, CameraComponent, CameraTransposerComponent } from '../components/CameraComponent'
+import { Ticks } from './TickSystem'
 import type { Node, EntityMaps, NormalizedNode, NormalizedComponent } from '../../stores/engineState'
 
 // Runtime component interface for script components
@@ -90,6 +94,10 @@ export class PlayModeManager {
 
   // Active runtime script components (PlayerController, WanderAI, etc.)
   private activeRuntimeComponents: Map<string, RuntimeComponent> = new Map()
+
+  // Active camera components
+  private activeCameras: Map<string, CameraComponent> = new Map()
+  private activeTransposers: Map<string, CameraTransposerComponent> = new Map()
 
   // Listeners for state changes
   private listeners: Set<PlayModeListener> = new Set()
@@ -176,13 +184,36 @@ export class PlayModeManager {
     this.state.elapsedTime = 0
 
     // Load graph files from project into registry
-    await this.loadProjectGraphs()
+    try {
+      await this.loadProjectGraphs()
+    } catch (error) {
+      console.error('[PlayMode] Failed to load project graphs:', error)
+    }
 
     // Initialize all behavior components in the scene
-    await this.initializeSceneBehaviors(rootNode)
+    try {
+      await this.initializeSceneBehaviors(rootNode)
+    } catch (error) {
+      console.error('[PlayMode] Failed to initialize scene behaviors:', error)
+    }
 
     // Initialize runtime script components (PlayerController, WanderAI, etc.)
-    this.initializeRuntimeComponents(rootNode)
+    try {
+      this.initializeRuntimeComponents(rootNode)
+    } catch (error) {
+      console.error('[PlayMode] Failed to initialize runtime components:', error)
+    }
+
+    // Initialize transform cache and camera system
+    try {
+      this.initializeTransformCache()
+      this.initializeCameraComponents(rootNode)
+    } catch (error) {
+      console.error('[PlayMode] Failed to initialize camera system:', error)
+    }
+
+    // Start the tick system
+    Ticks.start()
 
     // Start the runtime
     this.runtime.start()
@@ -215,11 +246,17 @@ export class PlayModeManager {
     // Stop the runtime
     this.runtime.stop()
 
+    // Stop the tick system
+    Ticks.stop()
+
     // Dispose all behavior instances
     this.disposeSceneBehaviors()
 
     // Dispose runtime script components
     this.disposeRuntimeComponents()
+
+    // Dispose camera components and reset CameraBrain
+    this.disposeCameraComponents()
 
     // Restore snapshot or apply changes
     if (!applyChanges && this.state.snapshot && this.setStoreState) {
@@ -561,6 +598,9 @@ export class PlayModeManager {
     this.state.frameCount++
     this.state.elapsedTime += deltaTime
 
+    // Update tick system animations
+    Ticks.update(deltaTime)
+
     // Update runtime script components
     for (const [id, component] of this.activeRuntimeComponents) {
       try {
@@ -604,9 +644,25 @@ export class PlayModeManager {
             if (compData.properties) {
               pc.moveSpeed = (compData.properties.moveSpeed as number) ?? 5
               pc.gridSnap = (compData.properties.gridSnap as boolean) ?? true
-              pc.moveCooldown = (compData.properties.moveCooldown as number) ?? 0.15
+              if (compData.properties.easing) {
+                pc.easing = compData.properties.easing as typeof pc.easing
+              }
             }
-            component = pc
+            component = pc as unknown as RuntimeComponent
+            break
+          }
+          case 'TickWanderAI': {
+            const ai = new TickWanderAIComponent()
+            // Copy properties from scene data
+            if (compData.properties) {
+              ai.moveChance = (compData.properties.moveChance as number) ?? 50
+              ai.wanderRadius = (compData.properties.wanderRadius as number) ?? 8
+              ai.allowDiagonal = (compData.properties.allowDiagonal as boolean) ?? false
+              if (compData.properties.easing) {
+                ai.easing = compData.properties.easing as typeof ai.easing
+              }
+            }
+            component = ai as unknown as RuntimeComponent
             break
           }
           // Note: Behavior components are handled by initializeSceneBehaviors
@@ -648,7 +704,7 @@ export class PlayModeManager {
 
     // Check for runtime script components (game-specific scripts)
     // Note: Behavior components use visual scripting and are handled separately
-    const runtimeScripts = ['PlayerController']
+    const runtimeScripts = ['PlayerController', 'TickWanderAI']
     for (const comp of node.components) {
       if (runtimeScripts.includes(comp.script)) {
         results.push({ node, scriptName: comp.script, compData: comp })
@@ -661,6 +717,161 @@ export class PlayModeManager {
     }
 
     return results
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Transform Cache & Camera System
+  // ─────────────────────────────────────────────────────────────────────────
+
+  private initializeTransformCache(): void {
+    console.log('[PlayMode] Initializing TransformCache...')
+
+    // Reset cache
+    TransformCache.getInstance().reset()
+
+    // Set up entities accessor
+    TransformCache.getInstance().setEntitiesAccessor(() => this.getStoreState!().entities)
+
+    // Set up entity resolver for CameraBrain (so it can look up entity positions)
+    CameraBrain.getInstance().setEntityResolver((entityId: string) => {
+      return TransformCache.getInstance().getWorldPosition(entityId)
+    })
+
+    console.log('[PlayMode] TransformCache initialized')
+  }
+
+  private initializeCameraComponents(rootNode: Node): void {
+    console.log('[PlayMode] Initializing camera components...')
+
+    // Reset CameraBrain
+    CameraBrain.getInstance().reset()
+
+    // Set up entity resolver again after reset
+    CameraBrain.getInstance().setEntityResolver((entityId: string) => {
+      return TransformCache.getInstance().getWorldPosition(entityId)
+    })
+
+    // Find all nodes with Camera and CameraTransposer components
+    const cameraNodes = this.findCameraNodes(rootNode)
+    console.log(`[PlayMode] Found ${cameraNodes.length} camera nodes`)
+
+    for (const { node, cameraData, transposerData } of cameraNodes) {
+      try {
+        // Create Camera component
+        if (cameraData) {
+          const camera = new CameraComponent()
+          camera._setNode(node)
+
+          // Copy properties
+          if (cameraData.properties) {
+            camera.priority = (cameraData.properties.priority as number) ?? 10
+            camera.active = (cameraData.properties.active as boolean) ?? true
+            camera.blendTime = (cameraData.properties.blendTime as number) ?? 0.5
+            camera.zoom = (cameraData.properties.zoom as number) ?? 1
+            camera.rotation = (cameraData.properties.rotation as number) ?? 0
+          }
+
+          // Call onInit which registers with CameraBrain
+          camera.onInit?.()
+
+          this.activeCameras.set(node.id, camera)
+          console.log(`[PlayMode] Initialized Camera on ${node.name} (priority=${camera.priority}, active=${camera.active})`)
+        }
+
+        // Create CameraTransposer component
+        if (transposerData) {
+          const transposer = new CameraTransposerComponent()
+          transposer._setNode(node)
+
+          // Copy properties
+          if (transposerData.properties) {
+            transposer.followTarget = (transposerData.properties.followTarget as string) ?? null
+            transposer.offset = (transposerData.properties.offset as [number, number]) ?? [0, 0]
+            transposer.dampingX = (transposerData.properties.dampingX as number) ?? 1
+            transposer.dampingY = (transposerData.properties.dampingY as number) ?? 1
+          }
+
+          // Call onInit which registers with CameraBrain
+          transposer.onInit?.()
+
+          this.activeTransposers.set(node.id, transposer)
+          console.log(`[PlayMode] Initialized CameraTransposer on ${node.name} (followTarget=${transposer.followTarget})`)
+        }
+      } catch (error) {
+        console.error(`[PlayMode] Failed to initialize camera on ${node.name}:`, error)
+      }
+    }
+
+    // Log final camera state
+    const liveCamera = CameraBrain.getInstance().getLiveCamera()
+    if (liveCamera) {
+      console.log(`[PlayMode] Live camera: ${liveCamera.getNode()?.name}`)
+    } else {
+      console.warn('[PlayMode] No live camera found!')
+    }
+  }
+
+  private findCameraNodes(node: Node): Array<{
+    node: Node
+    cameraData: { properties?: Record<string, unknown> } | null
+    transposerData: { properties?: Record<string, unknown> } | null
+  }> {
+    const results: Array<{
+      node: Node
+      cameraData: { properties?: Record<string, unknown> } | null
+      transposerData: { properties?: Record<string, unknown> } | null
+    }> = []
+
+    // Check for Camera and CameraTransposer components
+    const cameraComp = node.components.find(c => c.script === 'Camera')
+    const transposerComp = node.components.find(c => c.script === 'CameraTransposer')
+
+    if (cameraComp || transposerComp) {
+      results.push({
+        node,
+        cameraData: cameraComp ?? null,
+        transposerData: transposerComp ?? null,
+      })
+    }
+
+    // Recurse into children
+    for (const child of node.children) {
+      results.push(...this.findCameraNodes(child))
+    }
+
+    return results
+  }
+
+  private disposeCameraComponents(): void {
+    console.log('[PlayMode] Disposing camera components...')
+
+    // Dispose cameras
+    for (const [nodeId, camera] of this.activeCameras) {
+      try {
+        camera.onDispose?.()
+      } catch (error) {
+        console.error(`[PlayMode] Camera dispose error (${nodeId}):`, error)
+      }
+    }
+    this.activeCameras.clear()
+
+    // Dispose transposers
+    for (const [nodeId, transposer] of this.activeTransposers) {
+      try {
+        transposer.onDispose?.()
+      } catch (error) {
+        console.error(`[PlayMode] Transposer dispose error (${nodeId}):`, error)
+      }
+    }
+    this.activeTransposers.clear()
+
+    // Reset CameraBrain
+    CameraBrain.getInstance().reset()
+
+    // Reset TransformCache
+    TransformCache.getInstance().reset()
+
+    console.log('[PlayMode] Camera components disposed')
   }
 }
 

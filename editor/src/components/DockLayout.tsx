@@ -51,7 +51,6 @@ const TAB_DEFINITIONS: Record<string, { icon: string; label: string }> = {
   palette: { icon: '◐', label: 'Palette' },
   templates: { icon: '◇', label: 'Templates' },
   components: { icon: '▣', label: 'Components' },
-  'node-editor': { icon: '◎', label: 'Node Editor' },
   scene: { icon: '▦', label: 'Scene' },
   game: { icon: '▶', label: 'Game' },
   code: { icon: '{ }', label: 'Code' },
@@ -109,7 +108,6 @@ const TEMPLATE_LAYOUTS: Record<string, () => LayoutData> = {
               tabs: [
                 { id: 'scene', title: 'Scene', group: 'default' },
                 { id: 'game', title: 'Game', group: 'default' },
-                { id: 'node-editor', title: 'Node Editor', group: 'default' },
                 { id: 'code', title: 'Code', group: 'default' },
               ],
               activeId: 'scene',
@@ -371,12 +369,8 @@ export function DockableLayout({ renderContent, onLayoutChange, onDockReady }: D
 
   // Listen for redock events from floating windows
   useEffect(() => {
-    console.log('[DockLayout] Setting up redock event listener');
-
     const handleRedock = (event: CustomEvent<{ tabId: string }>) => {
-      console.log('[DockLayout] *** RECEIVED redock event ***', event.detail);
       const { tabId } = event.detail;
-      console.log('[DockLayout] Redock requested for tab:', tabId);
 
       if (!dockRef.current) return;
 
@@ -389,6 +383,20 @@ export function DockableLayout({ renderContent, onLayoutChange, onDockReady }: D
       // Get current layout and add tab back to the right panel
       const currentLayout = dockRef.current.getLayout();
 
+      // Get proper tab definition for title/icon
+      const def = allTabDefs[tabId] || TAB_DEFINITIONS[tabId] || { icon: '○', label: tabId };
+      const newTab: TabData = {
+        id: tabId,
+        title: (
+          <span className="dock-tab-title">
+            <span className="dock-tab-icon">{def.icon}</span>
+            <span>{def.label}</span>
+          </span>
+        ),
+        group: 'default',
+        content: <></>, // Content is loaded via loadTab
+      };
+
       // Helper to find and modify a panel in the layout tree
       const addTabToPanel = (box: BoxData | PanelData, siblingIds: string[]): boolean => {
         if ('tabs' in box && box.tabs) {
@@ -396,12 +404,8 @@ export function DockableLayout({ renderContent, onLayoutChange, onDockReady }: D
           const hasSibling = box.tabs.some(t => siblingIds.includes(t.id as string));
           if (hasSibling) {
             // Add our tab to this panel
-            box.tabs.push({
-              id: tabId,
-              title: tabId,
-              group: 'default',
-            } as TabData);
-            console.log('[DockLayout] Added tab to panel with siblings');
+            box.tabs.push(newTab);
+            box.activeId = tabId; // Make it active
             return true;
           }
         }
@@ -421,19 +425,22 @@ export function DockableLayout({ renderContent, onLayoutChange, onDockReady }: D
       }
 
       if (!added) {
-        // Fallback: add to first panel in the layout
-        const addToFirstPanel = (box: BoxData | PanelData): boolean => {
+        // Fallback: add to the center panel (usually has scene/game tabs)
+        const addToCenterPanel = (box: BoxData | PanelData): boolean => {
           if ('tabs' in box && box.tabs) {
-            box.tabs.push({
-              id: tabId,
-              title: tabId,
-              group: 'default',
-            } as TabData);
-            return true;
+            // Prefer panels that have 'scene' or 'game' tabs (center area)
+            const isCenterPanel = box.tabs.some(t =>
+              ['scene', 'game', 'code'].includes(t.id as string)
+            );
+            if (isCenterPanel) {
+              box.tabs.push(newTab);
+              box.activeId = tabId;
+              return true;
+            }
           }
           if ('children' in box && box.children) {
             for (const child of box.children) {
-              if (addToFirstPanel(child as BoxData | PanelData)) {
+              if (addToCenterPanel(child as BoxData | PanelData)) {
                 return true;
               }
             }
@@ -441,15 +448,37 @@ export function DockableLayout({ renderContent, onLayoutChange, onDockReady }: D
           return false;
         };
 
+        // Try center panel first
         if (currentLayout.dockbox) {
-          addToFirstPanel(currentLayout.dockbox as BoxData);
+          added = addToCenterPanel(currentLayout.dockbox as BoxData);
         }
-        console.log('[DockLayout] Added tab to first available panel (fallback)');
+
+        // Final fallback: first available panel
+        if (!added) {
+          const addToFirstPanel = (box: BoxData | PanelData): boolean => {
+            if ('tabs' in box && box.tabs) {
+              box.tabs.push(newTab);
+              box.activeId = tabId;
+              return true;
+            }
+            if ('children' in box && box.children) {
+              for (const child of box.children) {
+                if (addToFirstPanel(child as BoxData | PanelData)) {
+                  return true;
+                }
+              }
+            }
+            return false;
+          };
+
+          if (currentLayout.dockbox) {
+            addToFirstPanel(currentLayout.dockbox as BoxData);
+          }
+        }
       }
 
       // Load the modified layout
       dockRef.current.loadLayout(currentLayout);
-      console.log('[DockLayout] Layout updated with re-docked tab');
 
       // Clean up stored position
       originalPositionsRef.current.delete(tabId);
@@ -457,7 +486,7 @@ export function DockableLayout({ renderContent, onLayoutChange, onDockReady }: D
 
     window.addEventListener('floating-panel-redock', handleRedock as EventListener);
     return () => window.removeEventListener('floating-panel-redock', handleRedock as EventListener);
-  }, []);
+  }, [allTabDefs]);
 
   // Activate a tab by ID - find its panel and set it as active
   // If the tab doesn't exist in the layout, add it first
@@ -466,12 +495,21 @@ export function DockableLayout({ renderContent, onLayoutChange, onDockReady }: D
 
     const panel = findPanelWithTab(tabId);
     if (panel) {
-      // Update the panel's active tab
-      dockRef.current.updateTab(tabId, { id: tabId }, true);
-      console.log('[DockLayout] Activated tab:', tabId);
+      // Just activate the tab without replacing its content
+      // The third parameter 'true' makes it the active tab
+      const def = TAB_DEFINITIONS[tabId] || { icon: '○', label: tabId };
+      dockRef.current.updateTab(tabId, {
+        id: tabId,
+        title: (
+          <span className="dock-tab-title">
+            <span className="dock-tab-icon">{def.icon}</span>
+            <span>{def.label}</span>
+          </span>
+        ),
+        // NOTE: Don't pass content here - it would replace the existing component!
+      }, true);
     } else {
       // Tab not in layout - add it to a center panel
-      console.log('[DockLayout] Tab not in layout, adding:', tabId);
       const def = TAB_DEFINITIONS[tabId] || { icon: '○', label: tabId };
       const newTab: TabData = {
         id: tabId,
@@ -482,6 +520,7 @@ export function DockableLayout({ renderContent, onLayoutChange, onDockReady }: D
           </span>
         ),
         group: 'default',
+        content: <></>, // Content is loaded via loadTab
       };
 
       // Find the center panel (usually has 'scene' tab)
@@ -490,7 +529,17 @@ export function DockableLayout({ renderContent, onLayoutChange, onDockReady }: D
         dockRef.current.dockMove(newTab, scenePanel, 'middle');
         // Activate after a small delay to let the dock update
         setTimeout(() => {
-          dockRef.current?.updateTab(tabId, { id: tabId }, true);
+          const def2 = TAB_DEFINITIONS[tabId] || { icon: '○', label: tabId };
+          dockRef.current?.updateTab(tabId, {
+            id: tabId,
+            title: (
+              <span className="dock-tab-title">
+                <span className="dock-tab-icon">{def2.icon}</span>
+                <span>{def2.label}</span>
+              </span>
+            ),
+            content: <></>,
+          }, true);
         }, 50);
       } else {
         // Fallback: float the tab
@@ -502,7 +551,6 @@ export function DockableLayout({ renderContent, onLayoutChange, onDockReady }: D
   // Listen for global tab activation events
   useEffect(() => {
     const handleActivateTab = (e: CustomEvent<{ tabId: string }>) => {
-      console.log('[DockLayout] Received dock-activate-tab event for:', e.detail.tabId);
       activateTab(e.detail.tabId);
     };
 
@@ -604,7 +652,6 @@ export function DockableLayout({ renderContent, onLayoutChange, onDockReady }: D
               siblingTabIds: originalPos.siblingTabIds,
               index: originalPos.tabIndex
             });
-            console.log('[DockLayout] Stored original position for', tabId, '- siblings:', originalPos.siblingTabIds, 'index:', originalPos.tabIndex);
           }
         }
 
@@ -619,8 +666,6 @@ export function DockableLayout({ renderContent, onLayoutChange, onDockReady }: D
 
         // Get the tab definition for title
         const def = allTabDefs[tabId] || { icon: '○', label: tabId };
-
-        console.log('[DockLayout] Converting floating panel to native window:', tabId, 'at cursor:', cursorPosRef.current);
 
         // Create native window at cursor position
         createFloatingWindow(tabId, def.label, Math.round(x), Math.round(y), windowWidth, windowHeight).then(() => {
@@ -660,12 +705,10 @@ export function DockableLayout({ renderContent, onLayoutChange, onDockReady }: D
   // Switch layout when template changes
   useEffect(() => {
     if (currentTemplateId && currentTemplateId !== prevTemplateIdRef.current && dockRef.current) {
-      console.log('[DockLayout] Template changed to:', currentTemplateId);
       const layoutFn = TEMPLATE_LAYOUTS[currentTemplateId];
       if (layoutFn) {
         const newLayout = layoutFn();
         dockRef.current.loadLayout(newLayout);
-        console.log('[DockLayout] Layout updated for template:', currentTemplateId);
       }
       prevTemplateIdRef.current = currentTemplateId;
     }

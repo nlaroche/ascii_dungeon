@@ -9,11 +9,6 @@ export function DragOverlay() {
   const theme = useTheme()
   const { draggedPrefab, mouseX, mouseY, dropTarget, overScene, sceneDropTarget } = useDragState()
 
-  // Debug logging
-  if (draggedPrefab) {
-    console.log('[DragOverlay] Rendering:', draggedPrefab.name, 'at', mouseX, mouseY, 'dropTarget:', dropTarget?.nodeName)
-  }
-
   if (!draggedPrefab) return null
 
   // Get ASCII preview for the prefab

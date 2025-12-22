@@ -675,24 +675,6 @@ function reactFlowNodeToGraphNode(node: ReactFlowNode): GraphNode {
     }
   }
 
-  // Script node - custom TypeScript code
-  if (rfType === 'script') {
-    return {
-      ...base,
-      type: 'action',
-      component: 'Script',
-      method: 'execute',
-      inputs: {
-        code: node.data.code as string || '',
-        customInputs: node.data.customInputs || [],
-        customOutputs: node.data.customOutputs || [],
-        listenSignals: node.data.listenSignals || [],
-        emitSignals: node.data.emitSignals || [],
-        ...(node.data.inputs as Record<string, unknown> || {}),
-      },
-    }
-  }
-
   // Built-in action nodes (translate, print, move-entity, etc.)
   const builtinActions = [
     'translate', 'move-entity', 'print', 'log', 'spawn-entity', 'destroy-entity',

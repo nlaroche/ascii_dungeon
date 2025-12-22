@@ -1192,7 +1192,6 @@ useEngineState.subscribe(
 // Sync entities from tree on module load to ensure consistency
 // ─────────────────────────────────────────────────────────────────────────────
 queueMicrotask(() => {
-  console.log('[useEngineState] Initial entity sync from rootNode...');
   useEngineState.getState().syncEntitiesFromTree();
 });
 
@@ -1993,7 +1992,6 @@ export function useTemplate() {
 
   // Apply a template - updates tools, render settings, etc.
   const applyTemplate = (templateDef: TemplateDefinition) => {
-    console.log('[useTemplate] applyTemplate called with:', templateDef.id, templateDef.name);
     const updates: Array<{ path: (string | number)[]; value: unknown }> = [];
 
     // Update template state
@@ -2088,10 +2086,8 @@ export function useTemplate() {
     }
 
     // Apply all updates as a batch
-    console.log('[useTemplate] Applying updates:', updates);
     batchUpdate(updates, `Apply template: ${templateDef.name}`);
     log('success', `Applied template: ${templateDef.name}`);
-    console.log('[useTemplate] Template applied successfully');
   };
 
   // Simple switch (just changes the ID, for when full template def isn't available)
@@ -2400,19 +2396,23 @@ queueMicrotask(() => {
       project: useEngineState.getState().project,
     }),
     (updates) => {
-      if (updates.scene) {
-        useEngineState.setState((state) => ({
-          ...state,
-          scene: { ...state.scene, ...updates.scene },
-        }));
-      }
+      useEngineState.setState((state) => {
+        const newState = { ...state };
+        if (updates.scene) {
+          newState.scene = { ...state.scene, ...updates.scene };
+        }
+        if (updates.entities) {
+          // Full entity restore for play mode snapshot
+          newState.entities = updates.entities;
+        }
+        return newState;
+      });
     },
     // Pass setPath for direct entity property updates during play mode
     (path, value) => {
       useEngineState.getState().setPath(path, value, 'Runtime update', 'script');
     }
   );
-  console.log('[useEngineState] PlayMode store accessors initialized');
 });
 
 export function usePlayMode() {
@@ -2436,18 +2436,34 @@ export function usePlayMode() {
   }, []);
 
   const start = async () => {
-    await PlayMode.start();
-    // Sync state to store
-    useEngineState.setState((state) => ({
-      ...state,
-      playMode: {
-        ...state.playMode,
-        status: 'playing',
-        startTime: Date.now(),
-        frameCount: 0,
-        elapsedTime: 0,
-      },
-    }));
+    try {
+      console.log('[usePlayMode] Starting play mode...');
+      await PlayMode.start();
+      console.log('[usePlayMode] PlayMode.start() completed successfully');
+      // Sync state to store
+      useEngineState.setState((state) => ({
+        ...state,
+        playMode: {
+          ...state.playMode,
+          status: 'playing',
+          startTime: Date.now(),
+          frameCount: 0,
+          elapsedTime: 0,
+        },
+      }));
+      // Switch to Game tab when play starts
+      window.dispatchEvent(new CustomEvent('dock-activate-tab', { detail: { tabId: 'game' } }));
+    } catch (error) {
+      console.error('[usePlayMode] Failed to start play mode:', error);
+      // Reset status to stopped on error
+      useEngineState.setState((state) => ({
+        ...state,
+        playMode: {
+          ...state.playMode,
+          status: 'stopped',
+        },
+      }));
+    }
   };
 
   const stop = (applyChanges: boolean = false) => {

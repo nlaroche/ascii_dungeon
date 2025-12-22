@@ -295,32 +295,39 @@ export function Palette({ className = '' }: PaletteProps) {
         />
       </div>
 
-      {/* Category Tabs */}
+      {/* Category Tabs - neutral toggle pattern */}
       <div className="flex gap-1 px-2 pb-2 shrink-0 flex-wrap">
         <button
-          className="text-xs px-2 py-1 rounded"
+          className="text-xs px-2 py-1 rounded transition-all"
           style={{
-            backgroundColor: selectedCategory === null ? theme.accent : theme.bgHover,
-            color: selectedCategory === null ? '#fff' : theme.text,
+            backgroundColor: selectedCategory === null ? theme.bgHover : theme.bg,
+            border: `1px solid ${theme.border}`,
+            boxShadow: selectedCategory === null ? 'none' : 'inset 0 1px 2px rgba(0,0,0,0.15)',
+            color: selectedCategory === null ? theme.text : theme.textMuted,
           }}
           onClick={() => setSelectedCategory(null)}
         >
           All
         </button>
-        {rootCategories.map(category => (
-          <button
-            key={category.id}
-            className="text-xs px-2 py-1 rounded font-mono"
-            style={{
-              backgroundColor: selectedCategory === category.id ? theme.accent : theme.bgHover,
-              color: selectedCategory === category.id ? '#fff' : theme.text,
-            }}
-            onClick={() => setSelectedCategory(category.id)}
-            title={category.name}
-          >
-            {category.icon || category.name.slice(0, 3)}
-          </button>
-        ))}
+        {rootCategories.map(category => {
+          const isSelected = selectedCategory === category.id
+          return (
+            <button
+              key={category.id}
+              className="text-xs px-2 py-1 rounded font-mono transition-all"
+              style={{
+                backgroundColor: isSelected ? theme.bgHover : theme.bg,
+                border: `1px solid ${theme.border}`,
+                boxShadow: isSelected ? 'none' : 'inset 0 1px 2px rgba(0,0,0,0.15)',
+                color: isSelected ? theme.text : theme.textMuted,
+              }}
+              onClick={() => setSelectedCategory(category.id)}
+              title={category.name}
+            >
+              {category.icon || category.name.slice(0, 3)}
+            </button>
+          )
+        })}
       </div>
 
       {/* Prefab Grid */}

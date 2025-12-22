@@ -13,7 +13,6 @@ import { DockableLayout, DockAPI } from './components/DockLayout';
 import { WebGPUViewport } from './components/WebGPUViewport';
 import { MenuBar } from './components/MenuBar';
 import { TemplateBrowser } from './components/TemplateBrowser';
-import { NodeEditor } from './components/nodes/NodeEditor';
 import { useProject } from './hooks/useProject';
 import { FileEntry } from './lib/filesystem';
 import { getTemplate, TemplateDefinition } from './lib/templates';
@@ -23,10 +22,13 @@ import { RenderPipelinePanel } from './components/render';
 import { PalettePanel } from './components/PalettePanel';
 import { DragOverlay } from './components/DragOverlay';
 import { getFloatingPanelId, isFloatingPanelWindow, isTauri, useFloatingWindows } from './stores/useFloatingWindows';
-import { setPendingGraph } from './stores/useNodeEditor';
 import { useCodeEditor } from './stores/useCodeEditor';
 import { RuntimeInspector } from './components/RuntimeInspector';
 import { GameViewPanel } from './components/GameViewPanel';
+
+// Initialize all built-in components (registers them via decorators)
+import { initializeComponents } from './scripting';
+initializeComponents();
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Main App
@@ -73,8 +75,8 @@ function FloatingPanelApp({ tabId }: { tabId: string }) {
       await invoke('request_redock', { tabId, x, y })
       // Close this window
       await invoke('close_floating_window', { tabId })
-    } catch (error) {
-      console.error('[FloatingPanel] Failed to redock:', error)
+    } catch {
+      // Redock failed silently
     }
   }
 
@@ -116,9 +118,8 @@ function FloatingPanelApp({ tabId }: { tabId: string }) {
 function useFloatingPanelContent(tabId: string) {
   const { currentId: currentTemplateId } = useTemplate()
 
-  const handleSelectTemplate = useCallback((template: TemplateDefinition) => {
+  const handleSelectTemplate = useCallback((_template: TemplateDefinition) => {
     // Template selection from floating window - needs to communicate back to main
-    console.log('[FloatingPanel] Template selected:', template.id)
   }, [])
 
   // This mirrors the renderTabContent logic from AppContent
@@ -146,8 +147,6 @@ function useFloatingPanelContent(tabId: string) {
       )
     case 'components':
       return <TemplatePlaceholder icon="▣" title="Components" description="Browse and manage TypeScript components" />
-    case 'node-editor':
-      return <NodeEditor />
     case 'scene':
       return <SceneView />
     case 'game':
@@ -198,13 +197,7 @@ function AppContent() {
   // Template management
   const { currentId: currentTemplateId, applyTemplate } = useTemplate();
 
-  // Debug: log template changes
-  useEffect(() => {
-    console.log('[App] currentTemplateId changed:', currentTemplateId);
-  }, [currentTemplateId]);
-
   const handleSelectTemplate = useCallback((template: TemplateDefinition) => {
-    console.log('[App] handleSelectTemplate called:', template.id, template.name);
     applyTemplate(template);
   }, [applyTemplate]);
 
@@ -248,8 +241,6 @@ function AppContent() {
         );
       case 'components':
         return <TemplatePlaceholder icon="▣" title="Components" description="Browse and manage TypeScript components" />;
-      case 'node-editor':
-        return <NodeEditor />;
       case 'scene':
         return <SceneView />;
       case 'game':
@@ -366,15 +357,130 @@ function TemplatePlaceholder({ icon, title, description }: { icon: string; title
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// File Context Menu
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface FileContextMenuProps {
+  x: number;
+  y: number;
+  entry: FileEntry;
+  onClose: () => void;
+  onOpen: () => void;
+  onOpenInVSCode: () => void;
+  onRevealInExplorer: () => void;
+  onCopyPath: () => void;
+  onDelete: () => void;
+}
+
+function FileContextMenu({
+  x,
+  y,
+  entry,
+  onClose,
+  onOpen,
+  onOpenInVSCode,
+  onRevealInExplorer,
+  onCopyPath,
+  onDelete,
+}: FileContextMenuProps) {
+  const theme = useTheme();
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleEscape);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleEscape);
+    };
+  }, [onClose]);
+
+  const MenuItem = ({
+    label,
+    onClick,
+    disabled,
+    danger,
+  }: {
+    label: string;
+    onClick: () => void;
+    disabled?: boolean;
+    danger?: boolean;
+  }) => (
+    <button
+      onClick={() => {
+        if (!disabled) {
+          onClick();
+          onClose();
+        }
+      }}
+      disabled={disabled}
+      className="w-full px-3 py-1.5 text-left text-xs flex justify-between items-center rounded"
+      style={{
+        color: disabled ? theme.textDim : danger ? theme.error : theme.text,
+        opacity: disabled ? 0.5 : 1,
+      }}
+      onMouseEnter={(e) => {
+        if (!disabled) e.currentTarget.style.backgroundColor = theme.bgHover;
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.backgroundColor = 'transparent';
+      }}
+    >
+      <span>{label}</span>
+    </button>
+  );
+
+  return (
+    <div
+      ref={menuRef}
+      className="fixed z-50 py-1 rounded shadow-lg min-w-[160px]"
+      style={{
+        left: x,
+        top: y,
+        backgroundColor: theme.bg,
+        border: `1px solid ${theme.border}`,
+      }}
+    >
+      {!entry.isDirectory && (
+        <>
+          <MenuItem label="Open" onClick={onOpen} />
+          <div className="my-1" style={{ borderTop: `1px solid ${theme.border}` }} />
+        </>
+      )}
+      <MenuItem label="Open in VS Code" onClick={onOpenInVSCode} />
+      <MenuItem label="Reveal in File Explorer" onClick={onRevealInExplorer} />
+      <div className="my-1" style={{ borderTop: `1px solid ${theme.border}` }} />
+      <MenuItem label="Copy Path" onClick={onCopyPath} />
+      <div className="my-1" style={{ borderTop: `1px solid ${theme.border}` }} />
+      <MenuItem label="Delete" onClick={onDelete} danger />
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // File Tree
 // ─────────────────────────────────────────────────────────────────────────────
+
+interface FileContextMenuState {
+  x: number;
+  y: number;
+  entry: FileEntry;
+}
 
 function FileTree() {
   const theme = useTheme();
   const selectedFile = useEngineState((s) => s.project.selectedFile);
-  const projectRoot = useEngineState((s) => s.project.root);
   const setPath = useEngineState((s) => s.setPath);
-  const { createFloatingWindow, isFloating } = useFloatingWindows();
+  const [contextMenu, setContextMenu] = useState<FileContextMenuState | null>(null);
 
   const {
     hasProject,
@@ -388,11 +494,10 @@ function FileTree() {
   // Get file icon based on extension
   const getFileIcon = (name: string, isDir: boolean) => {
     if (isDir) return '▸';
-    // Special case for graph files
-    if (name.endsWith('.graph.json')) return '◎';
     const ext = name.split('.').pop()?.toLowerCase();
     switch (ext) {
-      case 'lua': return '◈';
+      case 'ts': return '◈';
+      case 'tsx': return '◈';
       case 'json': return '{ }';
       case 'wgsl': return '◇';
       case 'md': return '≡';
@@ -407,31 +512,56 @@ function FileTree() {
     }));
   }, []);
 
-  // Open graph file in node editor (spawns in its own floating window)
-  const openInNodeEditor = useCallback(async (path: string) => {
-    console.log('[FileTree] Opening graph in node editor:', path);
+  // Context menu handlers
+  const handleContextMenu = useCallback((e: React.MouseEvent, entry: FileEntry) => {
+    e.preventDefault();
+    setContextMenu({ x: e.clientX, y: e.clientY, entry });
+  }, []);
 
-    // Check if running in Tauri and node-editor not already floating
-    if (isTauri() && !isFloating('node-editor')) {
-      // Spawn node editor in a new floating window
-      // Pass the graph path and project root via URL params (more reliable than localStorage)
-      const width = 1000;
-      const height = 700;
-      const x = Math.round((window.screen.width - width) / 2);
-      const y = Math.round((window.screen.height - height) / 2);
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null);
+  }, []);
 
-      console.log('[FileTree] Creating floating window for node-editor with graph:', path);
-      await createFloatingWindow('node-editor', 'Node Editor', x, y, width, height, path, projectRoot || undefined);
-    } else {
-      // In the same window - use DOM event
-      window.dispatchEvent(new CustomEvent('dock-activate-tab', {
-        detail: { tabId: 'node-editor' }
-      }));
-      window.dispatchEvent(new CustomEvent('node-editor-open-graph', {
-        detail: { path }
-      }));
+  const handleOpenInVSCode = useCallback(async () => {
+    if (!contextMenu) return;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('open_in_external_editor', { path: contextMenu.entry.path });
+    } catch (err) {
+      console.error('Failed to open in VS Code:', err);
     }
-  }, [createFloatingWindow, isFloating, projectRoot]);
+  }, [contextMenu]);
+
+  const handleRevealInExplorer = useCallback(async () => {
+    if (!contextMenu) return;
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('reveal_in_file_explorer', { path: contextMenu.entry.path });
+    } catch (err) {
+      console.error('Failed to reveal in explorer:', err);
+    }
+  }, [contextMenu]);
+
+  const handleCopyPath = useCallback(async () => {
+    if (!contextMenu) return;
+    try {
+      await navigator.clipboard.writeText(contextMenu.entry.path);
+    } catch (err) {
+      console.error('Failed to copy path:', err);
+    }
+  }, [contextMenu]);
+
+  const handleDelete = useCallback(async () => {
+    if (!contextMenu) return;
+    const confirmed = window.confirm(`Delete "${contextMenu.entry.name}"?`);
+    if (!confirmed) return;
+    try {
+      const { remove } = await import('@tauri-apps/plugin-fs');
+      await remove(contextMenu.entry.path, { recursive: contextMenu.entry.isDirectory });
+    } catch (err) {
+      console.error('Failed to delete:', err);
+    }
+  }, [contextMenu]);
 
   // Render a file entry recursively
   const renderEntry = (entry: FileEntry, depth: number = 0) => {
@@ -450,17 +580,11 @@ function FileTree() {
             }
           }}
           onDoubleClick={() => {
-            console.log('[FileTree] Double-click on:', entry.name, 'isDir:', entry.isDirectory);
             if (!entry.isDirectory) {
-              // Open .graph.json files in node editor, others in code editor
-              if (entry.name.endsWith('.graph.json')) {
-                console.log('[FileTree] Detected graph file:', entry.name);
-                openInNodeEditor(entry.path);
-              } else {
-                openInCodeEditor(entry.path);
-              }
+              openInCodeEditor(entry.path);
             }
           }}
+          onContextMenu={(e) => handleContextMenu(e, entry)}
           className="py-1 cursor-pointer rounded transition-colors flex items-center gap-1"
           style={{
             paddingLeft,
@@ -525,6 +649,21 @@ function FileTree() {
         </div>
       ) : (
         fileTree.map((entry) => renderEntry(entry))
+      )}
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <FileContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          entry={contextMenu.entry}
+          onClose={closeContextMenu}
+          onOpen={() => openInCodeEditor(contextMenu.entry.path)}
+          onOpenInVSCode={handleOpenInVSCode}
+          onRevealInExplorer={handleRevealInExplorer}
+          onCopyPath={handleCopyPath}
+          onDelete={handleDelete}
+        />
       )}
     </div>
   );
@@ -728,9 +867,11 @@ function SceneView() {
           </button>
           <button
             onClick={() => setPath(['editor2D', 'recenterTimestamp'], Date.now(), 'Recenter view')}
-            className="px-2 py-1 rounded text-xs transition-colors"
+            className="px-2 py-1 rounded text-xs transition-colors hover:brightness-125"
             style={{ backgroundColor: theme.bgHover, color: theme.textMuted }}
             title="Recenter on content (Home)"
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = theme.accent; e.currentTarget.style.color = theme.bg }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = theme.bgHover; e.currentTarget.style.color = theme.textMuted }}
           >
             ⌂
           </button>
@@ -1045,10 +1186,8 @@ function AIChat() {
       .then(([available, path]) => {
         setClaudeAvailable(available);
         setClaudePath(path);
-        console.log('Claude available:', available, 'Path:', path);
       })
-      .catch((err) => {
-        console.error('Failed to check Claude:', err);
+      .catch(() => {
         setClaudeAvailable(false);
       });
   }, []);
@@ -1058,45 +1197,33 @@ function AIChat() {
 
   // Listen for streaming events - use refs for stable callbacks
   useEffect(() => {
-    console.log('[AIChat] Setting up event listener for claude-stream');
-
     const unlisten = listen<ClaudeStreamEvent>('claude-stream', (event) => {
       const { event_type, content, conversation_id } = event.payload;
-
-      console.log('[AIChat] Stream event received:', event_type, 'conv:', conversation_id, 'content length:', content.length);
 
       // Make sure this event is for a conversation we're expecting
       // Use the ref instead of currentConversation to avoid race conditions
       if (pendingConversationIdRef.current && conversation_id !== pendingConversationIdRef.current) {
-        console.log('[AIChat] Ignoring event for different conversation. Expected:', pendingConversationIdRef.current, 'Got:', conversation_id);
         return;
       }
 
       switch (event_type) {
         case 'start':
-          console.log('[AIChat] Received start event, creating message...');
           // Create assistant message placeholder using ref
           const msgId = addMessageRef.current('assistant', '', 'streaming');
           currentMessageIdRef.current = msgId;
-          console.log('[AIChat] Created message with id:', msgId);
           break;
 
         case 'chunk':
-          console.log('[AIChat] Received chunk, currentMessageId:', currentMessageIdRef.current, 'chunk preview:', content.substring(0, 50));
           // Append content to current message (plain text output)
           if (currentMessageIdRef.current) {
             appendToMessageRef.current(currentMessageIdRef.current, content);
-          } else {
-            console.warn('[AIChat] Received chunk but no currentMessageId!');
           }
           break;
 
         case 'done':
-          console.log('[AIChat] Received done event');
           // Mark message as complete
           if (currentMessageIdRef.current) {
             updateMessageRef.current(currentMessageIdRef.current, { status: 'complete' });
-            console.log('[AIChat] Message marked complete');
           }
           setStreamingRef.current(false);
           currentMessageIdRef.current = '';
@@ -1105,7 +1232,6 @@ function AIChat() {
           break;
 
         case 'error':
-          console.log('[AIChat] Received error event:', content);
           // Mark message as error using refs
           if (currentMessageIdRef.current) {
             updateMessageRef.current(currentMessageIdRef.current, {
@@ -1123,15 +1249,12 @@ function AIChat() {
           break;
 
         case 'progress':
-          // Progress events from stderr - show what Claude is doing
-          console.log('[AIChat] Progress:', content);
-          // Don't show progress in chat, it's noisy
+          // Progress events from stderr - don't show in chat
           break;
       }
     });
 
     return () => {
-      console.log('[AIChat] Cleaning up event listener');
       unlisten.then((fn) => fn());
     };
   }, []); // Empty deps - listener is stable, uses refs for callbacks
@@ -1143,10 +1266,7 @@ function AIChat() {
 
   // Send message
   const sendMessage = async () => {
-    console.log('[AIChat] sendMessage called, inputDraft:', inputDraft, 'isStreaming:', isStreaming);
-
     if (!inputDraft.trim() || isStreaming) {
-      console.log('[AIChat] Blocked - empty input or already streaming');
       return;
     }
 
@@ -1154,7 +1274,6 @@ function AIChat() {
     let convId = currentConversation?.id;
     if (!convId) {
       convId = createConversation('New Chat');
-      console.log('[AIChat] Created new conversation:', convId);
     }
 
     // Set the pending conversation ID before anything else
@@ -1172,7 +1291,6 @@ function AIChat() {
     // (slightly longer than the Rust timeout of 3 minutes)
     const timeoutId = setTimeout(() => {
       if (pendingConversationIdRef.current === convId) {
-        console.log('[AIChat] Timeout - resetting streaming state');
         addMessage('assistant', 'Request timed out. Claude may not be responding.', 'error');
         setStreaming(false);
         pendingConversationIdRef.current = '';
@@ -1180,18 +1298,14 @@ function AIChat() {
       }
     }, 210000);
 
-    console.log('[AIChat] Invoking send_claude_message with:', { message: userMessage, conversationId: convId });
-
     try {
-      const result = await invoke('send_claude_message', {
+      await invoke('send_claude_message', {
         message: userMessage,
         conversationId: convId,
         workingDir: projectRoot, // Sandbox Claude to project folder
       });
-      console.log('[AIChat] invoke returned:', result);
       clearTimeout(timeoutId);
     } catch (error) {
-      console.error('[AIChat] Failed to send message:', error);
       clearTimeout(timeoutId);
       // Show error in UI
       addMessage('assistant', `Error: ${error}`, 'error');
@@ -1204,8 +1318,8 @@ function AIChat() {
   const openClaudeAuth = async () => {
     try {
       await invoke('open_claude_auth');
-    } catch (error) {
-      console.error('Failed to open auth terminal:', error);
+    } catch {
+      // Auth terminal failed to open
     }
   };
 

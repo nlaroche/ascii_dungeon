@@ -88,10 +88,8 @@ export const useFloatingWindows = create<FloatingWindowsState>((set, get) => ({
         })
         return { windows: newWindows }
       })
-
-      console.log('[FloatingWindows] Created window:', result.window_label)
-    } catch (error) {
-      console.error('[FloatingWindows] Failed to create window:', error)
+    } catch {
+      // Window creation failed silently
     }
   },
 
@@ -106,10 +104,8 @@ export const useFloatingWindows = create<FloatingWindowsState>((set, get) => ({
         newWindows.delete(tabId)
         return { windows: newWindows }
       })
-
-      console.log('[FloatingWindows] Closed window for tab:', tabId)
-    } catch (error) {
-      console.error('[FloatingWindows] Failed to close window:', error)
+    } catch {
+      // Window close failed silently
     }
   },
 
@@ -124,13 +120,9 @@ export const useFloatingWindows = create<FloatingWindowsState>((set, get) => ({
     if ((window as any).__floatingWindowsInitialized) return
     ;(window as any).__floatingWindowsInitialized = true
 
-    console.log('[FloatingWindows] Setting up Tauri event listener...')
-
     // Listen for redock requests from floating windows (includes close events)
     listen<{ tab_id: string; x: number; y: number }>('floating-panel-redock', (event) => {
-      console.log('[FloatingWindows] *** RECEIVED Tauri event ***', event)
       const { tab_id } = event.payload
-      console.log('[FloatingWindows] Redock requested for tab:', tab_id)
 
       // Remove from our tracking - the DockLayout will handle re-adding
       set(state => {
@@ -140,17 +132,11 @@ export const useFloatingWindows = create<FloatingWindowsState>((set, get) => ({
       })
 
       // Emit a custom event for the DockLayout to handle
-      console.log('[FloatingWindows] Dispatching DOM event for DockLayout...')
       window.dispatchEvent(new CustomEvent('floating-panel-redock', {
         detail: { tabId: tab_id }
       }))
-      console.log('[FloatingWindows] DOM event dispatched')
-    }).then(() => {
-      console.log('[FloatingWindows] Tauri event listener registered successfully')
-    }).catch(err => {
-      console.error('[FloatingWindows] Failed to register event listener:', err)
+    }).catch(() => {
+      // Event listener registration failed
     })
-
-    console.log('[FloatingWindows] Initialized')
   },
 }))

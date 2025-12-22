@@ -13,7 +13,7 @@ import {
 import type { Node, NodeComponent } from '../stores/engineState'
 import { Vec2Scrubber, Vec3Scrubber, ColorScrubber, ToggleCheckbox, StackItem } from './ui/Scrubber'
 import { SearchablePopup, type SearchableItem } from './ui/Popup'
-import { graphStorage, type GraphListEntry } from '../scripting/runtime/GraphStorage'
+// Graph picker removed - visual scripting system has been removed
 
 // Special ID for "Create New Component" item
 const CREATE_NEW_COMPONENT_ID = '__create_new__'
@@ -101,6 +101,7 @@ function ComponentsSection({
   const [showAddMenu, setShowAddMenu] = useState(false)
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [newComponentName, setNewComponentName] = useState('')
+  const [isDragOver, setIsDragOver] = useState(false)
   const addButtonRef = useRef<HTMLButtonElement>(null)
   const nodePath = getNodePath(node.id)
 
@@ -129,6 +130,95 @@ function ComponentsSection({
       'enabled',
     ]
     setPath(fullPath, enabled, enabled ? 'Enable component' : 'Disable component')
+  }
+
+  const removeComponent = (compIndex: number) => {
+    if (!nodePath) return
+    const newComponents = node.components.filter((_, i) => i !== compIndex)
+    const fullPath = [
+      'scene',
+      'rootNode',
+      ...nodePath.flatMap((i) => ['children', i]),
+      'components',
+    ]
+    setPath(fullPath, newComponents, `Remove ${node.components[compIndex].script} component`)
+  }
+
+  const moveComponentToNode = (targetNodeId: string, component: NodeComponent, sourceNodeId: string, sourceIndex: number) => {
+    // Get source node path
+    const sourceNodePath = getNodePath(sourceNodeId)
+    if (!sourceNodePath) return
+
+    // Get target node path
+    const targetNodePath = getNodePath(targetNodeId)
+    if (!targetNodePath) return
+
+    // Get source and target nodes from scene
+    const rootNode = useEngineState.getState().scene.rootNode
+    if (!rootNode) return
+
+    // Navigate to source node
+    let sourceNode: Node = rootNode
+    for (const idx of sourceNodePath) {
+      sourceNode = sourceNode.children[idx]
+    }
+
+    // Navigate to target node
+    let targetNode: Node = rootNode
+    for (const idx of targetNodePath) {
+      targetNode = targetNode.children[idx]
+    }
+
+    // Remove from source
+    const newSourceComponents = sourceNode.components.filter((_, i) => i !== sourceIndex)
+    const sourcePath = [
+      'scene',
+      'rootNode',
+      ...sourceNodePath.flatMap((i) => ['children', i]),
+      'components',
+    ]
+    setPath(sourcePath, newSourceComponents, `Move ${component.script} to ${targetNode.name}`)
+
+    // Add to target (use setTimeout to ensure source update completes first)
+    setTimeout(() => {
+      // Re-get target node to get updated state
+      const updatedRootNode = useEngineState.getState().scene.rootNode
+      if (!updatedRootNode) return
+      let updatedTargetNode: Node = updatedRootNode
+      for (const idx of targetNodePath) {
+        updatedTargetNode = updatedTargetNode.children[idx]
+      }
+
+      const newTargetComponents = [...updatedTargetNode.components, { ...component, id: crypto.randomUUID() }]
+      const targetPath = [
+        'scene',
+        'rootNode',
+        ...targetNodePath.flatMap((i) => ['children', i]),
+        'components',
+      ]
+      setPath(targetPath, newTargetComponents, `Add ${component.script} from ${sourceNode.name}`)
+    }, 0)
+  }
+
+  // Drag over handlers for drop zone
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    if (draggedComponent && draggedComponent.sourceNodeId !== node.id) {
+      e.dataTransfer.dropEffect = 'move'
+      setIsDragOver(true)
+    }
+  }
+
+  const handleDragLeave = () => {
+    setIsDragOver(false)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+    if (draggedComponent && draggedComponent.sourceNodeId !== node.id) {
+      moveComponentToNode(node.id, draggedComponent.component, draggedComponent.sourceNodeId, draggedComponent.sourceIndex)
+    }
   }
 
   // Build searchable items from component registry
@@ -208,10 +298,8 @@ export class ${componentName}Component extends Component {
       window.dispatchEvent(new CustomEvent('code-editor-open-file', {
         detail: { path: filePath }
       }))
-
-      console.log('[ComponentInspector] Created component:', filePath)
-    } catch (err) {
-      console.error('[ComponentInspector] Failed to create component:', err)
+    } catch {
+      // Component creation failed silently
     }
   }, [projectPath])
 
@@ -222,13 +310,51 @@ export class ${componentName}Component extends Component {
       setShowCreateDialog(true)
       setNewComponentName('')
     } else {
-      console.log('[ComponentInspector] Add component:', item.id)
-      // TODO: Add component to node
+      // Add component to node
+      if (!nodePath) return
+
+      // Get default properties from component metadata
+      const metadata = componentRegistry.get(item.id)
+      const defaultProps: Record<string, unknown> = {}
+      if (metadata?.properties) {
+        for (const [key, propMeta] of Object.entries(metadata.properties)) {
+          if (propMeta.default !== undefined) {
+            defaultProps[key] = propMeta.default
+          }
+        }
+      }
+
+      const newComponent: NodeComponent = {
+        id: `${item.id.toLowerCase()}_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`,
+        script: item.id,
+        enabled: true,
+        properties: defaultProps,
+      }
+
+      const newComponents = [...node.components, newComponent]
+      const fullPath = [
+        'scene',
+        'rootNode',
+        ...nodePath.flatMap((i) => ['children', i]),
+        'components',
+      ]
+      setPath(fullPath, newComponents, `Add ${item.label} component`)
+      setShowAddMenu(false)
     }
-  }, [])
+  }, [node.components, nodePath, setPath])
 
   return (
-    <div className="p-3">
+    <div
+      className="p-3"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      style={{
+        backgroundColor: isDragOver ? theme.accent + '20' : 'transparent',
+        border: isDragOver ? `2px dashed ${theme.accent}` : '2px dashed transparent',
+        transition: 'all 0.15s ease',
+      }}
+    >
       <div className="flex items-center justify-between mb-2">
         <div className="text-xs uppercase tracking-wider" style={{ color: theme.textMuted }}>
           Components ({node.components.length})
@@ -242,6 +368,16 @@ export class ${componentName}Component extends Component {
           + Add
         </button>
       </div>
+
+      {/* Drop zone indicator when dragging */}
+      {isDragOver && (
+        <div
+          className="text-xs text-center py-2 mb-2 rounded"
+          style={{ backgroundColor: theme.accent + '30', color: theme.accent }}
+        >
+          Drop to add component here
+        </div>
+      )}
 
       {/* Add component popup */}
       <SearchablePopup
@@ -264,8 +400,12 @@ export class ${componentName}Component extends Component {
             <ComponentCard
               key={comp.id}
               component={comp}
+              compIndex={compIndex}
+              nodeId={node.id}
               onPropertyChange={(key, value) => updateComponentProperty(compIndex, key, value)}
               onToggleEnabled={(enabled) => toggleComponentEnabled(compIndex, enabled)}
+              onRemove={() => removeComponent(compIndex)}
+              onMoveComponent={moveComponentToNode}
             />
           ))}
         </div>
@@ -342,41 +482,215 @@ export class ${componentName}Component extends Component {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Component Drag State (global for cross-node dragging)
+// Uses custom mouse-based dragging since HTML5 drag doesn't work in Tauri
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface DraggedComponent {
+  component: NodeComponent
+  sourceNodeId: string
+  sourceIndex: number
+}
+
+// Global drag state
+let draggedComponent: DraggedComponent | null = null
+let dragPreviewElement: HTMLDivElement | null = null
+
+// Dispatch event when component drag ends (for NodeTree to listen)
+function emitComponentDragState(component: DraggedComponent | null) {
+  window.dispatchEvent(new CustomEvent('component-drag-state', {
+    detail: component
+  }))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Component Card
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface ComponentCardProps {
   component: NodeComponent
+  compIndex: number
+  nodeId: string
   onPropertyChange: (key: string, value: unknown) => void
   onToggleEnabled: (enabled: boolean) => void
+  onRemove: () => void
+  onMoveComponent: (targetNodeId: string, component: NodeComponent, sourceNodeId: string, sourceIndex: number) => void
 }
 
-function ComponentCard({ component, onPropertyChange, onToggleEnabled }: ComponentCardProps) {
+function ComponentCard({ component, compIndex, nodeId, onPropertyChange, onToggleEnabled, onRemove, onMoveComponent }: ComponentCardProps) {
   const theme = useTheme()
+  const projectPath = useEngineState((s) => s.project.root)
   const [expanded, setExpanded] = useState(true)
+  const [isDragging, setIsDragging] = useState(false)
+  const wasDraggingRef = useRef(false)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
 
   // Get component metadata from registry
   const componentType = getComponentType(component)
   const metadata = componentType ? componentRegistry.get(componentType)?.metadata : null
+  const registryEntry = componentType ? componentRegistry.get(componentType) : null
 
   // Group properties by their group option
   const groupedProperties = metadata ? groupPropertiesByGroup(metadata) : null
 
+  // Open script file in VS Code
+  const handleOpenScript = useCallback(async () => {
+    if (!projectPath || !componentType) return
+    // Check if it's a user component with a file path
+    const filePath = registryEntry?.filePath
+    if (filePath) {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('open_in_external_editor', { path: filePath })
+      } catch (err) {
+        console.error('Failed to open script in VS Code:', err)
+      }
+    } else {
+      // For built-in components, try to find in scripts folder
+      const scriptPath = `${projectPath}/scripts/${componentType}.ts`
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        await invoke('open_in_external_editor', { path: scriptPath })
+      } catch (err) {
+        console.error('Failed to open script in VS Code:', err)
+      }
+    }
+  }, [projectPath, componentType, registryEntry])
+
+  // Mouse-based drag handlers (HTML5 drag doesn't work in Tauri)
+  // Uses a movement threshold to distinguish drag from click
+  const handleMouseDown = (e: React.MouseEvent) => {
+    // Only start drag on left mouse button, and not on buttons/inputs
+    if (e.button !== 0) return
+    const target = e.target as HTMLElement
+    if (target.tagName === 'BUTTON' || target.tagName === 'INPUT') return
+
+    const startX = e.clientX
+    const startY = e.clientY
+    const DRAG_THRESHOLD = 5 // pixels before drag starts
+    let hasDragStarted = false
+
+    // Mouse move handler - only start drag after threshold
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      const dx = moveEvent.clientX - startX
+      const dy = moveEvent.clientY - startY
+      const distance = Math.sqrt(dx * dx + dy * dy)
+
+      if (!hasDragStarted && distance >= DRAG_THRESHOLD) {
+        hasDragStarted = true
+        wasDraggingRef.current = true
+
+        // Set up drag state
+        draggedComponent = {
+          component,
+          sourceNodeId: nodeId,
+          sourceIndex: compIndex,
+        }
+        setIsDragging(true)
+        emitComponentDragState(draggedComponent)
+
+        // Create visual preview
+        const preview = document.createElement('div')
+        preview.className = 'fixed pointer-events-none z-[9999] px-3 py-2 rounded text-xs'
+        preview.style.cssText = `
+          background: ${theme.bgPanel};
+          border: 2px solid ${theme.accent};
+          color: ${theme.text};
+          box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+          transform: translate(-50%, -50%);
+        `
+        preview.innerHTML = `<span style="color:${theme.accent}">${metadata?.icon || '▣'}</span> ${metadata?.name || componentType || 'Component'}`
+        document.body.appendChild(preview)
+        dragPreviewElement = preview
+      }
+
+      if (hasDragStarted && dragPreviewElement) {
+        dragPreviewElement.style.left = `${moveEvent.clientX}px`
+        dragPreviewElement.style.top = `${moveEvent.clientY}px`
+      }
+    }
+
+    // Mouse up handler
+    const handleMouseUp = (upEvent: MouseEvent) => {
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+
+      // Remove preview
+      if (dragPreviewElement) {
+        dragPreviewElement.remove()
+        dragPreviewElement = null
+      }
+
+      // Emit drop event with position (only if drag actually started)
+      if (hasDragStarted && draggedComponent) {
+        window.dispatchEvent(new CustomEvent('component-drag-drop', {
+          detail: {
+            ...draggedComponent,
+            x: upEvent.clientX,
+            y: upEvent.clientY,
+          }
+        }))
+      }
+
+      draggedComponent = null
+      setIsDragging(false)
+      emitComponentDragState(null)
+
+      // Reset drag flag after a short delay (after click would fire)
+      setTimeout(() => {
+        wasDraggingRef.current = false
+      }, 10)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }
+
+  // Click handler that respects drag state
+  const handleClick = () => {
+    if (wasDraggingRef.current) return // Don't toggle after drag
+    setExpanded(!expanded)
+  }
+
+  // Right-click context menu
+  const handleContextMenu = (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setContextMenu({ x: e.clientX, y: e.clientY })
+  }
+
+  // Close context menu when clicking outside
+  useEffect(() => {
+    if (!contextMenu) return
+    const handleClickOutside = () => setContextMenu(null)
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setContextMenu(null)
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [contextMenu])
+
   return (
     <div
       className="rounded overflow-hidden transition-all"
+      onContextMenu={handleContextMenu}
       style={{
-        // Consistent toggle style: outline + alpha fill when enabled, depressed when not
-        backgroundColor: component.enabled ? theme.accent + '15' : theme.bg,
-        border: `1px solid ${component.enabled ? theme.accent : theme.border}`,
+        // Neutral panel style: subtle surface difference when enabled, depressed when not
+        backgroundColor: component.enabled ? theme.bgHover : theme.bg,
+        border: `1px solid ${theme.border}`,
         boxShadow: component.enabled ? 'none' : 'inset 0 1px 2px rgba(0,0,0,0.15)',
-        opacity: component.enabled ? 1 : 0.7,
+        opacity: isDragging ? 0.5 : (component.enabled ? 1 : 0.7),
       }}
     >
       {/* Header */}
       <div
-        className="px-2 py-1.5 flex items-center justify-between cursor-pointer"
-        onClick={() => setExpanded(!expanded)}
+        className="px-2 py-1.5 flex items-center justify-between cursor-grab active:cursor-grabbing"
+        onMouseDown={handleMouseDown}
+        onClick={handleClick}
       >
         <div className="flex items-center gap-2">
           {/* Toggle checkbox using shared component */}
@@ -384,7 +698,7 @@ function ComponentCard({ component, onPropertyChange, onToggleEnabled }: Compone
             checked={component.enabled}
             onChange={(enabled) => onToggleEnabled(enabled)}
           />
-          <span style={{ color: component.enabled ? theme.accent : theme.textMuted }}>
+          <span style={{ color: component.enabled ? theme.text : theme.textMuted }}>
             {metadata?.icon || '▣'}
           </span>
           <span className="text-xs" style={{ color: component.enabled ? theme.text : theme.textMuted }}>
@@ -392,20 +706,151 @@ function ComponentCard({ component, onPropertyChange, onToggleEnabled }: Compone
           </span>
         </div>
         <div className="flex items-center gap-1">
+          <button
+            className="px-1 rounded opacity-50 hover:opacity-100 transition-opacity"
+            style={{ color: theme.error }}
+            onClick={(e) => {
+              e.stopPropagation()
+              onRemove()
+            }}
+            title="Remove component"
+          >
+            ×
+          </button>
           <span style={{ color: theme.textDim }}>{expanded ? '▾' : '▸'}</span>
         </div>
       </div>
 
       {/* Properties */}
       {expanded && component.enabled && (
-        <div className="px-2 pb-2 space-y-2">
+        <div className="px-3 pb-3 pt-1 space-y-2">
           {metadata && groupedProperties ? (
             // Render with metadata (grouped)
             Object.entries(groupedProperties).map(([groupName, props]) => {
-              // Special handling: combine Position (x,y) and Size (width,height) into Vec2Scrubbers
               const propKeys = props.map(([key]) => key)
 
-              // Check if this is a Position group with x and y
+              // Transform group - Position and Size on separate rows
+              if (groupName === 'Transform') {
+                const x = (component.properties.x as number) ?? 0
+                const y = (component.properties.y as number) ?? 0
+                const w = (component.properties.width as number) ?? 1
+                const h = (component.properties.height as number) ?? 1
+                return (
+                  <div key={groupName} className="space-y-1.5">
+                    <Vec2Scrubber
+                      label="Position"
+                      value={[x, y]}
+                      onChange={([newX, newY]) => {
+                        onPropertyChange('x', newX)
+                        onPropertyChange('y', newY)
+                      }}
+                      step={1}
+                      precision={0}
+                      labels={['X', 'Y']}
+                    />
+                    <Vec2Scrubber
+                      label="Size"
+                      value={[w, h]}
+                      onChange={([newW, newH]) => {
+                        onPropertyChange('width', Math.max(0, newW))
+                        onPropertyChange('height', Math.max(0, newH))
+                      }}
+                      step={1}
+                      precision={0}
+                      min={0}
+                      labels={['W', 'H']}
+                    />
+                  </div>
+                )
+              }
+
+              // Anchor group - visual 3x3 preset grid
+              if (groupName === 'Anchor') {
+                const ax = (component.properties.anchorX as number) ?? 0
+                const ay = (component.properties.anchorY as number) ?? 0
+                return (
+                  <AnchorPivotGrid
+                    key={groupName}
+                    label="Anchor"
+                    valueX={ax}
+                    valueY={ay}
+                    onChange={(newX, newY) => {
+                      onPropertyChange('anchorX', newX)
+                      onPropertyChange('anchorY', newY)
+                    }}
+                  />
+                )
+              }
+
+              // Pivot group - visual 3x3 preset grid
+              if (groupName === 'Pivot') {
+                const px = (component.properties.pivotX as number) ?? 0
+                const py = (component.properties.pivotY as number) ?? 0
+                return (
+                  <AnchorPivotGrid
+                    key={groupName}
+                    label="Pivot"
+                    valueX={px}
+                    valueY={py}
+                    onChange={(newX, newY) => {
+                      onPropertyChange('pivotX', newX)
+                      onPropertyChange('pivotY', newY)
+                    }}
+                  />
+                )
+              }
+
+              // Stretch group - inline toggle buttons
+              if (groupName === 'Stretch') {
+                const sx = component.properties.stretchX === true
+                const sy = component.properties.stretchY === true
+                return (
+                  <StretchToggles
+                    key={groupName}
+                    stretchX={sx}
+                    stretchY={sy}
+                    onChange={(axis, value) => {
+                      onPropertyChange(axis === 'x' ? 'stretchX' : 'stretchY', value)
+                    }}
+                  />
+                )
+              }
+
+              // Padding group - 4 values in cross layout
+              if (groupName === 'Padding' && propKeys.some(k => k.startsWith('padding'))) {
+                const pl = (component.properties.paddingLeft as number) ?? 0
+                const pr = (component.properties.paddingRight as number) ?? 0
+                const pt = (component.properties.paddingTop as number) ?? 0
+                const pb = (component.properties.paddingBottom as number) ?? 0
+                return (
+                  <PaddingEditor
+                    key={groupName}
+                    left={pl}
+                    right={pr}
+                    top={pt}
+                    bottom={pb}
+                    onChange={(side, value) => {
+                      const key = `padding${side.charAt(0).toUpperCase() + side.slice(1)}`
+                      onPropertyChange(key, Math.max(0, value))
+                    }}
+                  />
+                )
+              }
+
+              // Size group (for components that have autoSize without transform)
+              if (groupName === 'Size' && propKeys.includes('autoSize')) {
+                return (
+                  <div key={groupName} className="flex items-center gap-2">
+                    <span className="text-[10px] w-12" style={{ color: theme.textDim }}>Auto</span>
+                    <ToggleCheckbox
+                      checked={component.properties.autoSize === true}
+                      onChange={(value) => onPropertyChange('autoSize', value)}
+                    />
+                  </div>
+                )
+              }
+
+              // Legacy Position group (for non-Rect2D components)
               if (groupName === 'Position' && propKeys.includes('x') && propKeys.includes('y')) {
                 const x = (component.properties.x as number) ?? 0
                 const y = (component.properties.y as number) ?? 0
@@ -425,77 +870,18 @@ function ComponentCard({ component, onPropertyChange, onToggleEnabled }: Compone
                 )
               }
 
-              // Check if this is a Size group with width and height
-              if (groupName === 'Size' && propKeys.includes('width') && propKeys.includes('height')) {
-                const width = (component.properties.width as number) ?? 1
-                const height = (component.properties.height as number) ?? 1
-                const isAutoSize = component.properties.autoSize === true
-                // Filter out width/height, but keep other Size properties (like autoSize)
-                const otherProps = props.filter(([key]) => key !== 'width' && key !== 'height')
-                return (
-                  <div key={groupName} className="space-y-1">
-                    <Vec2Scrubber
-                      label="Size"
-                      value={[width, height]}
-                      onChange={([newW, newH]) => {
-                        onPropertyChange('width', Math.max(1, newW))
-                        onPropertyChange('height', Math.max(1, newH))
-                      }}
-                      step={1}
-                      precision={0}
-                      min={1}
-                      labels={['W', 'H']}
-                      disabled={isAutoSize}
-                    />
-                    {/* Render other Size group properties (like autoSize) */}
-                    {otherProps.map(([propKey, propOptions]) => (
-                      <PropertyField
-                        key={propKey}
-                        label={propOptions.label || propKey}
-                        type={propOptions.type}
-                        value={component.properties[propKey]}
-                        onChange={(value) => onPropertyChange(propKey, value)}
-                        options={propOptions}
-                      />
-                    ))}
-                  </div>
-                )
-              }
-
-              // Check if this is a Padding group with paddingX and paddingY
-              if (groupName === 'Padding' && propKeys.includes('paddingX') && propKeys.includes('paddingY')) {
-                const px = (component.properties.paddingX as number) ?? 0
-                const py = (component.properties.paddingY as number) ?? 0
-                return (
-                  <div key={groupName}>
-                    <Vec2Scrubber
-                      label="Padding"
-                      value={[px, py]}
-                      onChange={([newPx, newPy]) => {
-                        onPropertyChange('paddingX', Math.max(0, newPx))
-                        onPropertyChange('paddingY', Math.max(0, newPy))
-                      }}
-                      step={1}
-                      precision={0}
-                      min={0}
-                      labels={['X', 'Y']}
-                    />
-                  </div>
-                )
-              }
-
               // Default group rendering
               return (
                 <div key={groupName}>
                   {groupName !== 'default' && (
                     <div
-                      className="text-xs uppercase tracking-wider mt-2 mb-1"
+                      className="text-[10px] uppercase tracking-wider mt-2 mb-0.5"
                       style={{ color: theme.textDim }}
                     >
                       {groupName}
                     </div>
                   )}
-                  <div className="space-y-1">
+                  <div className="space-y-0.5">
                     {props.map(([propKey, propOptions]) => (
                       <PropertyField
                         key={propKey}
@@ -524,112 +910,273 @@ function ComponentCard({ component, onPropertyChange, onToggleEnabled }: Compone
           )}
         </div>
       )}
+
+      {/* Context Menu - matches MenuBar styling */}
+      {contextMenu && (
+        <div
+          className="fixed z-50 min-w-[140px] rounded-md"
+          style={{
+            left: contextMenu.x,
+            top: contextMenu.y,
+            backgroundColor: '#27272a',
+            border: '1px solid #52525b',
+            boxShadow: '0 8px 32px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.4)',
+            padding: '4px',
+          }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            className="w-full h-7 px-3 text-left text-xs rounded transition-colors"
+            style={{ color: theme.text }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = '#52525b'
+              e.currentTarget.style.color = theme.accent
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent'
+              e.currentTarget.style.color = theme.text
+            }}
+            onClick={() => {
+              setExpanded(!expanded)
+              setContextMenu(null)
+            }}
+          >
+            {expanded ? 'Collapse' : 'Expand'}
+          </button>
+          <button
+            className="w-full h-7 px-3 text-left text-xs rounded transition-colors"
+            style={{ color: theme.text }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = '#52525b'
+              e.currentTarget.style.color = theme.accent
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent'
+              e.currentTarget.style.color = theme.text
+            }}
+            onClick={() => {
+              onToggleEnabled(!component.enabled)
+              setContextMenu(null)
+            }}
+          >
+            {component.enabled ? 'Disable' : 'Enable'}
+          </button>
+          <div className="my-1 mx-2" style={{ borderTop: '1px solid #52525b', height: '1px' }} />
+          <button
+            className="w-full h-7 px-3 text-left text-xs rounded transition-colors"
+            style={{ color: theme.text }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = '#52525b'
+              e.currentTarget.style.color = theme.accent
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent'
+              e.currentTarget.style.color = theme.text
+            }}
+            onClick={() => {
+              handleOpenScript()
+              setContextMenu(null)
+            }}
+          >
+            Open Script
+          </button>
+          <div className="my-1 mx-2" style={{ borderTop: '1px solid #52525b', height: '1px' }} />
+          <button
+            className="w-full h-7 px-3 text-left text-xs rounded transition-colors"
+            style={{ color: theme.error }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.backgroundColor = '#52525b'
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.backgroundColor = 'transparent'
+            }}
+            onClick={() => {
+              onRemove()
+              setContextMenu(null)
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      )}
     </div>
   )
 }
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Graph Picker Component
+// Anchor/Pivot Grid - Visual 3x3 preset selector
 // ─────────────────────────────────────────────────────────────────────────────
 
-interface GraphPickerProps {
-  value: string
-  onChange: (graphId: string) => void
+interface AnchorPivotGridProps {
+  label: string
+  valueX: number
+  valueY: number
+  onChange: (x: number, y: number) => void
 }
 
-function GraphPicker({ value, onChange }: GraphPickerProps) {
+function AnchorPivotGrid({ label, valueX, valueY, onChange }: AnchorPivotGridProps) {
   const theme = useTheme()
-  const projectPath = useEngineState((s) => s.project.root)
-  const [graphs, setGraphs] = useState<GraphListEntry[]>([])
-  const [isLoading, setIsLoading] = useState(false)
+  const [hovered, setHovered] = useState<number | null>(null)
 
-  // Load available graphs when component mounts or project changes
-  useEffect(() => {
-    console.log('[GraphPicker] projectPath:', projectPath)
-    if (!projectPath) {
-      console.log('[GraphPicker] No project path, skipping')
-      return
-    }
+  // 3x3 grid of presets: (0,0), (0.5,0), (1,0), etc.
+  const presets = [
+    [0, 0], [0.5, 0], [1, 0],
+    [0, 0.5], [0.5, 0.5], [1, 0.5],
+    [0, 1], [0.5, 1], [1, 1],
+  ] as const
 
-    const loadGraphs = async () => {
-      setIsLoading(true)
-      try {
-        graphStorage.setBasePath(projectPath)
-        console.log('[GraphPicker] Looking in:', graphStorage.getBasePath())
-        const graphList = await graphStorage.list()
-        console.log('[GraphPicker] Found graphs:', graphList)
-        setGraphs(graphList)
-      } catch (e) {
-        console.error('[GraphPicker] Failed to load graphs:', e)
-      }
-      setIsLoading(false)
-    }
-
-    loadGraphs()
-  }, [projectPath])
-
-  // Extract graph ID from filename (remove .graph.json extension)
-  const getGraphId = (entry: GraphListEntry) => {
-    // entry.name is the display name from the graph metadata
-    // entry.path is the full path
-    // The graphId is typically the filename without extension
-    const filename = entry.path.split('/').pop() || entry.path
-    return filename.replace('.graph.json', '')
-  }
-
-  if (isLoading) {
-    return (
-      <span className="text-xs" style={{ color: theme.textDim }}>
-        Loading graphs...
-      </span>
-    )
-  }
+  const isSelected = (px: number, py: number) =>
+    Math.abs(valueX - px) < 0.01 && Math.abs(valueY - py) < 0.01
 
   return (
-    <div className="flex gap-1 items-center">
-      <select
+    <div className="flex items-center gap-3">
+      <span className="text-xs w-14 shrink-0" style={{ color: theme.textMuted }}>{label}</span>
+      <div
+        className="grid grid-cols-3 gap-0.5 p-1 rounded"
+        style={{ backgroundColor: theme.border }}
+      >
+        {presets.map(([px, py], i) => {
+          const selected = isSelected(px, py)
+          const isHovered = hovered === i
+          return (
+            <button
+              key={i}
+              className="w-5 h-5 rounded transition-all"
+              style={{
+                backgroundColor: selected ? theme.accent : isHovered ? theme.accent + '60' : theme.bg,
+                transform: isHovered && !selected ? 'scale(1.1)' : 'scale(1)',
+              }}
+              onClick={() => onChange(px, py)}
+              onMouseEnter={() => setHovered(i)}
+              onMouseLeave={() => setHovered(null)}
+              title={`${px}, ${py}`}
+            >
+              {selected && (
+                <span className="block w-2 h-2 rounded-full mx-auto" style={{ backgroundColor: theme.bg }} />
+              )}
+              {isHovered && !selected && (
+                <span className="block w-1.5 h-1.5 rounded-full mx-auto" style={{ backgroundColor: theme.accent, opacity: 0.8 }} />
+              )}
+            </button>
+          )
+        })}
+      </div>
+      <div className="flex items-center gap-1 text-xs" style={{ color: theme.textDim }}>
+        <input
+          type="number"
+          value={valueX}
+          onChange={(e) => onChange(parseFloat(e.target.value) || 0, valueY)}
+          className="w-12 px-1.5 py-0.5 rounded text-xs text-center"
+          style={{ backgroundColor: theme.bg, color: theme.text, border: `1px solid ${theme.border}` }}
+          step={0.1}
+          min={0}
+          max={1}
+        />
+        <input
+          type="number"
+          value={valueY}
+          onChange={(e) => onChange(valueX, parseFloat(e.target.value) || 0)}
+          className="w-12 px-1.5 py-0.5 rounded text-xs text-center"
+          style={{ backgroundColor: theme.bg, color: theme.text, border: `1px solid ${theme.border}` }}
+          step={0.1}
+          min={0}
+          max={1}
+        />
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Stretch Toggles - Horizontal/Vertical stretch buttons
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface StretchTogglesProps {
+  stretchX: boolean
+  stretchY: boolean
+  onChange: (axis: 'x' | 'y', value: boolean) => void
+}
+
+function StretchToggles({ stretchX, stretchY, onChange }: StretchTogglesProps) {
+  const theme = useTheme()
+
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-xs w-14 shrink-0" style={{ color: theme.textMuted }}>Stretch</span>
+      <div className="flex gap-2">
+        <button
+          className="px-3 py-1 rounded text-xs transition-all"
+          style={{
+            backgroundColor: stretchX ? theme.accent : theme.bg,
+            color: stretchX ? theme.bg : theme.textMuted,
+            border: `1px solid ${stretchX ? theme.accent : theme.border}`,
+          }}
+          onClick={() => onChange('x', !stretchX)}
+          title="Stretch horizontally to fill parent width"
+        >
+          ↔ Horizontal
+        </button>
+        <button
+          className="px-3 py-1 rounded text-xs transition-all"
+          style={{
+            backgroundColor: stretchY ? theme.accent : theme.bg,
+            color: stretchY ? theme.bg : theme.textMuted,
+            border: `1px solid ${stretchY ? theme.accent : theme.border}`,
+          }}
+          onClick={() => onChange('y', !stretchY)}
+          title="Stretch vertically to fill parent height"
+        >
+          ↕ Vertical
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Padding Editor - Compact 4-value padding input
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface PaddingEditorProps {
+  left: number
+  right: number
+  top: number
+  bottom: number
+  onChange: (side: 'left' | 'right' | 'top' | 'bottom', value: number) => void
+}
+
+function PaddingEditor({ left, right, top, bottom, onChange }: PaddingEditorProps) {
+  const theme = useTheme()
+
+  const PaddingInput = ({ value, side, label }: { value: number; side: 'left' | 'right' | 'top' | 'bottom'; label: string }) => (
+    <div className="flex items-center gap-1">
+      <span className="text-xs w-3" style={{ color: theme.textDim }}>{label}</span>
+      <input
+        type="number"
         value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="flex-1 px-2 py-0.5 rounded text-xs"
+        onChange={(e) => onChange(side, parseInt(e.target.value) || 0)}
+        className="w-12 px-1.5 py-0.5 text-center text-xs rounded"
         style={{
           backgroundColor: theme.bg,
           color: theme.text,
           border: `1px solid ${theme.border}`,
         }}
-      >
-        <option value="">-- Select Graph --</option>
-        {graphs.map((entry) => (
-          <option key={entry.path} value={getGraphId(entry)}>
-            {entry.name}
-          </option>
-        ))}
-      </select>
-      {value && (
-        <button
-          onClick={() => {
-            // Find the full path and open in node editor
-            const entry = graphs.find(g => getGraphId(g) === value)
-            if (entry) {
-              window.dispatchEvent(new CustomEvent('dock-activate-tab', {
-                detail: { tabId: 'node-editor' }
-              }))
-              window.dispatchEvent(new CustomEvent('node-editor-open-graph', {
-                detail: { path: entry.path }
-              }))
-            }
-          }}
-          className="px-1.5 py-0.5 rounded text-xs"
-          style={{
-            backgroundColor: theme.bgHover,
-            color: theme.textMuted,
-            border: `1px solid ${theme.border}`,
-          }}
-          title="Edit in Node Editor"
-        >
-          ◎
-        </button>
-      )}
+        title={`Padding ${side}`}
+        min={0}
+      />
+    </div>
+  )
+
+  return (
+    <div className="flex items-center gap-3">
+      <span className="text-xs w-14 shrink-0" style={{ color: theme.textMuted }}>Padding</span>
+      <div className="flex gap-3">
+        <PaddingInput value={left} side="left" label="L" />
+        <PaddingInput value={right} side="right" label="R" />
+        <PaddingInput value={top} side="top" label="T" />
+        <PaddingInput value={bottom} side="bottom" label="B" />
+      </div>
     </div>
   )
 }
@@ -763,11 +1310,11 @@ function PropertyField({ label, type, value, onChange, options }: PropertyFieldP
         )
 
       case 'graphPicker':
+        // Graph picker removed - visual scripting has been removed
         return (
-          <GraphPicker
-            value={String(value || '')}
-            onChange={(graphId) => onChange(graphId)}
-          />
+          <span style={{ color: theme.textDim }}>
+            (Visual scripting removed)
+          </span>
         )
 
       default:
@@ -808,31 +1355,10 @@ function getComponentType(component: NodeComponent): string | null {
     return (component as { type: string }).type
   }
 
-  // Check if script name is a registered core component type
+  // Check if script name is registered in the component registry
   if (component.script) {
-    // Core component types are just their name
-    const coreTypes = [
-      // Position/Rendering
-      'Rect2D',
-      'GlyphMap', 'GlyphImage', 'GlyphMapRenderer',  // Multi-char ASCII art
-      'Glyph',           // Single character
-      'Terrain',         // Grid of prefab IDs
-      'Animator',        // Frame-based animation
-      // Physics/Interaction
-      'Collider',        // Collision
-      'Interactable',    // Can be activated
-      // Runtime components
-      'Camera',          // Virtual camera
-      'CameraTransposer', // Camera follow behavior
-      'CameraComposer',  // Camera framing
-      'CameraConfiner',  // Camera bounds
-      'CameraShake',     // Screen shake
-      'CameraLetterbox', // Cinematic bars
-      'Audio',           // Sound effects
-      'Behavior',        // Visual scripting
-      'Debug',           // Debug output
-    ]
-    if (coreTypes.includes(component.script)) {
+    // Look up in the component registry - includes both built-in and user components
+    if (componentRegistry.has(component.script)) {
       return component.script
     }
 

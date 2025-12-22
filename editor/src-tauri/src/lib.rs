@@ -68,6 +68,9 @@ pub fn run() {
             commands::write_prefab_file,
             commands::delete_prefab_file,
             commands::create_category_folder,
+            // File operations
+            commands::open_in_external_editor,
+            commands::reveal_in_file_explorer,
             // Floating panel windows
             commands::create_floating_window,
             commands::close_floating_window,

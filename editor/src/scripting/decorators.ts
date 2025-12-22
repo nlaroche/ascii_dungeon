@@ -511,13 +511,56 @@ function createEmptyMetadataMaps() {
 export function registerCoreComponents(): void {
   // Register Rect2D with its properties
   const rect2DProperties = new Map<string, PropertyOptions>()
-  rect2DProperties.set('x', { type: 'number', label: 'X', group: 'Position' })
-  rect2DProperties.set('y', { type: 'number', label: 'Y', group: 'Position' })
-  rect2DProperties.set('width', { type: 'number', label: 'Width', min: 1, group: 'Size' })
-  rect2DProperties.set('height', { type: 'number', label: 'Height', min: 1, group: 'Size' })
-  rect2DProperties.set('autoSize', { type: 'boolean', label: 'Auto Size', group: 'Size', tooltip: 'Automatically size based on children bounds' })
-  rect2DProperties.set('paddingX', { type: 'number', label: 'Padding X', min: 0, group: 'Padding', tooltip: 'Extra cells on left/right when auto-sizing' })
-  rect2DProperties.set('paddingY', { type: 'number', label: 'Padding Y', min: 0, group: 'Padding', tooltip: 'Extra cells on top/bottom when auto-sizing' })
+
+  // Transform group - basic position/size
+  rect2DProperties.set('x', { type: 'number', label: 'X', group: 'Transform' })
+  rect2DProperties.set('y', { type: 'number', label: 'Y', group: 'Transform' })
+  rect2DProperties.set('width', { type: 'number', label: 'W', min: 0, group: 'Transform' })
+  rect2DProperties.set('height', { type: 'number', label: 'H', min: 0, group: 'Transform' })
+
+  // Anchor/Pivot system - position relative to parent
+  rect2DProperties.set('anchorX', {
+    type: 'number', label: 'X', group: 'Anchor',
+    min: 0, max: 1, step: 0.5, precision: 2,
+    tooltip: 'Horizontal anchor on parent (0=left, 0.5=center, 1=right)'
+  })
+  rect2DProperties.set('anchorY', {
+    type: 'number', label: 'Y', group: 'Anchor',
+    min: 0, max: 1, step: 0.5, precision: 2,
+    tooltip: 'Vertical anchor on parent (0=top, 0.5=center, 1=bottom)'
+  })
+  rect2DProperties.set('pivotX', {
+    type: 'number', label: 'X', group: 'Pivot',
+    min: 0, max: 1, step: 0.5, precision: 2,
+    tooltip: 'Horizontal pivot/origin point (0=left, 0.5=center, 1=right)'
+  })
+  rect2DProperties.set('pivotY', {
+    type: 'number', label: 'Y', group: 'Pivot',
+    min: 0, max: 1, step: 0.5, precision: 2,
+    tooltip: 'Vertical pivot/origin point (0=top, 0.5=center, 1=bottom)'
+  })
+
+  // Stretch mode
+  rect2DProperties.set('stretchX', {
+    type: 'boolean', label: 'Stretch X', group: 'Stretch',
+    tooltip: 'Stretch horizontally to fill parent (width becomes padding)'
+  })
+  rect2DProperties.set('stretchY', {
+    type: 'boolean', label: 'Stretch Y', group: 'Stretch',
+    tooltip: 'Stretch vertically to fill parent (height becomes padding)'
+  })
+
+  // Padding (used when stretching or auto-sizing)
+  rect2DProperties.set('paddingLeft', { type: 'number', label: 'L', min: 0, group: 'Padding' })
+  rect2DProperties.set('paddingRight', { type: 'number', label: 'R', min: 0, group: 'Padding' })
+  rect2DProperties.set('paddingTop', { type: 'number', label: 'T', min: 0, group: 'Padding' })
+  rect2DProperties.set('paddingBottom', { type: 'number', label: 'B', min: 0, group: 'Padding' })
+
+  // Auto-size
+  rect2DProperties.set('autoSize', {
+    type: 'boolean', label: 'Auto', group: 'Size',
+    tooltip: 'Automatically size based on children bounds'
+  })
 
   componentRegistry.set('Rect2D', {
     metadata: {

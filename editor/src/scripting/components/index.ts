@@ -18,6 +18,18 @@ export type { ColliderType, CollisionEventData } from './ColliderComponent'
 export { InteractableComponent } from './InteractableComponent'
 export type { InteractionType } from './InteractableComponent'
 
+// AI Controllers
+export { WanderAIComponent } from './WanderAIComponent'
+export { TickWanderAIComponent } from './TickWanderAIComponent'
+
+// World/Scene Management
+export { WorldManagerComponent } from './WorldManagerComponent'
+export { EdgeTriggerComponent } from './EdgeTriggerComponent'
+export { GameDataComponent } from './GameDataComponent'
+
+// Player Input
+export { PlayerControllerComponent } from './PlayerControllerComponent'
+
 // Debug/Development
 export { DebugComponent, Debug, onDebugMessage } from './DebugComponent'
 export type { LogLevel, DebugMessageEvent } from './DebugComponent'
@@ -43,14 +55,6 @@ export type {
   CameraTransitionEvent,
   CameraShakeEvent,
 } from './CameraComponent'
-
-// Behavior (Visual Scripting)
-export {
-  BehaviorComponent,
-  BehaviorGraphRegistry,
-  ComponentInstanceRegistry,
-} from './BehaviorComponent'
-export type { GraphReference, ExecutionMode } from './BehaviorComponent'
 
 // Re-export decorators for convenience
 export {

@@ -54,27 +54,6 @@ export type {
   ExprWrapper,
 } from './expressions'
 
-// Logic Graph Runtime
-export {
-  GraphRuntime,
-  GraphExecutor,
-  GlobalGraphExecutor,
-} from './graph'
-export type {
-  LogicGraph,
-  VariableDef,
-  GraphEdge,
-  GraphNode,
-  SignalNode,
-  ActionNode,
-  BranchNode,
-  FlowNode,
-  VariableNode,
-  SubGraphNode,
-  GraphExecutionContext,
-  ComponentInstance,
-} from './graph'
-
 // State Machine Runtime
 export {
   StateMachineInstance,
@@ -133,28 +112,6 @@ export type {
   RuntimeStats,
 } from './RuntimeManager'
 
-// Graph Serialization
-export {
-  serializeGraph,
-  deserializeGraph,
-  validateGraph,
-  graphToJSON,
-  graphFromJSON,
-  cloneGraph,
-  graphToReactFlow,
-  reactFlowToGraph,
-} from './serialization'
-export type {
-  SerializedGraph,
-  SerializedNode,
-  SerializedEdge,
-  SerializedVariable,
-  GraphMetadata,
-  ValidationError,
-  ReactFlowNode,
-  ReactFlowEdge,
-} from './serialization'
-
 // Timer Manager
 export {
   TimerManager,
@@ -189,75 +146,6 @@ export type {
   EntityQuery,
 } from './SceneManager'
 
-// Node Executors
-export {
-  mathExecutors,
-  vectorExecutors,
-  stringExecutors,
-  comparisonExecutors,
-  entityExecutors,
-  sceneExecutors,
-  timerExecutors,
-  arrayExecutors,
-  debugExecutors,
-  nodeExecutors,
-  executeNode,
-  hasExecutor,
-  registerExecutor,
-} from './nodeExecutors'
-export type { NodeExecutorContext, NodeExecutor } from './nodeExecutors'
-
-// Graph Runner
-export {
-  GraphRunner,
-  globalGraphRunner,
-  loadGraph,
-  startGraph,
-  stopGraph,
-  pauseGraph,
-  resumeGraph,
-  getGraphState,
-} from './GraphRunner'
-export type {
-  GraphRunnerState,
-  GraphRunnerEvent,
-  GraphRunnerListener,
-  ExecutionStats,
-} from './GraphRunner'
-
-// Graph Storage
-export {
-  GraphStorage,
-  graphStorage,
-  saveGraph,
-  loadGraph as loadGraphFromFile,
-  listGraphs,
-  deleteGraph,
-} from './GraphStorage'
-export type {
-  SavedGraph,
-  SavedNode,
-  SavedEdge,
-  SavedVariable,
-  GraphListEntry,
-} from './GraphStorage'
-
-// Entity Binding
-export {
-  EntityBindingManager,
-  entityBindingManager,
-  bindGraphToEntity,
-  unbindGraph,
-  startEntityGraphs,
-  stopEntityGraphs,
-  sendEntityEvent,
-} from './EntityBinding'
-export type {
-  EntityRef,
-  BoundGraph,
-  ComponentProxy,
-} from './EntityBinding'
-
 // Game Hooks
 export {
   GameHooks,
@@ -271,56 +159,6 @@ export type {
   CameraRequest,
   GameHookHandler,
 } from './GameHooks'
-
-// SubGraph System
-export {
-  subGraphRegistry,
-  registerSubGraph,
-  getSubGraph,
-  getAllSubGraphs,
-  createSubGraph,
-} from './SubGraph'
-export type {
-  SubGraphDefinition,
-  SubGraphPort,
-  SubGraphInstance,
-} from './SubGraph'
-
-// Debugger
-export {
-  GraphDebugger,
-  graphDebugger,
-  attachDebugger,
-  setBreakpoint,
-  removeBreakpoint,
-  toggleBreakpoint,
-  startDebugging,
-  stopDebugging,
-  continueExecution,
-  stepOver,
-  stepInto,
-  stepOut,
-} from './Debugger'
-export type {
-  Breakpoint,
-  DebugState,
-  DebugEvent,
-  DebugEventListener,
-} from './Debugger'
-
-// Hot Reload
-export {
-  hotReloadManager,
-  hotReloadGraph,
-  hotReloadFromFile,
-  watchGraphFile,
-  unwatchGraphFile,
-  unwatchAllGraphFiles,
-} from './HotReload'
-export type {
-  HotReloadResult,
-  HotReloadOptions,
-} from './HotReload'
 
 // Play Mode Manager
 export {
@@ -341,3 +179,63 @@ export type {
   PlayModeStats,
   EntityRuntimeState,
 } from './PlayModeManager'
+
+// Transform Cache - World position caching with dirty flag propagation
+export {
+  TransformCache,
+  getWorldPosition,
+  markTransformDirty,
+} from './TransformCache'
+
+// Signal Types - Extensible signal system (instant, timed, delayed, custom)
+export {
+  SignalTypeRegistry,
+  InstantSignalType,
+  TimedSignalType,
+  DelayedSignalType,
+  registerBuiltinSignalTypes,
+  emitSignal,
+  emitInstant,
+  emitTimed,
+  updateSignals,
+  isSignalAnimating,
+} from './SignalTypes'
+export type {
+  SignalType,
+  SignalEmitOptions,
+  SignalEventData,
+  SignalEmitContext,
+  ActiveTimedSignal,
+} from './SignalTypes'
+
+// Tick System - Roguelike turn-based game logic with smooth animations
+export {
+  TickSystem,
+  Ticks,
+  TickEasing,
+  triggerTick,
+  onTick,
+  getTickCount,
+  getTickProgress,
+  getEasedTickProgress,
+  isTickAnimating,
+  setTickDuration,
+  lerpTick,
+} from './TickSystem'
+export type { EasingType } from './TickSystem'
+
+// Script Behaviors - TypeScript-based behaviors
+export {
+  registerScriptBehavior,
+  hasScriptBehavior,
+  createScriptBehavior,
+  getScriptBehaviorIds,
+  createWanderBehavior,
+  createPatrolBehavior,
+  createFollowBehavior,
+} from './ScriptBehaviors'
+export type {
+  ScriptBehaviorContext,
+  ScriptBehavior,
+  ScriptBehaviorFactory,
+} from './ScriptBehaviors'

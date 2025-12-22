@@ -112,8 +112,8 @@ export function StackItem({
     <div
       className="rounded overflow-hidden transition-all"
       style={{
-        backgroundColor: enabled ? theme.accent + '15' : theme.bg,
-        border: `1px solid ${enabled ? theme.accent : theme.border}`,
+        backgroundColor: enabled ? theme.bgHover : theme.bg,
+        border: `1px solid ${enabled ? theme.border : theme.border}`,
         boxShadow: enabled ? 'none' : 'inset 0 1px 2px rgba(0,0,0,0.15)',
       }}
     >
@@ -128,7 +128,7 @@ export function StackItem({
 
         {/* Icon if provided */}
         {icon && (
-          <span style={{ color: enabled ? theme.accent : theme.textMuted }}>{icon}</span>
+          <span style={{ color: enabled ? theme.text : theme.textMuted }}>{icon}</span>
         )}
 
         {/* Title */}
@@ -144,9 +144,9 @@ export function StackItem({
           <span
             className="text-xs px-1.5 rounded font-mono"
             style={{
-              backgroundColor: theme.accent + '20',
-              color: theme.accent,
-              border: `1px solid ${theme.accent}40`,
+              backgroundColor: theme.bg,
+              color: theme.text,
+              border: `1px solid ${theme.border}`,
             }}
           >
             {typeof value === 'number' ? value.toFixed(valuePrecision) : value}
@@ -247,6 +247,7 @@ interface ScrubberProps {
   className?: string
   dragDirection?: DragDirection
   sensitivity?: number  // Pixels per step (higher = less sensitive)
+  compact?: boolean
 }
 
 export function Scrubber({
@@ -262,6 +263,7 @@ export function Scrubber({
   className = '',
   dragDirection = 'horizontal',
   sensitivity = 4,  // 4 pixels per step (less sensitive)
+  compact = false,
 }: ScrubberProps) {
   const theme = useTheme()
   const [isDragging, setIsDragging] = useState(false)
@@ -403,13 +405,13 @@ export function Scrubber({
         onBlur={handleBlur}
         onKeyDown={handleKeyDown}
         disabled={disabled}
-        className="px-1 rounded text-xs"
+        className={`px-1 rounded ${compact ? 'text-[10px]' : 'text-xs'}`}
         style={{
           backgroundColor: theme.bg,
           color: disabled ? theme.textDim : theme.text,
           border: `1px solid ${isFocused ? theme.accent : theme.border}`,
-          width: '48px',
-          height: '20px',
+          width: compact ? '38px' : '48px',
+          height: compact ? '18px' : '20px',
           opacity: disabled ? 0.5 : 1,
         }}
       />
@@ -849,6 +851,7 @@ interface Vec2ScrubberProps {
   disabled?: boolean
   className?: string
   sensitivity?: number
+  compact?: boolean
 }
 
 export function Vec2Scrubber({
@@ -863,6 +866,7 @@ export function Vec2Scrubber({
   disabled = false,
   className = '',
   sensitivity = 4,  // 4 pixels per step
+  compact = false,
 }: Vec2ScrubberProps) {
   const theme = useTheme()
   const [isDragging, setIsDragging] = useState(false)
@@ -915,12 +919,12 @@ export function Vec2Scrubber({
     <div className={`flex items-center ${className}`}>
       {label && (
         <span
-          className="text-xs select-none rounded shrink-0"
+          className={`${compact ? 'text-[10px]' : 'text-xs'} select-none rounded shrink-0`}
           style={{
             color: isDragging ? theme.text : theme.textMuted,
             cursor: disabled ? 'not-allowed' : 'move',
             backgroundColor: isDragging ? theme.accent + '40' : 'transparent',
-            width: '55px',
+            width: compact ? '32px' : '55px',
           }}
           onMouseDown={handleLabelMouseDown}
           title="Drag to adjust both values"
@@ -928,7 +932,7 @@ export function Vec2Scrubber({
           {label}
         </span>
       )}
-      <div className="flex gap-1">
+      <div className={`flex ${compact ? 'gap-0.5' : 'gap-1'}`}>
         <Scrubber
           label={labels[0]}
           value={value[0]}
@@ -940,6 +944,7 @@ export function Vec2Scrubber({
           disabled={disabled}
           dragDirection="horizontal"
           sensitivity={sensitivity}
+          compact={compact}
         />
         <Scrubber
           label={labels[1]}
@@ -952,6 +957,7 @@ export function Vec2Scrubber({
           disabled={disabled}
           dragDirection="vertical"
           sensitivity={sensitivity}
+          compact={compact}
         />
       </div>
     </div>

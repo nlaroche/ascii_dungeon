@@ -5,7 +5,7 @@
 
 import { GameEventBus, createGameEvent, TriplePhaseEventBus } from './events'
 import { GlobalVariables } from './variables'
-import { BehaviorComponent, ComponentInstanceRegistry } from '../components/BehaviorComponent'
+import { Component } from '../Component'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -78,8 +78,8 @@ export class RuntimeManager {
     touches: [],
   }
 
-  // Behaviors
-  private behaviors: Set<BehaviorComponent> = new Set()
+  // Components (behaviors)
+  private behaviors: Set<Component> = new Set()
 
   // Callbacks
   private updateCallbacks: Set<UpdateCallback> = new Set()
@@ -287,9 +287,9 @@ export class RuntimeManager {
       data: { deltaTime: dt },
     }))
 
-    // Update all registered behaviors
+    // Update all registered components
     for (const behavior of this.behaviors) {
-      behavior.onUpdate(dt)
+      behavior.onUpdate?.(dt)
     }
 
     // Call update callbacks
@@ -324,7 +324,7 @@ export class RuntimeManager {
   private updateStats(rawDelta: number): void {
     this.stats.frameTime = rawDelta * 1000
     this.stats.behaviorCount = this.behaviors.size
-    this.stats.activeGraphs = Array.from(this.behaviors).filter(b => b.getIsRunning()).length
+    this.stats.activeGraphs = this.behaviors.size // All registered components are active
 
     // FPS calculation (averaged over 1 second)
     this.fpsFrames++
@@ -350,11 +350,11 @@ export class RuntimeManager {
   // Behavior Registration
   // ─────────────────────────────────────────────────────────────────────────
 
-  registerBehavior(behavior: BehaviorComponent): void {
+  registerBehavior(behavior: Component): void {
     this.behaviors.add(behavior)
   }
 
-  unregisterBehavior(behavior: BehaviorComponent): void {
+  unregisterBehavior(behavior: Component): void {
     this.behaviors.delete(behavior)
   }
 

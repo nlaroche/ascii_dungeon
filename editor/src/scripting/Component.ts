@@ -13,6 +13,10 @@ export interface ComponentLifecycle {
   onAttach?(node: Node): void
   /** Called when component is removed from a node */
   onDetach?(): void
+  /** Called once after onAttach, when play mode starts */
+  onInit?(): void
+  /** Called before onDetach, when play mode stops */
+  onDispose?(): void
   /** Called every frame with delta time */
   onUpdate?(dt: number): void
   /** Called at fixed intervals for physics */
@@ -82,6 +86,8 @@ export abstract class Component implements ComponentLifecycle {
   // Lifecycle methods - override in subclasses
   onAttach?(node: Node): void
   onDetach?(): void
+  onInit?(): void
+  onDispose?(): void
   onUpdate?(dt: number): void
   onFixedUpdate?(dt: number): void
   onPropertyChanged?(key: string, oldValue: unknown, newValue: unknown): void

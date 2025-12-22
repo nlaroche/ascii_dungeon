@@ -51,14 +51,10 @@ export function usePalette(options: UsePaletteOptions) {
     setError(null)
 
     try {
-      console.log('[usePalette] Scanning palette folder:', palettePath)
-
       // Scan the palette folder structure
       const scanResult = await invoke<PaletteScanResult>('scan_palette_folder', {
         path: palettePath
       })
-
-      console.log('[usePalette] Scan result:', scanResult)
 
       // Convert scanned categories to store format
       const categories: Record<string, PaletteCategory> = {}
@@ -123,8 +119,6 @@ export function usePalette(options: UsePaletteOptions) {
       setPath(['palette', 'rootCategories'], scanResult.root_categories, 'Load root categories')
 
       setLastScan(new Date())
-      console.log('[usePalette] Loaded', Object.keys(prefabs).length, 'prefabs in',
-                  Object.keys(categories).length, 'categories')
 
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
@@ -165,8 +159,6 @@ export function usePalette(options: UsePaletteOptions) {
       prefab: prefabFile
     })
 
-    console.log('[usePalette] Saved prefab to:', filePath)
-
     // Reload palette to pick up new file
     await loadPalette()
 
@@ -184,8 +176,6 @@ export function usePalette(options: UsePaletteOptions) {
     await invoke('delete_prefab_file', {
       path: prefab._filePath
     })
-
-    console.log('[usePalette] Deleted prefab:', prefab._filePath)
 
     // Reload palette
     await loadPalette()
@@ -210,8 +200,6 @@ export function usePalette(options: UsePaletteOptions) {
       icon: icon || null
     })
 
-    console.log('[usePalette] Created category folder:', folderPath)
-
     // Reload palette
     await loadPalette()
   }, [palettePath, loadPalette])
@@ -235,9 +223,7 @@ export function usePalette(options: UsePaletteOptions) {
         await invoke('start_file_watcher', { path: palettePath })
 
         // Listen for file change events
-        const unlisten = await listen<{ path: string }>('file-change', (event) => {
-          console.log('[usePalette] File changed:', event.payload.path)
-
+        const unlisten = await listen<{ path: string }>('file-change', () => {
           // Reload palette on any change
           loadPalette()
         })

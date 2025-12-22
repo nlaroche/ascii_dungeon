@@ -68,10 +68,18 @@ interface MenuBarProps {
   onOpenPanel?: (panelId: string) => void;
 }
 
+// Confirmation dialog for folder overwrite
+interface OverwriteConfirmation {
+  projectDir: string;
+  demoId: string | null;
+  demoName: string;
+}
+
 export function MenuBar({ openPanels = [], onOpenPanel }: MenuBarProps) {
   const theme = useTheme();
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [showNewProjectDialog, setShowNewProjectDialog] = useState(false);
+  const [overwriteConfirmation, setOverwriteConfirmation] = useState<OverwriteConfirmation | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const { currentId: currentTemplateId, applyTemplate, currentName, isCustomized } = useTemplate();
   const { scale: uiScale, setScale: setUIScale } = useUIScale();
@@ -81,6 +89,7 @@ export function MenuBar({ openPanels = [], onOpenPanel }: MenuBarProps) {
   const {
     createProject,
     createProjectFromDemo,
+    createProjectInFolder,
     openProject,
     saveProject,
     hasProject,
@@ -89,9 +98,33 @@ export function MenuBar({ openPanels = [], onOpenPanel }: MenuBarProps) {
   } = useProject();
 
   // Handle demo selection from dialog
-  const handleSelectDemo = useCallback((demo: DemoProject) => {
-    createProjectFromDemo(demo.id, demo.name);
+  const handleSelectDemo = useCallback(async (demo: DemoProject) => {
+    const result = await createProjectFromDemo(demo.id, demo.name);
+    if (result && 'needsConfirmation' in result) {
+      // Folder has existing content, show confirmation dialog
+      setOverwriteConfirmation({
+        projectDir: result.projectDir,
+        demoId: result.demoId,
+        demoName: result.demoName,
+      });
+    }
   }, [createProjectFromDemo]);
+
+  // Handle overwrite confirmation
+  const handleConfirmOverwrite = useCallback(() => {
+    if (overwriteConfirmation) {
+      createProjectInFolder(
+        overwriteConfirmation.projectDir,
+        overwriteConfirmation.demoId,
+        overwriteConfirmation.demoName
+      );
+      setOverwriteConfirmation(null);
+    }
+  }, [overwriteConfirmation, createProjectInFolder]);
+
+  const handleCancelOverwrite = useCallback(() => {
+    setOverwriteConfirmation(null);
+  }, []);
 
   // Close menu when clicking outside
   useEffect(() => {
@@ -317,6 +350,93 @@ export function MenuBar({ openPanels = [], onOpenPanel }: MenuBarProps) {
         onClose={() => setShowNewProjectDialog(false)}
         onSelectDemo={handleSelectDemo}
       />
+
+      {/* Overwrite Confirmation Dialog */}
+      {overwriteConfirmation && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'rgba(0, 0, 0, 0.7)',
+            zIndex: 1001,
+          }}
+          onClick={handleCancelOverwrite}
+        >
+          <div
+            style={{
+              background: theme.bgPanel,
+              borderRadius: '8px',
+              border: `1px solid ${theme.border}`,
+              boxShadow: '0 10px 40px rgba(0, 0, 0, 0.5)',
+              maxWidth: '400px',
+              width: '90%',
+              padding: '20px',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+              <span style={{ fontSize: '24px' }}>⚠️</span>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: theme.text }}>
+                Folder Not Empty
+              </h3>
+            </div>
+
+            <p style={{ margin: '0 0 8px', fontSize: '13px', color: theme.textMuted, lineHeight: 1.5 }}>
+              The selected folder already contains files:
+            </p>
+            <code style={{
+              display: 'block',
+              padding: '8px 12px',
+              background: theme.bg,
+              borderRadius: '4px',
+              fontSize: '11px',
+              color: theme.textDim,
+              marginBottom: '16px',
+              wordBreak: 'break-all',
+            }}>
+              {overwriteConfirmation.projectDir}
+            </code>
+            <p style={{ margin: '0 0 20px', fontSize: '13px', color: theme.textMuted, lineHeight: 1.5 }}>
+              Creating a new project here will overwrite <code>project.json</code>, <code>scene.json</code>, and the <code>palettes/</code> folder. Other files will be kept.
+            </p>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button
+                onClick={handleCancelOverwrite}
+                style={{
+                  padding: '8px 16px',
+                  background: 'transparent',
+                  border: `1px solid ${theme.border}`,
+                  borderRadius: '6px',
+                  color: theme.textMuted,
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmOverwrite}
+                style={{
+                  padding: '8px 20px',
+                  background: theme.warning || '#f59e0b',
+                  border: 'none',
+                  borderRadius: '6px',
+                  color: '#000',
+                  fontSize: '12px',
+                  fontWeight: 500,
+                  cursor: 'pointer',
+                }}
+              >
+                Replace & Create
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
