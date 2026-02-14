@@ -1,20 +1,21 @@
-/**
- * WebGPU Renderer for ASCII Dungeon
- * Handles all GPU operations, text rendering with shaders
- */
+import { createSDFAtlas } from './SDFAtlas.js';
+import { createTilemapRenderer, colorToU32, CELL_FLAGS } from './TilemapRenderer.js';
+
+export { colorToU32, CELL_FLAGS } from './TilemapRenderer.js';
+
 export class Renderer {
-  constructor(canvas) {
+  constructor(canvas, config = {}) {
     this.canvas = canvas;
+    this.gridWidth = config.gridWidth || 80;
+    this.gridHeight = config.gridHeight || 50;
+    this.cellSize = config.cellSize || 12;
+    
     this.device = null;
     this.context = null;
     this.format = null;
-    this.uniformBuffer = null;
     this.time = 0;
-    this.charTexture = null;
-    this.textPipeline = null;
-    this.textBuffer = null;
-    this.lastAscii = '';
-    this.textTexture = null;
+    this.atlas = null;
+    this.tilemap = null;
   }
 
   async init() {
@@ -41,7 +42,15 @@ export class Renderer {
       alphaMode: 'premultiplied'
     });
 
-    await this.createResources();
+    this.atlas = createSDFAtlas(this.device, 'monospace', 96);
+    this.tilemap = createTilemapRenderer(
+      this.device,
+      this.format,
+      this.atlas.texture,
+      this.gridWidth,
+      this.gridHeight
+    );
+    
     this.setupResize();
   }
 
@@ -52,154 +61,21 @@ export class Renderer {
     });
   }
 
-  async createResources() {
-    // Create uniform buffer for time/resolution
-    this.uniformBuffer = this.device.createBuffer({
-      size: 64,
-      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
-    });
-
-    // Create ASCII texture for text rendering (using canvas 2d as intermediate)
-    this.createTextTexture();
-    
-    // Create render pipeline
-    await this.createRenderPipeline();
+  setCell(x, y, char, fgColor, bgColor, depth = 0, flags = 0) {
+    const charCode = typeof char === 'string' ? char.charCodeAt(0) : char;
+    const fg = colorToU32(fgColor);
+    const bg = colorToU32(bgColor);
+    this.tilemap.setTile(x, y, charCode, fg, bg, depth, flags);
   }
 
-  createTextTexture() {
-    // Create a 2D canvas to render text, then upload as texture
-    this.textCanvas = document.createElement('canvas');
-    this.textCanvas.width = 1024;
-    this.textCanvas.height = 512;
-    this.textCtx = this.textCanvas.getContext('2d');
-    
-    // Draw default ASCII charset
-    this.textCtx.fillStyle = '#000000';
-    this.textCtx.fillRect(0, 0, 1024, 512);
-    this.textCtx.font = '24px monospace';
-    this.textCtx.fillStyle = '#ffffff';
-    this.textCtx.textBaseline = 'top';
-    
-    // Draw ASCII characters 32-126
-    let charX = 0;
-    let charY = 0;
-    for (let i = 32; i < 127; i++) {
-      const char = String.fromCharCode(i);
-      this.textCtx.fillText(char, charX * 20 + 4, charY * 28 + 4);
-      charX++;
-      if (charX >= 20) {
-        charX = 0;
-        charY++;
-      }
+  setCells(cellArray) {
+    for (const cell of cellArray) {
+      this.setCell(cell.x, cell.y, cell.char, cell.fg, cell.bg, cell.depth, cell.flags);
     }
-    
-    // Upload to GPU
-    this.textTexture = this.device.createTexture({
-      size: [1024, 512],
-      format: 'rgba8unorm',
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
-    });
-    
-    this.device.queue.copyExternalImageToTexture(
-      { source: this.textCanvas },
-      { texture: this.textTexture },
-      [1024, 512]
-    );
   }
 
-  async createRenderPipeline() {
-    // Simple fullscreen quad shader
-    const shaderCode = `
-      struct Uniforms {
-        resolution: vec2<f32>,
-        time: f32,
-        padding: vec2<f32>,
-      };
-      
-      @group(0) @binding(0) var<uniform> uniforms: Uniforms;
-      @group(0) @binding(1) var myTexture: texture_2d<f32>;
-      @group(0) @binding(2) var mySampler: sampler;
-      
-      struct VertexOutput {
-        @builtin(position) position: vec4<f32>,
-        @location(0) uv: vec2<f32>,
-      };
-      
-      @vertex
-      fn vertexMain(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
-        var positions = array<vec2<f32>, 6>(
-          vec2<f32>(-1.0, -1.0),
-          vec2<f32>(1.0, -1.0),
-          vec2<f32>(-1.0, 1.0),
-          vec2<f32>(-1.0, 1.0),
-          vec2<f32>(1.0, -1.0),
-          vec2<f32>(1.0, 1.0)
-        );
-        
-        var output: VertexOutput;
-        output.position = vec4<f32>(positions[vertexIndex], 0.0, 1.0);
-        output.uv = positions[vertexIndex] * 0.5 + 0.5;
-        output.uv.y = 1.0 - output.uv.y;
-        return output;
-      }
-      
-      @fragment
-      fn fragmentMain(@location(0) uv: vec2<f32>) -> @location(0) vec4<f32> {
-        var color = textureSample(myTexture, mySampler, uv);
-        
-        // Add scanline effect
-        let scanline = sin(uv.y * uniforms.resolution.y * 1.5) * 0.04;
-        color.rgb = color.rgb - scanline;
-        
-        // Add subtle glow/vignette
-        let center = vec2<f32>(0.5, 0.5);
-        let dist = distance(uv, center);
-        let vignette = 1.0 - dist * 0.5;
-        color.rgb = color.rgb * vignette;
-        
-        // CRT curvature (subtle)
-        let offset = (uv - 0.5) * 0.02;
-        color.rgb = color.rgb + offset.x;
-        
-        return color;
-      }
-    `;
-
-    const shaderModule = this.device.createShaderModule({
-      code: shaderCode
-    });
-
-    const sampler = this.device.createSampler({
-      magFilter: 'nearest',
-      minFilter: 'nearest'
-    });
-
-    this.textPipeline = this.device.createRenderPipeline({
-      layout: 'auto',
-      vertex: {
-        module: shaderModule,
-        entryPoint: 'vertexMain'
-      },
-      fragment: {
-        module: shaderModule,
-        entryPoint: 'fragmentMain',
-        targets: [{
-          format: this.format
-        }]
-      },
-      primitive: {
-        topology: 'triangle-list'
-      }
-    });
-
-    this.textBindGroup = this.device.createBindGroup({
-      layout: this.textPipeline.getBindGroupLayout(0),
-      entries: [
-        { binding: 0, resource: { buffer: this.uniformBuffer } },
-        { binding: 1, resource: this.textTexture.createView() },
-        { binding: 2, resource: sampler }
-      ]
-    });
+  clearGrid() {
+    this.tilemap.clearGrid();
   }
 
   startLoop() {
@@ -211,68 +87,22 @@ export class Renderer {
     requestAnimationFrame(render);
   }
 
-  drawText(ascii, x, y, color) {
-    // Store text to render this frame
-    this.pendingText = { ascii, x, y, color };
-  }
-
   render() {
-    // Update uniforms
-    const uniformData = new Float32Array([
-      this.canvas.width, this.canvas.height, this.time, 0
-    ]);
-    this.device.queue.writeBuffer(this.uniformBuffer, 0, uniformData);
-
-    // Render text to 2D canvas, then copy to texture
-    this.renderTextToTexture();
-
     const commandEncoder = this.device.createCommandEncoder();
     const textureView = this.context.getCurrentTexture().createView();
 
-    const renderPass = commandEncoder.beginRenderPass({
-      colorAttachments: [{
-        view: textureView,
-        clearValue: { r: 0.02, g: 0.02, b: 0.04, a: 1 },
-        loadOp: 'clear',
-        storeOp: 'store'
-      }]
-    });
-
-    renderPass.setPipeline(this.textPipeline);
-    renderPass.setBindGroup(0, this.textBindGroup);
-    renderPass.draw(6);
-    
-    renderPass.end();
-    this.device.queue.submit([commandEncoder.finish()]);
-  }
-
-  renderTextToTexture() {
-    if (!this.pendingText) return;
-    
-    const { ascii, color } = this.pendingText;
-    
-    // Clear and draw to 2D canvas
-    this.textCtx.fillStyle = '#000000';
-    this.textCtx.fillRect(0, 0, 1024, 512);
-    
-    // Draw the ASCII text
-    this.textCtx.fillStyle = color;
-    this.textCtx.font = '20px monospace';
-    this.textCtx.textBaseline = 'top';
-    
-    const lines = ascii.split('\n');
-    lines.forEach((line, i) => {
-      this.textCtx.fillText(line, 10, i * 24 + 10);
-    });
-    
-    // Upload to GPU texture
-    this.device.queue.copyExternalImageToTexture(
-      { source: this.textCanvas },
-      { texture: this.textTexture },
-      [1024, 512]
+    this.tilemap.upload(this.device);
+    this.tilemap.render(
+      commandEncoder,
+      textureView,
+      this.canvas.width,
+      this.canvas.height,
+      this.time,
+      this.cellSize,
+      this.cellSize * 1.5
     );
-    
-    this.pendingText = null;
+
+    this.device.queue.submit([commandEncoder.finish()]);
   }
 
   addEffect(type, x, y, options = {}) {
