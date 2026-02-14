@@ -80,131 +80,105 @@ export class Game {
   performAIAction() {
     const player = this.state.player;
     const dungeon = this.state.dungeon;
-    const x = player.x;
-    const y = player.y;
     
-    // Check for adjacent enemies
-    const adjacentEnemy = this.getAdjacentEnemy(x, y);
+    // Use AI library to decide action
+    const action = decideAction(
+      { x: player.x, y: player.y },
+      dungeon.grid,
+      { width: dungeon.width, height: dungeon.height }
+    );
     
-    if (adjacentEnemy) {
-      // Attack!
-      this.combat(adjacentEnemy, player);
-    } else {
-      // Move intelligently
-      this.performAIMovement(x, y);
+    if (action.type === 'attack') {
+      this.combat(action.target);
+    } else if (action.type === 'move') {
+      this.performMove(action.dx, action.dy);
     }
   }
 
-  getAdjacentEnemy(x, y) {
-    const dirs = [[0, -1], [0, 1], [-1, 0], [1, 0]];
-    for (const [dx, dy] of dirs) {
-      const nx = x + dx;
-      const ny = y + dy;
-      if (ny >= 0 && ny < this.state.dungeon.height && 
-          nx >= 0 && nx < this.state.dungeon.width) {
-        const cell = this.state.dungeon.grid[ny][nx];
-        if (cell.contents && cell.contents.type === 'enemy') {
-          return { x: nx, y: ny, ...cell.contents };
-        }
-      }
-    }
-    return null;
-  }
-
-  performAIMovement(x, y) {
+  performMove(dx, dy) {
+    const player = this.state.player;
     const dungeon = this.state.dungeon;
-    const dirs = [[0, -1], [0, 1], [-1, 0], [1, 0]];
+    const nx = player.x + dx;
+    const ny = player.y + dy;
     
-    // Shuffle directions based on "intelligence" - smarter = more exploration
-    const shuffled = [...dirs].sort(() => Math.random() - 0.5);
-    
-    for (const [dx, dy] of shuffled) {
-      const nx = x + dx;
-      const ny = y + dy;
+    if (ny >= 0 && ny < dungeon.height && nx >= 0 && nx < dungeon.width) {
+      const cell = dungeon.grid[ny][nx];
       
-      if (ny >= 0 && ny < dungeon.height && nx >= 0 && nx < dungeon.width) {
-        const cell = dungeon.grid[ny][nx];
+      if (cell.type === 'floor') {
+        // Update player position
+        this.state.player = {
+          ...player,
+          x: nx,
+          y: ny,
+          stamina: player.stamina - 1
+        };
         
-        if (cell.type === 'floor') {
-          // Move here
-          player.x = nx;
-          player.y = ny;
-          cell.explored = true;
-          this.state.player.stamina--;
-          this.state.runStats.stepsTaken++;
-          
-          // Check for treasure
-          if (cell.contents && cell.contents.type === 'treasure') {
-            this.collectTreasure(nx, ny, cell.contents);
-            cell.contents = null;
-          }
-          return;
+        cell.explored = true;
+        this.state.runStats.stepsTaken++;
+        
+        // Check for treasure
+        if (cell.contents && cell.contents.type === 'treasure') {
+          this.handleTreasure(nx, ny, cell.contents);
+          cell.contents = null;
         }
       }
     }
   }
 
-  combat(enemy, player) {
-    // Player attacks
-    const damage = Math.max(1, player.attack - 5); // Simplified defense
-    enemy.hp -= damage;
-    this.state.runStats.damageDealt += damage;
-    this.log(`You hit the ${enemy.symbol} for ${damage} damage!`);
+  combat(enemy) {
+    const player = this.state.player;
     
-    // Update grid
-    this.state.dungeon.grid[enemy.y][enemy.x].contents = enemy;
+    // Use combat library to resolve combat
+    const result = resolveCombat(player, enemy);
     
-    if (enemy.hp <= 0) {
+    this.state.runStats.damageDealt += result.defenderDamage;
+    this.log(`You hit the ${enemy.symbol} for ${result.defenderDamage} damage!`);
+    
+    // Update enemy in grid
+    if (!result.defenderKilled) {
+      this.state.dungeon.grid[enemy.y][enemy.x].contents = {
+        ...enemy,
+        hp: result.defenderHp
+      };
+    } else {
       // Enemy killed!
       this.state.runStats.enemiesKilled++;
-      this.state.runStats.gold += enemy.gold;
-      this.state.player.gold += enemy.gold;
-      this.state.runStats.xp = (this.state.runStats.xp || 0) + enemy.xp;
-      this.state.player.xp += enemy.xp;
+      this.state.runStats.gold = (this.state.runStats.gold || 0) + result.loot.gold;
       this.state.dungeon.grid[enemy.y][enemy.x].contents = null;
-      this.log(`Killed ${enemy.symbol}! +${enemy.gold} gold, +${enemy.xp} XP`);
+      this.log(`Killed ${enemy.symbol}! +${result.loot.gold} gold, +${result.loot.xp} XP`);
       
-      // Check level up
-      if (this.state.player.xp >= this.state.player.xpToNext) {
-        this.levelUp();
-      }
-    } else {
-      // Enemy counter-attacks
-      const enemyDmg = Math.max(1, enemy.attack - player.defense);
-      this.state.player.hp -= enemyDmg;
-      this.state.runStats.damageTaken += enemyDmg;
-      this.log(`${enemy.symbol} hits you for ${enemyDmg} damage!`);
-      
-      if (this.state.player.hp <= 0) {
-        this.log("You were defeated! Escaping...");
-        this.endDungeonRun();
-      }
+      // Update player with loot
+      this.state.player = addXp(addGold(player, result.loot.gold), result.loot.xp);
     }
     
-    this.state.player.stamina--;
+    // Handle counter-attack if enemy survived
+    if (!result.defenderKilled && result.attackerDamage > 0) {
+      this.state.player = applyDamage(player, result.attackerDamage);
+      this.state.runStats.damageTaken += result.attackerDamage;
+      this.log(`${enemy.symbol} hits you for ${result.attackerDamage} damage!`);
+    }
+    
+    // Decrease stamina
+    this.state.player = {
+      ...this.state.player,
+      stamina: this.state.player.stamina - 1
+    };
+    
+    // Check if player died
+    if (this.state.player.hp <= 0) {
+      this.log("You were defeated! Escaping...");
+      this.endDungeonRun();
+    }
   }
 
-  collectTreasure(x, y, treasure) {
-    this.state.player.gold += treasure.gold;
-    this.state.player.xp += treasure.xp;
+  handleTreasure(x, y, treasure) {
+    const loot = collectTreasure(treasure);
+    
+    // Update player with treasure
+    this.state.player = addXp(addGold(this.state.player, loot.gold), loot.xp);
     this.state.runStats.treasureFound++;
-    this.state.runStats.gold = (this.state.runStats.gold || 0) + treasure.gold;
-    this.log(`Found treasure! +${treasure.gold} gold, +${treasure.xp} XP`);
-    
-    if (this.state.player.xp >= this.state.player.xpToNext) {
-      this.levelUp();
-    }
-  }
-
-  levelUp() {
-    this.state.player.level++;
-    this.state.player.xp -= this.state.player.xpToNext;
-    this.state.player.xpToNext = Math.floor(this.state.player.xpToNext * 1.5);
-    this.state.player.maxHp += 10;
-    this.state.player.hp = this.state.player.maxHp;
-    this.state.player.attack += 2;
-    this.state.player.defense += 1;
-    this.log(`LEVEL UP! Now level ${this.state.player.level}!`);
+    this.state.runStats.gold = (this.state.runStats.gold || 0) + loot.gold;
+    this.log(`Found treasure! +${loot.gold} gold, +${loot.xp} XP`);
   }
 
   endDungeonRun() {
