@@ -16,11 +16,12 @@
 </script>
 
 <div class="param-slider">
-  <label>
+  <label for="slider-input">
     <span class="label">{label}</span>
     <span class="value">{value}</span>
   </label>
   <input 
+    id="slider-input"
     type="range" 
     {min} 
     {max} 
