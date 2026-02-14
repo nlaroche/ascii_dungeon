@@ -64,6 +64,18 @@ export function applyDamage(player, amount) {
 }
 
 /**
+ * Heal player by amount, capped at maxHp
+ * @param {Object} player - Player object
+ * @param {number} amount - Heal amount
+ * @returns {Object} Updated player object
+ */
+export function healPlayer(player, amount) {
+  const newPlayer = { ...player };
+  newPlayer.hp = Math.min(newPlayer.maxHp, newPlayer.hp + amount);
+  return newPlayer;
+}
+
+/**
  * Add gold to player
  * @param {Object} player - Player object
  * @param {number} amount - Gold amount
