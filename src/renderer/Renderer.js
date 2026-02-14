@@ -29,9 +29,8 @@ export class Renderer {
     }
 
     this.device = await adapter.requestDevice();
-    
-    this.canvas.width = window.innerWidth * window.devicePixelRatio;
-    this.canvas.height = window.innerHeight * window.devicePixelRatio;
+
+    this.resizeCanvas();
 
     this.context = this.canvas.getContext('webgpu');
     this.format = navigator.gpu.getPreferredCanvasFormat();
@@ -42,7 +41,7 @@ export class Renderer {
       alphaMode: 'premultiplied'
     });
 
-    this.atlas = createSDFAtlas(this.device, 'monospace', 96);
+    this.atlas = createSDFAtlas(this.device, 'Consolas, "Courier New", monospace', 96);
     this.tilemap = createTilemapRenderer(
       this.device,
       this.format,
@@ -54,18 +53,28 @@ export class Renderer {
     this.setupResize();
   }
 
-  setupResize() {
-    window.addEventListener('resize', () => {
-      this.canvas.width = window.innerWidth * window.devicePixelRatio;
-      this.canvas.height = window.innerHeight * window.devicePixelRatio;
-    });
+  resizeCanvas() {
+    const parent = this.canvas.parentElement;
+    const dpr = window.devicePixelRatio || 1;
+    if (parent) {
+      this.canvas.width = parent.clientWidth * dpr;
+      this.canvas.height = parent.clientHeight * dpr;
+    } else {
+      this.canvas.width = window.innerWidth * dpr;
+      this.canvas.height = window.innerHeight * dpr;
+    }
   }
 
-  setCell(x, y, char, fgColor, bgColor, depth = 0, flags = 0) {
+  setupResize() {
+    const observer = new ResizeObserver(() => this.resizeCanvas());
+    observer.observe(this.canvas.parentElement || this.canvas);
+  }
+
+  setCell(x, y, char, fgColor, bgColor, depth = 0, flags = 0, light = 1.0) {
     const charCode = typeof char === 'string' ? char.charCodeAt(0) : char;
     const fg = colorToU32(fgColor);
     const bg = colorToU32(bgColor);
-    this.tilemap.setTile(x, y, charCode, fg, bg, depth, flags);
+    this.tilemap.setTile(x, y, charCode, fg, bg, depth, flags, light);
   }
 
   setCells(cellArray) {
@@ -103,6 +112,11 @@ export class Renderer {
     );
 
     this.device.queue.submit([commandEncoder.finish()]);
+
+    if (!this._ready) {
+      this._ready = true;
+      this.canvas.dataset.ready = '1';
+    }
   }
 
   addEffect(type, x, y, options = {}) {

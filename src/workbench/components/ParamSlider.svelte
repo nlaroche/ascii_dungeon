@@ -6,9 +6,10 @@
   export let max = 100;
   export let step = 1;
   export let value = 50;
-  
+
   const dispatch = createEventDispatcher();
-  
+  const id = 'slider-' + label.toLowerCase().replace(/\s+/g, '-');
+
   function handleChange(event) {
     value = parseFloat(event.target.value);
     dispatch('change', value);
@@ -16,13 +17,13 @@
 </script>
 
 <div class="param-slider">
-  <label for="slider-input">
+  <label for={id}>
     <span class="label">{label}</span>
     <span class="value">{value}</span>
   </label>
-  <input 
-    id="slider-input"
-    type="range" 
+  <input
+    {id}
+    type="range"
     {min} 
     {max} 
     {step} 

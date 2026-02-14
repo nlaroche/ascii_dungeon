@@ -40,8 +40,8 @@ export function colorToU32(cssColor) {
   const b = parseInt(hex.slice(4, 6), 16);
   const a = 255;
   
-  // Pack as (r<<24)|(g<<16)|(b<<8)|a
-  return (r << 24) | (g << 16) | (b << 8) | a;
+  // Pack as (r<<24)|(g<<16)|(b<<8)|a, >>> 0 for unsigned
+  return ((r << 24) | (g << 16) | (b << 8) | a) >>> 0;
 }
 
 /**
@@ -70,9 +70,10 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
     minFilter: 'linear',
   });
   
-  // Uniform buffer for renderer (resolution, time, etc.)
+  // Uniform buffer matches shader Uniforms struct: 12 x f32 = 48 bytes
+  const UNIFORM_SIZE = 48;
   const uniformBuffer = device.createBuffer({
-    size: 32, // vec2 resolution + f32 time + padding
+    size: UNIFORM_SIZE,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
   
@@ -87,7 +88,7 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
       {
         binding: 1,
         visibility: GPUShaderStage.VERTEX | GPUShaderStage.FRAGMENT,
-        buffer: { type: 'storage' },
+        buffer: { type: 'read-only-storage' },
       },
       {
         binding: 2,
@@ -145,14 +146,14 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
    * @param {number} depth - 0.0=floor, 0.5=entity, 1.0=ceiling
    * @param {number} flags - cell flags (VISIBLE|EXPLORED|HIGHLIGHTED)
    */
-  function setTile(x, y, glyph, fg, bg, depth, flags = 0) {
+  function setTile(x, y, glyph, fg, bg, depth, flags = 0, light = 1.0) {
     if (x < 0 || x >= gridWidth || y < 0 || y >= gridHeight) {
       return;
     }
-    
+
     const index = y * gridWidth + x;
     const offset = index * CELL_SIZE_BYTES;
-    
+
     // glyph: u32
     dataView.setUint32(offset + 0, glyph, true);
     // fg: u32
@@ -161,8 +162,8 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
     dataView.setUint32(offset + 8, bg, true);
     // depth: f32
     dataView.setFloat32(offset + 12, depth, true);
-    // light: f32 (default 1.0)
-    dataView.setFloat32(offset + 16, 1.0, true);
+    // light: f32
+    dataView.setFloat32(offset + 16, light, true);
     // flags: u32
     dataView.setUint32(offset + 20, flags, true);
   }
@@ -197,24 +198,31 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
    * @param {number} cameraOffsetY
    * @returns {GPUTexture}
    */
-  function render(encoder, outputTexture, canvasWidth, canvasHeight, time = 0, cellPixelWidth = 8, cellPixelHeight = 8, cameraOffsetX = 0, cameraOffsetY = 0) {
-    // Update uniforms
-    const uniformData = new ArrayBuffer(32);
-    const uniformView = new DataView(uniformData);
-    uniformView.setFloat32(0, canvasWidth, true);
-    uniformView.setFloat32(4, canvasHeight, true);
-    uniformView.setFloat32(8, time, true);
-    // padding
-    uniformView.setFloat32(12, 0, true);
-    uniformView.setFloat32(16, 0.5, true); // parallaxStrength
-    uniformView.setFloat32(20, cellPixelWidth, true);
-    uniformView.setFloat32(24, cellPixelHeight, true);
-    uniformView.setFloat32(28, gridWidth, true);
-    // gridSize.y at offset 32 (but we only have 32 bytes allocated, so skip)
-    // camera offset at offset 36
-    // sdfEdge at offset 40
-    // sdfSmoothing at offset 44
-    
+  function render(encoder, outputTexture, canvasWidth, canvasHeight, time = 0, cellPixelWidth = 12, cellPixelHeight = 18, cameraOffsetX = 0, cameraOffsetY = 0) {
+    // Uniform struct layout (must match shader):
+    // resolution: vec2<f32>     offset 0
+    // time: f32                 offset 8
+    // parallaxStrength: f32     offset 12
+    // cellPixelSize: vec2<f32>  offset 16
+    // gridSize: vec2<f32>       offset 24
+    // cameraOffset: vec2<f32>   offset 32
+    // sdfEdge: f32              offset 40
+    // sdfSmoothing: f32         offset 44
+    const uniformData = new ArrayBuffer(UNIFORM_SIZE);
+    const v = new DataView(uniformData);
+    v.setFloat32(0, canvasWidth, true);
+    v.setFloat32(4, canvasHeight, true);
+    v.setFloat32(8, time, true);
+    v.setFloat32(12, 0.5, true);  // parallaxStrength
+    v.setFloat32(16, cellPixelWidth, true);
+    v.setFloat32(20, cellPixelHeight, true);
+    v.setFloat32(24, gridWidth, true);
+    v.setFloat32(28, gridHeight, true);
+    v.setFloat32(32, cameraOffsetX, true);
+    v.setFloat32(36, cameraOffsetY, true);
+    v.setFloat32(40, 0.5, true);  // sdfEdge
+    v.setFloat32(44, 0.05, true); // sdfSmoothing
+
     device.queue.writeBuffer(uniformBuffer, 0, uniformData);
     
     const passEncoder = encoder.beginRenderPass({
