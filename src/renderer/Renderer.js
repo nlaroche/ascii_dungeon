@@ -97,6 +97,7 @@ export class Renderer {
   }
 
   render() {
+    const dpr = window.devicePixelRatio || 1;
     const commandEncoder = this.device.createCommandEncoder();
     const textureView = this.context.getCurrentTexture().createView();
 
@@ -107,8 +108,8 @@ export class Renderer {
       this.canvas.width,
       this.canvas.height,
       this.time,
-      this.cellSize,
-      this.cellSize * 1.5
+      this.cellSize * dpr,
+      this.cellSize * 1.5 * dpr
     );
 
     this.device.queue.submit([commandEncoder.finish()]);
