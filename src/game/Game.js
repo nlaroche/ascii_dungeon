@@ -1,3 +1,8 @@
+import { createPlayer, addGold, addXp, applyDamage } from '../lib/index.js';
+import { generateDungeon } from '../lib/index.js';
+import { resolveCombat, collectTreasure } from '../lib/index.js';
+import { decideAction } from '../lib/index.js';
+
 /**
  * Main Game Logic
  * Handles dungeon runs, stamina, loot, and town phases
@@ -8,26 +13,7 @@ export class Game {
     this.state = {
       phase: 'dungeon', // 'dungeon' | 'summary' | 'town'
       dungeon: null,
-      player: {
-        name: 'Hero',
-        hp: 100,
-        maxHp: 100,
-        stamina: 20,
-        maxStamina: 20,
-        attack: 10,
-        defense: 5,
-        intelligence: 5, // AI "smarts" - affects decisions
-        level: 1,
-        xp: 0,
-        xpToNext: 100,
-        gold: 0,
-        inventory: [],
-        equipment: {
-          weapon: null,
-          armor: null,
-          amulet: null
-        }
-      },
+      player: createPlayer(),
       runStats: {
         enemiesKilled: 0,
         treasureFound: 0,
@@ -47,8 +33,18 @@ export class Game {
 
   startDungeonRun() {
     this.state.phase = 'dungeon';
-    this.state.dungeon = this.generateDungeon();
-    this.state.player.stamina = this.state.player.maxStamina;
+    this.state.dungeon = generateDungeon({
+      width: 20,
+      height: 15,
+      roomCount: 5,
+      playerLevel: this.state.player.level
+    });
+    this.state.player = {
+      ...this.state.player,
+      stamina: this.state.player.maxStamina,
+      x: 1,
+      y: 1
+    };
     this.state.runStats = {
       enemiesKilled: 0,
       treasureFound: 0,
@@ -57,108 +53,6 @@ export class Game {
       damageTaken: 0
     };
     this.log("Entered the dungeon...");
-    
-    // Place player in starting position
-    this.state.player.x = 1;
-    this.state.player.y = 1;
-  }
-
-  generateDungeon() {
-    const width = 20;
-    const height = 15;
-    const grid = [];
-    
-    // Generate empty grid
-    for (let y = 0; y < height; y++) {
-      const row = [];
-      for (let x = 0; x < width; x++) {
-        row.push({
-          type: 'wall',
-          explored: false,
-          seen: false,
-          contents: null
-        });
-      }
-      grid.push(row);
-    }
-
-    // Simple room carving
-    const rooms = [];
-    for (let i = 0; i < 5; i++) {
-      const roomW = 3 + Math.floor(Math.random() * 4);
-      const roomH = 3 + Math.floor(Math.random() * 3);
-      const roomX = 1 + Math.floor(Math.random() * (width - roomW - 2));
-      const roomY = 1 + Math.floor(Math.random() * (height - roomH - 2));
-      
-      rooms.push({ x: roomX, y: roomY, w: roomW, h: roomH });
-      
-      for (let ry = roomY; ry < roomY + roomH; ry++) {
-        for (let rx = roomX; rx < roomX + roomW; rx++) {
-          grid[ry][rx].type = 'floor';
-        }
-      }
-    }
-
-    // Connect rooms with corridors
-    for (let i = 1; i < rooms.length; i++) {
-      const prev = rooms[i - 1];
-      const curr = rooms[i];
-      const prevCenterX = Math.floor(prev.x + prev.w / 2);
-      const prevCenterY = Math.floor(prev.y + prev.h / 2);
-      const currCenterX = Math.floor(curr.x + curr.w / 2);
-      const currCenterY = Math.floor(curr.y + curr.h / 2);
-      
-      // Horizontal corridor
-      const startX = Math.min(prevCenterX, currCenterX);
-      const endX = Math.max(prevCenterX, currCenterX);
-      for (let x = startX; x <= endX; x++) {
-        grid[prevCenterY][x].type = 'floor';
-      }
-      
-      // Vertical corridor
-      const startY = Math.min(prevCenterY, currCenterY);
-      const endY = Math.max(prevCenterY, currCenterY);
-      for (let y = startY; y <= endY; y++) {
-        grid[y][currCenterX].type = 'floor';
-      }
-    }
-
-    // Add enemies and treasure to rooms (skip first room = start)
-    for (let i = 1; i < rooms.length; i++) {
-      const room = rooms[i];
-      const enemyChance = 0.3 + (this.state.player.level * 0.05);
-      
-      if (Math.random() < enemyChance) {
-        const ex = room.x + Math.floor(Math.random() * room.w);
-        const ey = room.y + Math.floor(Math.random() * room.h);
-        if (grid[ey][ex].type === 'floor') {
-          grid[ey][ex].contents = {
-            type: 'enemy',
-            hp: 20 + this.state.player.level * 10,
-            maxHp: 20 + this.state.player.level * 10,
-            attack: 5 + this.state.player.level * 2,
-            xp: 25 + this.state.player.level * 10,
-            gold: 10 + this.state.player.level * 5,
-            symbol: ['g', 'o', 's', 'S', 'T'][Math.floor(Math.random() * 5)]
-          };
-        }
-      }
-      
-      if (Math.random() < 0.4) {
-        const tx = room.x + Math.floor(Math.random() * room.w);
-        const ty = room.y + Math.floor(Math.random() * room.h);
-        if (grid[ty][tx].type === 'floor' && !grid[ty][tx].contents) {
-          grid[ty][tx].contents = {
-            type: 'treasure',
-            gold: 5 + Math.floor(Math.random() * 20 * this.state.player.level),
-            xp: 10 + Math.floor(Math.random() * 15),
-            symbol: '$'
-          };
-        }
-      }
-    }
-
-    return { grid, width, height, rooms };
   }
 
   gameLoop() {
