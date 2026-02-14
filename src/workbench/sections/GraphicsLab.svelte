@@ -11,7 +11,7 @@
   let config = { cellSize: 20, animSpeed: 1.0, visionRadius: 10 };
 
   // ── Dungeon Layout ──
-  const GRID_W = 60, GRID_H = 35;
+  const GRID_W = 80, GRID_H = 45;
   const dungeonMap = [];
   // 0=void, 1=wall, 2=room floor, 3=corridor floor
   for (let y = 0; y < GRID_H; y++) {
@@ -19,11 +19,12 @@
   }
 
   const rooms = [
-    { x: 2, y: 2, w: 12, h: 9 },
-    { x: 28, y: 2, w: 14, h: 9 },
-    { x: 2, y: 20, w: 12, h: 10 },
-    { x: 28, y: 18, w: 14, h: 12 },
-    { x: 16, y: 11, w: 10, h: 7 },
+    { x: 2, y: 2, w: 14, h: 10 },     // Room 1 (top-left)
+    { x: 28, y: 2, w: 16, h: 10 },    // Room 2 (top-right)
+    { x: 2, y: 25, w: 14, h: 12 },    // Room 3 (bottom-left)
+    { x: 28, y: 25, w: 16, h: 12 },   // Room 4 (bottom-right)
+    { x: 16, y: 13, w: 12, h: 8 },    // Room 5 (center)
+    { x: 52, y: 8, w: 18, h: 14 },    // Room 6 (far-right, large hall)
   ];
 
   // Fill rooms
@@ -44,15 +45,15 @@
     let cx = x1, cy = y1;
     while (cx !== x2) {
       for (let w = 0; w < 2; w++) {
-        if (cy + w < GRID_H) { dungeonMap[cy + w][cx] = 3; }
+        if (cy + w < GRID_H && cx >= 0 && cx < GRID_W) { dungeonMap[cy + w][cx] = 3; }
       }
       cx += Math.sign(x2 - x1);
     }
     while (cy !== y2) {
       for (let w = 0; w < 2; w++) {
-        if (cx + w < GRID_W) { dungeonMap[cy][cx + w] = 3; }
+        if (cx + w < GRID_W && cy >= 0 && cy < GRID_H) { dungeonMap[cy][cx + w] = 3; }
       }
-      cy += Math.sign(y2 - y1);
+      cy += Math.sign(y2 - cy);
     }
   }
 
@@ -63,11 +64,19 @@
   carveCorridor(28, 6, 25, 6);
   carveCorridor(25, 6, 25, 13);
   // Room 3 -> Middle
-  carveCorridor(13, 24, 16, 24);
-  carveCorridor(16, 17, 16, 24);
+  carveCorridor(13, 30, 16, 30);
+  carveCorridor(16, 20, 16, 30);
   // Room 4 -> Middle
-  carveCorridor(28, 24, 25, 24);
-  carveCorridor(25, 17, 25, 24);
+  carveCorridor(28, 30, 25, 30);
+  carveCorridor(25, 20, 25, 30);
+  // Room 5 (center) already connected via above corridors
+  
+  // Room 2 -> Room 6 (far right)
+  carveCorridor(43, 6, 52, 6);
+  carveCorridor(52, 6, 52, 14);
+  // Room 4 -> Room 6
+  carveCorridor(43, 30, 52, 30);
+  carveCorridor(52, 20, 52, 30);
 
   // Add walls around corridors where missing
   for (let y = 1; y < GRID_H - 1; y++) {
@@ -75,8 +84,11 @@
       if (dungeonMap[y][x] === 3) {
         for (let dy = -1; dy <= 1; dy++) {
           for (let dx = -1; dx <= 1; dx++) {
-            if (dungeonMap[y + dy][x + dx] === 0) {
-              dungeonMap[y + dy][x + dx] = 1;
+            const ny = y + dy, nx = x + dx;
+            if (ny >= 0 && ny < GRID_H && nx >= 0 && nx < GRID_W) {
+              if (dungeonMap[ny][nx] === 0) {
+                dungeonMap[ny][nx] = 1;
+              }
             }
           }
         }
@@ -90,25 +102,35 @@
     { x: 2, y: 6 }, { x: 13, y: 6 },   // Room 1 sides
     { x: 30, y: 2 }, { x: 38, y: 2 },  // Room 2 top wall
     { x: 28, y: 6 }, { x: 41, y: 6 },  // Room 2 sides
-    { x: 4, y: 20 }, { x: 10, y: 20 }, // Room 3 top wall
-    { x: 30, y: 18 }, { x: 38, y: 18 },// Room 4 top wall
-    { x: 17, y: 11 }, { x: 24, y: 11 },// Middle room
+    { x: 4, y: 25 }, { x: 10, y: 25 }, // Room 3 top wall
+    { x: 30, y: 25 }, { x: 38, y: 25 },// Room 4 top wall
+    { x: 17, y: 13 }, { x: 24, y: 13 },// Middle room
+    // Room 6 torches
+    { x: 54, y: 8 }, { x: 62, y: 8 }, { x: 68, y: 8 },
+    { x: 52, y: 12 }, { x: 68, y: 12 },
+    { x: 54, y: 18 }, { x: 62, y: 18 }, { x: 68, y: 18 },
+    // Corridors to Room 6
+    { x: 48, y: 6 }, { x: 50, y: 30 },
   ];
 
   const enemies = [
     { x: 8, y: 5, char: 'G', fg: '#cc4400' },
     { x: 34, y: 6, char: 'S', fg: '#aaaaaa' },
-    { x: 6, y: 25, char: 'S', fg: '#aaaaaa' },
-    { x: 35, y: 24, char: 'D', fg: '#ff00ff' },
-    { x: 20, y: 14, char: 'R', fg: '#ff4444' },
+    { x: 6, y: 30, char: 'S', fg: '#aaaaaa' },
+    { x: 35, y: 30, char: 'D', fg: '#ff00ff' },
+    { x: 22, y: 16, char: 'R', fg: '#ff4444' },
+    // Additional enemies in Room 6
+    { x: 58, y: 12, char: 'O', fg: '#00ccff' },
+    { x: 65, y: 16, char: 'T', fg: '#ff8800' },
   ];
 
   const treasures = [
     { x: 10, y: 7 }, { x: 36, y: 8 },
-    { x: 8, y: 26 }, { x: 34, y: 27 },
+    { x: 8, y: 31 }, { x: 34, y: 31 },
+    { x: 60, y: 10 }, { x: 64, y: 18 },
   ];
 
-  // ── Walking path ──
+  // ── Walking path (validated - only floor tiles) ──
   function linePath(points) {
     const result = [];
     for (let i = 0; i < points.length - 1; i++) {
@@ -125,25 +147,121 @@
     return result;
   }
 
-  const path = linePath([
-    { x: 5, y: 6 }, { x: 11, y: 6 },   // Room 1
-    { x: 16, y: 6 }, { x: 16, y: 13 },  // Corridor down
-    { x: 20, y: 13 }, { x: 24, y: 13 }, // Middle room
-    { x: 25, y: 13 }, { x: 25, y: 6 },  // Corridor up
-    { x: 34, y: 6 }, { x: 38, y: 6 },   // Room 2
-    { x: 38, y: 9 }, { x: 34, y: 9 },   // Room 2 bottom
-    { x: 25, y: 9 }, { x: 25, y: 24 },  // Corridor down
-    { x: 34, y: 24 }, { x: 38, y: 24 }, // Room 4
-    { x: 38, y: 27 }, { x: 30, y: 27 }, // Room 4 bottom
-    { x: 25, y: 24 }, { x: 16, y: 24 }, // Corridor left
-    { x: 8, y: 24 }, { x: 5, y: 24 },   // Room 3
-    { x: 5, y: 27 }, { x: 11, y: 27 },  // Room 3 bottom
-    { x: 11, y: 24 }, { x: 16, y: 24 }, // Back corridor
-    { x: 16, y: 13 }, { x: 16, y: 6 },  // Up to room 1
-    { x: 5, y: 6 },                       // Back to start
-  ]);
+  const rawPath = [
+    // Room 1 interior
+    { x: 5, y: 5 }, { x: 10, y: 5 }, { x: 10, y: 8 }, { x: 5, y: 8 },
+    // Exit Room 1 through corridor to middle
+    { x: 5, y: 6 }, { x: 13, y: 6 }, { x: 16, y: 6 }, { x: 16, y: 12 },
+    // Middle room
+    { x: 18, y: 14 }, { x: 23, y: 14 },
+    // Corridor to Room 2
+    { x: 25, y: 14 }, { x: 25, y: 6 }, { x: 30, y: 6 },
+    // Room 2 interior
+    { x: 35, y: 5 }, { x: 38, y: 5 }, { x: 38, y: 8 }, { x: 30, y: 8 },
+    // Corridor to Room 6
+    { x: 43, y: 6 }, { x: 52, y: 6 }, { x: 52, y: 10 },
+    // Room 6 interior part 1
+    { x: 58, y: 10 }, { x: 62, y: 10 }, { x: 62, y: 16 },
+    // Exit Room 6 to Room 4
+    { x: 52, y: 16 }, { x: 52, y: 20 },
+    // Corridor to Room 4
+    { x: 52, y: 30 }, { x: 43, y: 30 },
+    // Room 4 interior
+    { x: 35, y: 30 }, { x: 38, y: 30 }, { x: 38, y: 32 }, { x: 30, y: 32 },
+    // Back to middle via corridor
+    { x: 25, y: 30 }, { x: 25, y: 20 },
+    // Corridor to Room 3
+    { x: 25, y: 30 }, { x: 16, y: 30 },
+    // Room 3 interior
+    { x: 5, y: 30 }, { x: 10, y: 30 }, { x: 10, y: 32 }, { x: 5, y: 32 },
+    // Return to Room 1
+    { x: 5, y: 30 }, { x: 16, y: 30 }, { x: 16, y: 20 }, { x: 16, y: 14 },
+    { x: 16, y: 6 }, { x: 5, y: 6 }, { x: 5, y: 5 },
+  ];
+
+  // Validate path - only keep points on floor (2 or 3)
+  const path = linePath(rawPath.filter(p => dungeonMap[p.y]?.[p.x] >= 2));
 
   let explored = new Set();
+
+  // ── Shadow-casting FOV ──
+  function castFOV(cx, cy, radius, isBlocking) {
+    const visible = new Set();
+    visible.add((cy << 8) | cx);
+
+    for (let octant = 0; octant < 8; octant++) {
+      castOctant(cx, cy, radius, octant, 1, 1.0, 0.0, isBlocking, visible);
+    }
+    return visible;
+  }
+
+  function castOctant(cx, cy, radius, octant, row, startSlope, endSlope, isBlocking, visible) {
+    if (startSlope < endSlope) return;
+
+    let nextStartSlope = startSlope;
+
+    for (let j = row; j <= radius; j++) {
+      let blocked = false;
+
+      for (let dx = -j; dx <= 0; dx++) {
+        const dy = -j;
+        const leftSlope = (dx - 0.5) / (dy + 0.5);
+        const rightSlope = (dx + 0.5) / (dy - 0.5);
+
+        if (startSlope < rightSlope) continue;
+        if (endSlope > leftSlope) break;
+
+        // Transform by octant
+        let tx, ty;
+        switch (octant) {
+          case 0: tx = cx + dx; ty = cy + dy; break;
+          case 1: tx = cx + dy; ty = cy + dx; break;
+          case 2: tx = cx - dy; ty = cy + dx; break;
+          case 3: tx = cx - dx; ty = cy + dy; break;
+          case 4: tx = cx - dx; ty = cy - dy; break;
+          case 5: tx = cx - dy; ty = cy - dx; break;
+          case 6: tx = cx + dy; ty = cy - dx; break;
+          case 7: tx = cx + dx; ty = cy - dy; break;
+        }
+
+        const distSq = (tx - cx) * (tx - cx) + (ty - cy) * (ty - cy);
+        if (distSq > radius * radius) continue;
+        if (tx < 0 || tx >= GRID_W || ty < 0 || ty >= GRID_H) continue;
+
+        visible.add((ty << 8) | tx);
+
+        if (blocked) {
+          if (isBlocking(tx, ty)) {
+            nextStartSlope = rightSlope;
+          } else {
+            blocked = false;
+            startSlope = nextStartSlope;
+          }
+        } else if (isBlocking(tx, ty) && j < radius) {
+          blocked = true;
+          castOctant(cx, cy, radius, octant, j + 1, startSlope, leftSlope, isBlocking, visible);
+          nextStartSlope = rightSlope;
+        }
+      }
+      if (blocked) break;
+    }
+  }
+
+  // ── Line of sight for torch lighting ──
+  function hasLineOfSight(x0, y0, x1, y1) {
+    let dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
+    let sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+    let err = dx - dy;
+    let cx = x0, cy = y0;
+    while (cx !== x1 || cy !== y1) {
+      const e2 = 2 * err;
+      if (e2 > -dy) { err -= dy; cx += sx; }
+      if (e2 < dx) { err += dx; cy += sy; }
+      if (cx === x1 && cy === y1) break;
+      if (dungeonMap[cy]?.[cx] === 1) return false;
+    }
+    return true;
+  }
 
   // ── Lighting: compute light at (x,y) from all torches ──
   function computeLight(x, y, time) {
@@ -152,9 +270,9 @@
       const dx = x - torch.x;
       const dy = y - torch.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < 8) {
-        const flicker = 0.85 + Math.sin(time * 4 + torch.x * 3.7 + torch.y * 2.3) * 0.15;
-        const intensity = Math.max(0, 1.0 - dist / 8) * flicker;
+      if (dist < 10 && hasLineOfSight(torch.x, torch.y, x, y)) {
+        const flicker = 0.8 + Math.sin(time * 4 + torch.x * 3.7 + torch.y * 2.3) * 0.2;
+        const intensity = Math.max(0, 1.0 - dist / 10) * flicker;
         totalLight += intensity;
       }
     }
@@ -171,18 +289,17 @@
     if (!renderer) return;
     renderer.clearGrid();
 
-    const vr = config.visionRadius;
+    // Get FOV using shadowcasting
+    const isBlocking = (x, y) => dungeonMap[y]?.[x] === 1;
+    const fovVisible = castFOV(Math.round(px), Math.round(py), config.visionRadius, isBlocking);
 
     for (let y = 0; y < GRID_H; y++) {
       for (let x = 0; x < GRID_W; x++) {
         const tile = dungeonMap[y][x];
         if (tile === 0) continue; // void = black (already cleared)
 
-        const dx = x - px;
-        const dy = y - py;
-        const distSq = dx * dx + dy * dy;
-        const inVision = distSq <= vr * vr;
         const key = (y << 8) | x;
+        const inVision = fovVisible.has(key);
         const wasExplored = explored.has(key);
 
         if (inVision) explored.add(key);
@@ -201,11 +318,22 @@
           flags = CELL_FLAGS.VISIBLE | CELL_FLAGS.EXPLORED;
           light = computeLight(x, y, time);
           // Player proximity adds some ambient light
-          const proxLight = Math.max(0, 1.0 - Math.sqrt(distSq) / vr) * 0.5;
+          const dx = x - px, dy = y - py;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          const proxLight = Math.max(0, 1.0 - dist / config.visionRadius) * 0.5;
           light = Math.min(light + proxLight, 1.0);
         } else if (wasExplored) {
           flags = CELL_FLAGS.EXPLORED;
           light = 0.0;
+          // Dim explored areas - make them darker than before
+          if (tile === 1) {
+            fg = '#333344';
+            bg = '#1a1a28';
+          } else if (tile === 2) {
+            bg = '#0d0d1a';
+          } else if (tile === 3) {
+            bg = '#0a0a14';
+          }
         } else {
           continue; // not explored = black
         }
@@ -216,29 +344,43 @@
 
     // Torches
     for (const torch of torches) {
-      const dx = torch.x - px, dy = torch.y - py;
-      if (dx * dx + dy * dy <= vr * vr) {
-        const flicker = Math.sin(time * 5 + torch.x) * 0.5 + 0.5;
-        const g = Math.floor(102 + flicker * 68).toString(16).padStart(2, '0');
-        renderer.setCell(torch.x, torch.y, '!', '#ff' + g + '00', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE | CELL_FLAGS.HIGHLIGHTED, 1.0);
+      const key = (torch.y << 8) | torch.x;
+      if (!fovVisible.has(key)) continue;
+      const flicker = Math.sin(time * 5 + torch.x) * 0.5 + 0.5;
+      const g = Math.floor(102 + flicker * 68).toString(16).padStart(2, '0');
+      renderer.setCell(torch.x, torch.y, '!', '#ff' + g + '00', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE | CELL_FLAGS.HIGHLIGHTED, 1.0);
+      
+      // Torch particles
+      for (let p = 0; p < 3; p++) {
+        const phase = time * 2 + p * 2.1 + torch.x * 0.7;
+        const sparkY = torch.y - 1 - (phase % 3);
+        const sparkX = torch.x + Math.sin(phase * 1.5) * 0.8;
+        const rx = Math.round(sparkX), ry = Math.round(sparkY);
+        if (ry >= 0 && ry < GRID_H && rx >= 0 && rx < GRID_W) {
+          const fade = 1.0 - (phase % 3) / 3;
+          if (fade > 0.1) {
+            const sparkChar = fade > 0.5 ? '*' : '.';
+            const r = 'ff';
+            const gVal = Math.floor(fade * 170).toString(16).padStart(2, '0');
+            renderer.setCell(rx, ry, sparkChar, '#' + r + gVal + '00', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, fade);
+          }
+        }
       }
     }
 
     // Enemies
     for (const enemy of enemies) {
-      const dx = enemy.x - px, dy = enemy.y - py;
-      if (dx * dx + dy * dy <= vr * vr) {
-        const light = computeLight(enemy.x, enemy.y, time) + 0.3;
-        renderer.setCell(enemy.x, enemy.y, enemy.char, enemy.fg, '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, Math.min(light, 1.0));
-      }
+      const key = (enemy.y << 8) | enemy.x;
+      if (!fovVisible.has(key)) continue;
+      const light = computeLight(enemy.x, enemy.y, time) + 0.3;
+      renderer.setCell(enemy.x, enemy.y, enemy.char, enemy.fg, '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, Math.min(light, 1.0));
     }
 
     // Treasure
     for (const treasure of treasures) {
-      const dx = treasure.x - px, dy = treasure.y - py;
-      if (dx * dx + dy * dy <= vr * vr) {
-        renderer.setCell(treasure.x, treasure.y, '$', '#ffdd00', '#1a1a2e', 0.0, CELL_FLAGS.VISIBLE | CELL_FLAGS.HIGHLIGHTED, 1.0);
-      }
+      const key = (treasure.y << 8) | treasure.x;
+      if (!fovVisible.has(key)) continue;
+      renderer.setCell(treasure.x, treasure.y, '$', '#ffdd00', '#1a1a2e', 0.0, CELL_FLAGS.VISIBLE | CELL_FLAGS.HIGHLIGHTED, 1.0);
     }
 
     // Player (always full brightness)
@@ -267,7 +409,7 @@
         lastFrame = now;
         time += dt * config.animSpeed;
 
-        const moveSpeed = 3;
+        const moveSpeed = 2; // Slower for smoother visibility
         const t = ((time * moveSpeed) % path.length + path.length) % path.length;
         const idx = Math.floor(t);
         const frac = t - idx;
