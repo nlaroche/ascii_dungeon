@@ -289,9 +289,14 @@
     if (!renderer) return;
     renderer.clearGrid();
 
-    // Get FOV using shadowcasting
+    // Get FOV using shadowcasting - merged from current and next tile for smooth transitions
     const isBlocking = (x, y) => dungeonMap[y]?.[x] === 1;
-    const fovVisible = castFOV(Math.round(px), Math.round(py), config.visionRadius, isBlocking);
+    const cx = Math.floor(px), cy = Math.floor(py);
+    const nx = Math.ceil(px), ny = Math.ceil(py);
+    const fov1 = castFOV(cx, cy, config.visionRadius, isBlocking);
+    const fov2 = (cx !== nx || cy !== ny) ? castFOV(nx, ny, config.visionRadius, isBlocking) : fov1;
+    // Merge: union of both FOV sets
+    const fovVisible = new Set([...fov1, ...fov2]);
 
     for (let y = 0; y < GRID_H; y++) {
       for (let x = 0; x < GRID_W; x++) {
@@ -383,8 +388,20 @@
       renderer.setCell(treasure.x, treasure.y, '$', '#ffdd00', '#1a1a2e', 0.0, CELL_FLAGS.VISIBLE | CELL_FLAGS.HIGHLIGHTED, 1.0);
     }
 
-    // Player (always full brightness)
-    renderer.setCell(Math.round(px), Math.round(py), '@', '#00ff88', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, 1.0);
+    // Player rendered at both tiles during transition
+    const playerCX = Math.floor(px), playerCY = Math.floor(py);
+    const playerNX = Math.ceil(px), playerNY = Math.ceil(py);
+    const playerFrac = Math.max(Math.abs(px - playerCX), Math.abs(py - playerCY));
+    if (playerCX !== playerNX || playerCY !== playerNY) {
+      // Fading out of current tile
+      const fadeOut = Math.max(0.2, 1.0 - playerFrac);
+      renderer.setCell(playerCX, playerCY, '@', '#00ff88', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, fadeOut);
+      // Fading into next tile
+      const fadeIn = Math.max(0.2, playerFrac);
+      renderer.setCell(playerNX, playerNY, '@', '#00ff88', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, fadeIn);
+    } else {
+      renderer.setCell(playerCX, playerCY, '@', '#00ff88', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, 1.0);
+    }
   }
 
   onMount(async () => {
@@ -409,7 +426,7 @@
         lastFrame = now;
         time += dt * config.animSpeed;
 
-        const moveSpeed = 2; // Slower for smoother visibility
+        const moveSpeed = 1.5; // Slower for smoother visibility
         const t = ((time * moveSpeed) % path.length + path.length) % path.length;
         const idx = Math.floor(t);
         const frac = t - idx;
