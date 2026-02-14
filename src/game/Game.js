@@ -2,6 +2,7 @@ import { createPlayer, addGold, addXp, applyDamage } from '../lib/index.js';
 import { generateDungeon } from '../lib/index.js';
 import { resolveCombat, collectTreasure } from '../lib/index.js';
 import { decideAction } from '../lib/index.js';
+import { CELL_FLAGS } from '../renderer/Renderer.js';
 
 /**
  * Main Game Logic
@@ -201,7 +202,7 @@ export class Game {
   }
 
   render() {
-    if (!this.renderer) return;
+    this.renderer.clearGrid();
     
     if (this.state.phase === 'dungeon') {
       this.renderDungeon();
@@ -215,84 +216,74 @@ export class Game {
     this.renderHUD();
   }
 
+  renderString(x, y, text, fg, bg) {
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (ch !== '\n') {
+        this.renderer.setCell(x + i, y, ch, fg, bg || '#000000', 0, CELL_FLAGS.VISIBLE);
+      }
+    }
+  }
+
   renderDungeon() {
     const dungeon = this.state.dungeon;
     const player = this.state.player;
-    
-    let ascii = '';
     
     for (let y = 0; y < dungeon.height; y++) {
       for (let x = 0; x < dungeon.width; x++) {
         const cell = dungeon.grid[y][x];
         
         if (x === player.x && y === player.y) {
-          ascii += '@';
+          this.renderer.setCell(x, y, '@', '#00ff00', '#000000', 0.5, CELL_FLAGS.VISIBLE);
         } else if (cell.contents) {
-          ascii += cell.contents.symbol;
+          this.renderer.setCell(x, y, cell.contents.symbol, '#ff0000', '#000000', 0.5, CELL_FLAGS.VISIBLE);
         } else if (cell.type === 'wall') {
-          ascii += '#';
+          this.renderer.setCell(x, y, '#', '#666666', '#333333', 1.0, CELL_FLAGS.VISIBLE);
         } else if (cell.type === 'floor') {
-          ascii += '.';
+          this.renderer.setCell(x, y, '.', '#333333', '#111111', 0.0, CELL_FLAGS.VISIBLE);
         } else {
-          ascii += ' ';
+          this.renderer.setCell(x, y, ' ', '#000000', '#000000', 0.0, 0);
         }
       }
-      ascii += '\n';
     }
-    
-    this.renderer.drawText(ascii, 20, 20, '#00ff00');
   }
 
   renderSummary() {
     const stats = this.state.runStats;
     const player = this.state.player;
     
-    let ascii = `
-=== DUNGEON RUN COMPLETE ===
-
-Enemies Killed: ${stats.enemiesKilled}
-Treasure Found: ${stats.treasureFound}
-Steps Taken: ${stats.stepsTaken}
-Gold Earned: ${stats.gold}
-
-Current Gold: ${player.gold}
-Level: ${player.level} (${player.xp}/${player.xpToNext} XP)
-
-Press [T] to go to Town
-Press [R] for another run
-`;
-    
-    this.renderer.drawText(ascii, 20, 20, '#ffff00');
+    this.renderString(2, 2, '=== DUNGEON RUN COMPLETE ===', '#ffff00');
+    this.renderString(2, 4, 'Enemies Killed: ' + stats.enemiesKilled, '#ffff00');
+    this.renderString(2, 5, 'Treasure Found: ' + stats.treasureFound, '#ffff00');
+    this.renderString(2, 6, 'Steps Taken: ' + stats.stepsTaken, '#ffff00');
+    this.renderString(2, 7, 'Gold Earned: ' + stats.gold, '#ffff00');
+    this.renderString(2, 9, 'Current Gold: ' + player.gold, '#ffffff');
+    this.renderString(2, 10, 'Level: ' + player.level + ' (' + player.xp + '/' + player.xpToNext + ' XP)', '#ffffff');
+    this.renderString(2, 12, 'Press [T] to go to Town', '#888888');
+    this.renderString(2, 13, 'Press [R] for another run', '#888888');
   }
 
   renderTown() {
     const player = this.state.player;
     
-    let ascii = `
-=== THE TOWN ===
-
-Welcome, ${player.name} the Level ${player.level} Hero!
-
-Gold: ${player.gold}
-HP: ${player.hp}/${player.maxHp}
-Attack: ${player.attack}
-Defense: ${player.defense}
-Intelligence: ${player.intelligence}
-
-[T] Train Intelligence (+1, costs 50g)
-[R] Return to Dungeon
-[Q] Quit
-`;
-    
-    this.renderer.drawText(ascii, 20, 20, '#00ffff');
+    this.renderString(2, 2, '=== THE TOWN ===', '#00ffff');
+    this.renderString(2, 4, 'Welcome, ' + player.name + ' the Level ' + player.level + ' Hero!', '#ffffff');
+    this.renderString(2, 6, 'Gold: ' + player.gold, '#ffff00');
+    this.renderString(2, 7, 'HP: ' + player.hp + '/' + player.maxHp, '#ff0000');
+    this.renderString(2, 8, 'Attack: ' + player.attack, '#ff6666');
+    this.renderString(2, 9, 'Defense: ' + player.defense, '#66ff66');
+    this.renderString(2, 10, 'Intelligence: ' + player.intelligence, '#6666ff');
+    this.renderString(2, 12, '[T] Train Intelligence (+1, costs 50g)', '#888888');
+    this.renderString(2, 13, '[R] Return to Dungeon', '#888888');
+    this.renderString(2, 14, '[Q] Quit', '#888888');
   }
 
   renderHUD() {
     const player = this.state.player;
     const stats = this.state.runStats;
     
-    let hud = `HP: ${player.hp}/${player.maxHp}  Stamina: ${player.stamina}/${player.maxStamina}  Gold: ${player.gold}`;
-    this.renderer.drawText(hud, 20, this.renderer.canvas.height - 30, '#ffffff');
+    let hud = 'HP: ' + player.hp + '/' + player.maxHp + '  Stamina: ' + player.stamina + '/' + player.maxStamina + '  Gold: ' + player.gold;
+    this.renderString(1, this.renderer.gridHeight - 1, hud, '#ffffff');
   }
 
   // Handle user input (called from UI)
