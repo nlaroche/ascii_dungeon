@@ -252,23 +252,28 @@
 
       let running = true;
       let time = 0;
-      let lastFrame = performance.now();
+      let lastFrame = 0;
 
       const loop = (now) => {
         if (!running) return;
 
-        const dt = (now - lastFrame) / 1000;
+        if (lastFrame === 0) {
+          lastFrame = now;
+          requestAnimationFrame(loop);
+          return;
+        }
+
+        const dt = Math.min((now - lastFrame) / 1000, 0.1); // cap dt to 100ms
         lastFrame = now;
         time += dt * config.animSpeed;
 
-        // Smooth tweened movement: fractional path index
-        const moveSpeed = 3; // tiles per second
-        const t = (time * moveSpeed) % path.length;
+        const moveSpeed = 3;
+        const t = ((time * moveSpeed) % path.length + path.length) % path.length;
         const idx = Math.floor(t);
         const frac = t - idx;
-        const curr = path[idx % path.length];
+        const curr = path[idx];
         const next = path[(idx + 1) % path.length];
-        // Lerp between current and next tile
+
         const px = curr.x + (next.x - curr.x) * frac;
         const py = curr.y + (next.y - curr.y) * frac;
 
