@@ -34,25 +34,18 @@
   let phase = 'town';
   let playerLevel = 1;
   let difficulty = 1.0;
-  let autoRunInterval = null;
+  let autoRunning = false;
   let endReason = 'cleared';
 
   const END_REASONS = ['death', 'cleared', 'retired'];
 
   // Helper functions
-  function log(message, type = 'info') {
-    eventLog = [{ message, type, time: Date.now() }, ...eventLog].slice(0, 30);
-  }
-
   function addLogEntry(msg, type = 'info') {
-    log(msg, type);
+    eventLog = [{ message: msg, type, time: Date.now() }, ...eventLog].slice(0, 30);
   }
 
   function resetAll() {
-    if (autoRunInterval) {
-      clearInterval(autoRunInterval);
-      autoRunInterval = null;
-    }
+    autoRunning = false;
     player = createPlayer();
     run = null;
     town = createTown();
@@ -144,40 +137,43 @@
     }
   }
 
-  // Auto run
-  async function autoRun() {
+  // Auto run - continuous loop using setTimeout chains
+  function autoRun() {
     if (phase !== 'town') {
       addLogEntry('Must be in town to start auto run', 'damage');
       return;
     }
     
-    startRun();
-    
-    autoRunInterval = setInterval(() => {
-      if (phase === 'dungeon') {
-        simulateFloor();
-      } else if (phase === 'floor_complete') {
-        if (run.floor < run.maxFloors) {
-          nextFloor();
-        } else {
-          endCurrentRun('cleared');
-          clearInterval(autoRunInterval);
-          autoRunInterval = null;
-          addLogEntry('Auto run complete!', 'phase');
-        }
+    autoRunning = true;
+    addLogEntry('Auto-run started — looping town ↔ dungeon', 'phase');
+    autoStep();
+  }
+
+  function autoStep() {
+    if (!autoRunning) return;
+
+    if (phase === 'town') {
+      startRun();
+      setTimeout(autoStep, 400);
+    } else if (phase === 'dungeon') {
+      simulateFloor();
+      setTimeout(autoStep, 400);
+    } else if (phase === 'floor_complete') {
+      if (run.floor < run.maxFloors) {
+        nextFloor();
       } else {
-        clearInterval(autoRunInterval);
-        autoRunInterval = null;
+        endCurrentRun('cleared');
       }
-    }, 500);
+      setTimeout(autoStep, 400);
+    } else if (phase === 'run_complete') {
+      returnToTown();
+      setTimeout(autoStep, 1000); // pause in town
+    }
   }
 
   function stopAutoRun() {
-    if (autoRunInterval) {
-      clearInterval(autoRunInterval);
-      autoRunInterval = null;
-      addLogEntry('Auto run stopped', 'info');
-    }
+    autoRunning = false;
+    addLogEntry('Auto-run stopped', 'info');
   }
 
   // Town actions
@@ -242,11 +238,11 @@
 
   // Log type colors
   const logColors = {
-    loot: 'var(--text-gold)',
-    damage: 'var(--text-red)',
-    heal: 'var(--text-green)',
-    phase: 'var(--text-cyan)',
-    info: 'var(--text-muted)'
+    loot: 'var(--accent-amber)',
+    damage: 'var(--accent-red)',
+    heal: 'var(--accent-green)',
+    phase: 'var(--accent)',
+    info: 'var(--fg-muted)'
   };
 </script>
 
@@ -266,17 +262,32 @@
     <!-- Left Panel: Phase Diagram + Controls -->
     <aside class="left-panel">
       <div class="phase-diagram">
-        <h3>Phase</h3>
+        <h3>Phase Loop</h3>
         <div class="phase-list">
-          {#each ['town', 'dungeon', 'floor_complete', 'run_complete'] as p, i}
-            <div class="phase-item" class:active={phase === p}>
-              <span class="phase-dot" style="background: {phase === p ? phaseColors[p] : 'var(--border)'}"></span>
-              <span class="phase-name">{p.replace('_', ' ')}</span>
-            </div>
-            {#if i < 3}
-              <div class="phase-line"></div>
-            {/if}
-          {/each}
+          <div class="phase-item" class:active={phase === 'town'}>
+            <span class="phase-dot" class:pulsing={phase === 'town'} style="background: {phase === 'town' ? phaseColors['town'] : 'var(--border)'}"></span>
+            <span class="phase-name">Town</span>
+          </div>
+          <div class="phase-arrow">→</div>
+          <div class="phase-item" class:active={phase === 'dungeon'}>
+            <span class="phase-dot" class:pulsing={phase === 'dungeon'} style="background: {phase === 'dungeon' ? phaseColors['dungeon'] : 'var(--border)'}"></span>
+            <span class="phase-name">Dungeon</span>
+          </div>
+          <div class="phase-arrow">→</div>
+          <div class="phase-item" class:active={phase === 'floor_complete'}>
+            <span class="phase-dot" class:pulsing={phase === 'floor_complete'} style="background: {phase === 'floor_complete' ? phaseColors['floor_complete'] : 'var(--border)'}"></span>
+            <span class="phase-name">Floor</span>
+          </div>
+          <div class="phase-arrow">→</div>
+          <div class="phase-item" class:active={phase === 'run_complete'}>
+            <span class="phase-dot" class:pulsing={phase === 'run_complete'} style="background: {phase === 'run_complete' ? phaseColors['run_complete'] : 'var(--border)'}"></span>
+            <span class="phase-name">Complete</span>
+          </div>
+          <div class="phase-arrow">→</div>
+          <div class="phase-item" class:active={phase === 'town'}>
+            <span class="phase-dot" class:pulsing={phase === 'town'} style="background: {phase === 'town' ? phaseColors['town'] : 'var(--border)'}"></span>
+            <span class="phase-name">Town</span>
+          </div>
         </div>
       </div>
 
@@ -285,7 +296,7 @@
         
         {#if phase === 'town'}
           <button class="btn-primary" on:click={startRun}>Start Run</button>
-          <button class="btn-secondary" on:click={autoRun} disabled={autoRunInterval}>▶ Auto Run</button>
+          <button class="btn-secondary" on:click={autoRun} disabled={autoRunning}>▶ Auto Run</button>
         {:else if phase === 'dungeon'}
           <button class="btn-primary" on:click={simulateFloor}>Simulate Floor</button>
           <div class="dropdown">
@@ -305,7 +316,7 @@
           <button class="btn-primary" on:click={returnToTown}>Return to Town</button>
         {/if}
 
-        {#if autoRunInterval}
+        {#if autoRunning}
           <button class="btn-warning" on:click={stopAutoRun}>⏹ Stop Auto</button>
         {/if}
       </div>
@@ -461,6 +472,14 @@
           <!-- Town Phase -->
           {:else if phase === 'town'}
             <div class="town-view">
+              <div class="town-welcome">
+                <h2>Day {calendar.currentDay} — Welcome Back</h2>
+                <div class="town-gold">
+                  <span class="gold-icon">💰</span>
+                  <span class="gold-amount">{player.gold}g</span>
+                </div>
+              </div>
+              
               <div class="town-cards">
                 <!-- Vendor -->
                 <div class="town-card">
@@ -650,8 +669,8 @@
     flex-direction: column;
     flex: 1;
     min-height: 0;
-    background: var(--bg-app);
-    color: var(--text-primary);
+    background: var(--bg);
+    color: var(--fg);
   }
 
   .lab-header {
@@ -665,7 +684,7 @@
 
   .lab-header h2 {
     margin: 0;
-    font-size: var(--text-lg);
+    font-size: 14px;
     font-weight: 600;
   }
 
@@ -677,31 +696,31 @@
 
   .stat-badge {
     padding: var(--space-xs) var(--space-sm);
-    background: var(--bg-elevated);
+    background: var(--bg-muted);
     border-radius: var(--radius-sm);
-    font-size: var(--text-sm);
+    font-size: 11px;
     font-weight: 500;
   }
 
   .time-dawn { color: var(--accent-amber); }
-  .time-morning { color: var(--accent-yellow); }
+  .time-morning { color: var(--accent-amber); }
   .time-noon { color: var(--accent-green); }
-  .time-afternoon { color: var(--accent-cyan); }
-  .time-dusk { color: var(--accent-orange); }
-  .time-night { color: var(--accent-purple); }
+  .time-afternoon { color: var(--accent); }
+  .time-dusk { color: var(--accent-amber); }
+  .time-night { color: var(--accent); }
 
   .btn-reset {
     padding: var(--space-xs) var(--space-md);
-    background: var(--bg-elevated);
+    background: var(--bg-muted);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    color: var(--text-primary);
+    color: var(--fg);
     cursor: pointer;
-    font-size: var(--text-sm);
+    font-size: 11px;
   }
 
   .btn-reset:hover {
-    background: var(--bg-hover);
+    background: var(--bg-accent);
   }
 
   .lab-content {
@@ -724,9 +743,9 @@
   }
 
   .left-panel h3 {
-    font-size: var(--text-sm);
+    font-size: 11px;
     font-weight: 600;
-    color: var(--text-muted);
+    color: var(--fg-muted);
     text-transform: uppercase;
     margin: 0 0 var(--space-sm) 0;
   }
@@ -767,8 +786,23 @@
   }
 
   .phase-name {
-    font-size: var(--text-sm);
+    font-size: 11px;
     text-transform: capitalize;
+  }
+
+  .phase-arrow {
+    color: var(--fg-dim);
+    font-size: 10px;
+    margin: 2px 0;
+  }
+
+  .phase-dot.pulsing {
+    animation: pulse 1s ease-in-out infinite;
+  }
+
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 currentColor; opacity: 1; }
+    50% { box-shadow: 0 0 8px 2px currentColor; opacity: 0.8; }
   }
 
   .controls {
@@ -781,15 +815,15 @@
     padding: var(--space-sm) var(--space-md);
     border: none;
     border-radius: var(--radius);
-    font-size: var(--text-sm);
+    font-size: 11px;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.2s;
   }
 
   .btn-primary {
-    background: var(--accent-cyan);
-    color: var(--bg-app);
+    background: var(--accent);
+    color: var(--bg);
   }
 
   .btn-primary:hover {
@@ -797,13 +831,13 @@
   }
 
   .btn-secondary {
-    background: var(--bg-elevated);
+    background: var(--bg-muted);
     border: 1px solid var(--border);
-    color: var(--text-primary);
+    color: var(--fg);
   }
 
   .btn-secondary:hover:not(:disabled) {
-    background: var(--bg-hover);
+    background: var(--bg-accent);
   }
 
   .btn-danger {
@@ -813,7 +847,7 @@
 
   .btn-warning {
     background: var(--accent-amber);
-    color: var(--bg-app);
+    color: var(--bg);
   }
 
   .btn-primary:disabled, .btn-secondary:disabled {
@@ -829,11 +863,11 @@
   .dropdown select {
     flex: 1;
     padding: var(--space-sm);
-    background: var(--bg-elevated);
+    background: var(--bg-muted);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    color: var(--text-primary);
-    font-size: var(--text-sm);
+    color: var(--fg);
+    font-size: 11px;
   }
 
   .params {
@@ -884,13 +918,13 @@
   }
 
   .info-label {
-    font-size: var(--text-xs);
-    color: var(--text-muted);
+    font-size: 10px;
+    color: var(--fg-muted);
     margin-bottom: var(--space-xs);
   }
 
   .info-value {
-    font-size: var(--text-lg);
+    font-size: 14px;
     font-weight: 600;
   }
 
@@ -898,8 +932,8 @@
     display: flex;
     gap: var(--space-lg);
     justify-content: center;
-    color: var(--text-muted);
-    font-size: var(--text-sm);
+    color: var(--fg-muted);
+    font-size: 11px;
   }
 
   .stamina-section {
@@ -912,8 +946,8 @@
   }
 
   .stamina-section label {
-    font-size: var(--text-sm);
-    color: var(--text-muted);
+    font-size: 11px;
+    color: var(--fg-muted);
   }
 
   .action-buttons {
@@ -973,17 +1007,17 @@
   }
 
   .result-icon {
-    font-size: var(--text-xl);
+    font-size: 16px;
   }
 
   .result-value {
-    font-size: var(--text-xl);
+    font-size: 16px;
     font-weight: 700;
   }
 
   .result-label {
-    font-size: var(--text-xs);
-    color: var(--text-muted);
+    font-size: 10px;
+    color: var(--fg-muted);
   }
 
   .loot-bag {
@@ -999,13 +1033,13 @@
 
   .loot-bag h4 {
     margin: 0 0 var(--space-sm) 0;
-    font-size: var(--text-sm);
-    color: var(--text-muted);
+    font-size: 11px;
+    color: var(--fg-muted);
   }
 
   .loot-item {
     padding: var(--space-xs) 0;
-    font-size: var(--text-sm);
+    font-size: 11px;
   }
 
   /* Run Complete View */
@@ -1023,16 +1057,13 @@
     font-weight: 800;
     line-height: 1;
     margin: var(--space-lg) 0;
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
   }
 
-  .grade-S { background: linear-gradient(135deg, #ffd700, #ffaa00); }
+  .grade-S { color: #ffd700; }
   .grade-A { color: var(--accent-green); }
-  .grade-B { color: var(--accent-cyan); }
-  .grade-C { color: var(--accent-yellow); }
-  .grade-D { color: var(--accent-orange); }
+  .grade-B { color: var(--accent); }
+  .grade-C { color: var(--accent-amber); }
+  .grade-D { color: var(--accent-amber); }
   .grade-F { color: var(--accent-red); }
 
   .summary-grid {
@@ -1053,12 +1084,12 @@
   }
 
   .summary-label {
-    font-size: var(--text-xs);
-    color: var(--text-muted);
+    font-size: 10px;
+    color: var(--fg-muted);
   }
 
   .summary-value {
-    font-size: var(--text-lg);
+    font-size: 14px;
     font-weight: 600;
   }
 
@@ -1070,8 +1101,8 @@
 
   .run-history h4 {
     margin: 0 0 var(--space-sm) 0;
-    font-size: var(--text-sm);
-    color: var(--text-muted);
+    font-size: 11px;
+    color: var(--fg-muted);
   }
 
   .history-item {
@@ -1081,7 +1112,7 @@
     background: var(--bg-card);
     border-radius: var(--radius-sm);
     margin-bottom: var(--space-xs);
-    font-size: var(--text-sm);
+    font-size: 11px;
   }
 
   .history-grade {
@@ -1110,10 +1141,43 @@
     overflow: hidden;
   }
 
+  .town-welcome {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-md);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: var(--space-md);
+  }
+
+  .town-welcome h2 {
+    margin: 0;
+    font-size: 16px;
+    color: var(--fg);
+  }
+
+  .town-gold {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+  }
+
+  .gold-icon {
+    font-size: 20px;
+  }
+
+  .gold-amount {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--accent-amber);
+  }
+
   .town-card h3 {
     margin: 0 0 var(--space-md) 0;
-    font-size: var(--text-base);
-    color: var(--text-primary);
+    font-size: 12px;
+    color: var(--fg);
   }
 
   .vendor-list, .stash-list {
@@ -1129,9 +1193,9 @@
     align-items: center;
     gap: var(--space-sm);
     padding: var(--space-xs);
-    background: var(--bg-elevated);
+    background: var(--bg-muted);
     border-radius: var(--radius-sm);
-    font-size: var(--text-sm);
+    font-size: 11px;
   }
 
   .item-name {
@@ -1142,17 +1206,17 @@
   }
 
   .item-price, .item-level {
-    color: var(--text-muted);
-    font-size: var(--text-xs);
+    color: var(--fg-muted);
+    font-size: 10px;
   }
 
   .btn-small {
     padding: var(--space-xs) var(--space-sm);
-    background: var(--accent-cyan);
+    background: var(--accent);
     border: none;
     border-radius: var(--radius-sm);
-    color: var(--bg-app);
-    font-size: var(--text-xs);
+    color: var(--bg);
+    font-size: 10px;
     cursor: pointer;
   }
 
@@ -1161,8 +1225,8 @@
   }
 
   .empty-message {
-    color: var(--text-muted);
-    font-size: var(--text-sm);
+    color: var(--fg-muted);
+    font-size: 11px;
     text-align: center;
     padding: var(--space-lg);
   }
@@ -1187,8 +1251,8 @@
 
   .upgrades h4 {
     margin: 0;
-    font-size: var(--text-sm);
-    color: var(--text-muted);
+    font-size: 11px;
+    color: var(--fg-muted);
   }
 
   .upgrade-item {
@@ -1196,9 +1260,9 @@
     justify-content: space-between;
     align-items: center;
     padding: var(--space-xs);
-    background: var(--bg-elevated);
+    background: var(--bg-muted);
     border-radius: var(--radius-sm);
-    font-size: var(--text-sm);
+    font-size: 11px;
   }
 
   /* Right Panel */
@@ -1214,9 +1278,9 @@
   }
 
   .right-panel h3 {
-    font-size: var(--text-sm);
+    font-size: 11px;
     font-weight: 600;
-    color: var(--text-muted);
+    color: var(--fg-muted);
     text-transform: uppercase;
     margin: 0 0 var(--space-sm) 0;
   }
@@ -1234,17 +1298,17 @@
   }
 
   .stat-row label {
-    font-size: var(--text-xs);
-    color: var(--text-muted);
+    font-size: 10px;
+    color: var(--fg-muted);
   }
 
   .stat-value {
-    font-size: var(--text-sm);
+    font-size: 11px;
     font-weight: 500;
   }
 
   .stat-value.gold {
-    color: var(--text-gold);
+    color: var(--accent-amber);
   }
 
   .equipment {
@@ -1253,24 +1317,24 @@
 
   .equipment h4 {
     margin: 0 0 var(--space-sm) 0;
-    font-size: var(--text-sm);
-    color: var(--text-muted);
+    font-size: 11px;
+    color: var(--fg-muted);
   }
 
   .equip-slot {
     display: flex;
     justify-content: space-between;
     padding: var(--space-xs) 0;
-    font-size: var(--text-sm);
+    font-size: 11px;
     border-bottom: 1px solid var(--border);
   }
 
   .slot-label {
-    color: var(--text-muted);
+    color: var(--fg-muted);
   }
 
   .slot-item {
-    color: var(--text-primary);
+    color: var(--fg);
   }
 
   .run-stats, .calendar-panel {
@@ -1283,7 +1347,7 @@
     display: flex;
     justify-content: space-between;
     padding: var(--space-xs) 0;
-    font-size: var(--text-sm);
+    font-size: 11px;
     border-bottom: 1px solid var(--border);
   }
 
@@ -1303,8 +1367,8 @@
 
   .event-log h4 {
     margin: 0 0 var(--space-sm) 0;
-    font-size: var(--text-sm);
-    color: var(--text-muted);
+    font-size: 11px;
+    color: var(--fg-muted);
   }
 
   .log-entries {
@@ -1318,17 +1382,24 @@
   .log-entry {
     display: flex;
     gap: var(--space-md);
-    font-size: var(--text-sm);
+    font-size: 11px;
     padding: 2px 0;
   }
 
   .log-time {
-    color: var(--text-muted);
-    font-size: var(--text-xs);
+    color: var(--fg-muted);
+    font-size: 10px;
     flex-shrink: 0;
   }
 
   .log-message {
     flex: 1;
   }
+
+  /* Log type colors */
+  .log-type-loot { color: var(--accent-amber); }
+  .log-type-damage { color: var(--accent-red); }
+  .log-type-heal { color: var(--accent-green); }
+  .log-type-phase { color: var(--accent); }
+  .log-type-info { color: var(--fg-muted); }
 </style>
