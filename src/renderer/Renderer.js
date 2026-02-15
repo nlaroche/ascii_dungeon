@@ -44,13 +44,24 @@ export class Renderer {
     });
 
     this.atlas = createSDFAtlas(this.device, 'Consolas, "Courier New", monospace', 96);
-    this.tilemap = createTilemapRenderer(
+    const tilemap = createTilemapRenderer(
       this.device,
       this.format,
       this.atlas.texture,
       this.gridWidth,
       this.gridHeight
     );
+    // Copy all tilemap methods to this.tilemap for convenience
+    this.tilemap = {
+      setTile: tilemap.setTile.bind(tilemap),
+      clearGrid: tilemap.clearGrid.bind(tilemap),
+      clearLayer: tilemap.clearLayer.bind(tilemap),
+      clearLightMap: tilemap.clearLightMap.bind(tilemap),
+      setLightTexel: tilemap.setLightTexel.bind(tilemap),
+      upload: tilemap.upload.bind(tilemap),
+      uploadLightMap: tilemap.uploadLightMap.bind(tilemap),
+      render: tilemap.render.bind(tilemap),
+    };
     
     this.setupResize();
   }
