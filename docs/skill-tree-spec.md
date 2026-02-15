@@ -114,3 +114,37 @@ Total: 90
 
 ### Next Focus
 Add the architecture: strain data structures, mutation thresholds, resonance pairing rules, and void unlock formula. Show concrete numbers.
+```
+
+## Iteration 2: The Mutation Model - Refined
+
+### Theme
+Iteration 1's Mutation Model with three critical fixes: **Strain Transplants** for respec agency, **Whisper Warnings** for transparency, and **Simplified Resonance** for clarity. The core fantasy remains - skills evolve into unexpected forms - but now players feel in control and informed.
+
+### Three Key Ideas
+1. **Strain Transplants (Respec)**: At any time, spend gold to "transplant" points from one strain to another. Cost scales exponentially: `cost = 10 * (transplantedPoints ^ 1.5)`. This gives players agency to change paths without feeling locked in. Town NPC "The Biologist" handles transplants.
+
+2. **Whisper Warnings**: When you're 1 point away from a mutation, UI shows a "whisper" - cryptic hint of what's coming. At 4/5 Blood points: "Your blood boils with unspent violence." At 9/10: "The Vampire mutation is nearly complete." No exact numbers, but clear something is happening. Makes mutations feel discovered rather than arbitrary.
+
+3. **Simplified Resonance**: Instead of complex multiplicative stacking, resonances are binary toggles. Blood + Bile = Hemomancy (ON/OFF). Each active resonance grants ONE big bonus: "+5 damage to attacks that also deal magic damage." Max 3 resonances active. Player chooses which 3 of their 6 possible resonances to equip, like skill slots. Much easier to balance, clearer to understand.
+
+### How it feels to play
+Run 1: You dump Attack. At 5 points, BOOM - Vampire mutation. You feel powerful. Run 3: You want to try Intelligence. You visit The Biologist, spend 50 gold to transplant 5 points. Now you're on a new path. At 4/5 Intelligence, you see a whisper: "The Arcanist mutation stirs..." You're excited to reach 5. Run 5: You have Blood mutation + Arcane resonance. Your attacks burn AND leech. This is exactly what you wanted. You feel in control.
+
+### Score
+- R1 Endless Scaling: 90 - Transplants let you infinite-respec. Mutations still unlock new skill trees. Void still exists for long-term goals.
+- R2 Number Feel: 95 - Same visible spikes at 5/15/30/50/100. Whispers make the spike feel earned/anticipated rather than random.
+- R3 Discovery Depth: 85 - Whispers reduce pure discovery, but void skills and hidden resonance combos still surprise. Tradeoff acceptable.
+- R4 Build Diversity: 90 - Transplants + 3-slot resonances = more viable builds than pure mutation locking. Players can pivot freely.
+- R5 Integration: 80 - Same as Iteration 1. Transplants use gold (economy integration). Whispers add flavor text (narrative integration).
+- R6 Implementability: 90 - Transplants = simple formula. Whispers = conditional text lookup. Resonance = array of 6 booleans. Simpler than Iteration 1.
+
+Total: 87
+
+### Weaknesses
+- Still relatively complex with 4 strains, mutations, resonances, void
+- Gold cost for transplants might feel grindy early on
+- Whisper system requires writing flavor text for every mutation threshold
+
+### Next Focus
+Architecture time! Define: strain point storage, mutation threshold tables, whisper text database, resonance configuration, transplant cost function. Show working JavaScript with example data.
