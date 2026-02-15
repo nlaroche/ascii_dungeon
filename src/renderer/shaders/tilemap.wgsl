@@ -63,12 +63,12 @@ fn vertexMain(
   let gridY = f32(instanceIndex / gridW);
   let localPos = quadPos[vertexIndex];
 
-  // Cell position in pixels with parallax
+  // Cell position in pixels with camera offset (global scroll)
   var pixelPos = vec2<f32>(
     (gridX + localPos.x) * uniforms.cellPixelSize.x,
     (gridY + localPos.y) * uniforms.cellPixelSize.y,
   );
-  pixelPos += cell.depth * uniforms.cameraOffset * uniforms.parallaxStrength;
+  pixelPos += uniforms.cameraOffset;
 
   // NDC
   let ndc = vec2<f32>(

@@ -16,6 +16,8 @@ export class Renderer {
     this.time = 0;
     this.atlas = null;
     this.tilemap = null;
+    this.cameraOffsetX = 0;
+    this.cameraOffsetY = 0;
   }
 
   async init() {
@@ -109,7 +111,9 @@ export class Renderer {
       this.canvas.height,
       this.time,
       this.cellSize * dpr,
-      this.cellSize * 1.5 * dpr
+      this.cellSize * 1.5 * dpr,
+      this.cameraOffsetX * dpr,
+      this.cameraOffsetY * dpr
     );
 
     this.device.queue.submit([commandEncoder.finish()]);

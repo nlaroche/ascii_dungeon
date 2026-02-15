@@ -388,20 +388,8 @@
       renderer.setCell(treasure.x, treasure.y, '$', '#ffdd00', '#1a1a2e', 0.0, CELL_FLAGS.VISIBLE | CELL_FLAGS.HIGHLIGHTED, 1.0);
     }
 
-    // Player rendered at both tiles during transition
-    const playerCX = Math.floor(px), playerCY = Math.floor(py);
-    const playerNX = Math.ceil(px), playerNY = Math.ceil(py);
-    const playerFrac = Math.max(Math.abs(px - playerCX), Math.abs(py - playerCY));
-    if (playerCX !== playerNX || playerCY !== playerNY) {
-      // Fading out of current tile
-      const fadeOut = Math.max(0.2, 1.0 - playerFrac);
-      renderer.setCell(playerCX, playerCY, '@', '#00ff88', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, fadeOut);
-      // Fading into next tile
-      const fadeIn = Math.max(0.2, playerFrac);
-      renderer.setCell(playerNX, playerNY, '@', '#00ff88', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, fadeIn);
-    } else {
-      renderer.setCell(playerCX, playerCY, '@', '#00ff88', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, 1.0);
-    }
+    // Player at nearest grid cell (camera offset handles smooth visual movement)
+    renderer.setCell(Math.round(px), Math.round(py), '@', '#00ff88', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, 1.0);
   }
 
   onMount(async () => {
@@ -435,6 +423,12 @@
 
         const px = curr.x + (next.x - curr.x) * frac;
         const py = curr.y + (next.y - curr.y) * frac;
+
+        // Smooth camera: offset the grid by the fractional part of player position
+        const fracX = px - Math.round(px);
+        const fracY = py - Math.round(py);
+        renderer.cameraOffsetX = -fracX * config.cellSize;
+        renderer.cameraOffsetY = -fracY * config.cellSize * 1.5;
 
         renderer.cellSize = config.cellSize;
         fillDemoScene(time, px, py);
