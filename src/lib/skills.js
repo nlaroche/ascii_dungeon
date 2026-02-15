@@ -2,6 +2,8 @@
 // A massive interconnected graph with fog of war discovery mechanics
 // Generated procedurally for 400+ nodes
 
+import { COLORS } from './palette.js';
+
 // ── Constants ──
 
 const REGIONS = ['combat', 'defense', 'vitality', 'exploration', 'fortune', 'arcane'];
@@ -95,12 +97,12 @@ const NODE_CHARS = {
 };
 
 const REGION_COLORS = {
-  combat: '#c4645a',
-  defense: '#5a8ec4',
-  vitality: '#5ab87e',
-  exploration: '#5ab8c4',
-  fortune: '#c4b05a',
-  arcane: '#9a7ab8'
+  combat: COLORS.combat,
+  defense: COLORS.defense,
+  vitality: COLORS.vitality,
+  exploration: COLORS.exploration,
+  fortune: COLORS.fortune,
+  arcane: COLORS.arcane,
 };
 
 const REGION_ANGLES = {
@@ -351,15 +353,7 @@ export const SKILL_GRAPH_ADJACENCY = buildAdjacencyMap(SKILL_GRAPH_EDGES);
 // ── Helper Functions ──
 
 export function getRegionColor(region) {
-  const colors = {
-    combat: '#c4645a',
-    defense: '#5a8ec4',
-    vitality: '#5ab87e',
-    exploration: '#5ab8c4',
-    fortune: '#c4b05a',
-    arcane: '#9a7ab8'
-  };
-  return colors[region] || '#888888';
+  return REGION_COLORS[region] || COLORS.recordLow;
 }
 
 export function getNodeTypeChar(type) {
