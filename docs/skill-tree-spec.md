@@ -85,3 +85,10 @@ ASCII dungeon roguelike. Player has attack/defense/hp/stamina/gold/level. Combat
 
 **Weaknesses**: Early game feels weak, high complexity for new players, death penalties can feel harsh without shard collection.
 
+## Judge Feedback (Iteration 2)
+- R1: PASS. R2: PASS — accelerating curve is exactly right. R3-R6: PASS.
+- ALL LITMUS TESTS PASS. Good foundation.
+- MISSING: The "tiers and layers" design goal. Where are the HIDDEN LAYERS that reveal themselves as you invest deeper? At 10 points in attack you should discover a new BRANCH of the tree that wasn't visible before. At 50 points, another layer. The tree itself should GROW — not just the numbers.
+- MISSING: Builds need different MECHANICS, not just different stats. A tank build should PLAY differently (position matters, you body-block enemies). An explorer build should interact with the MAP differently (reveal hidden rooms, shortcuts). Right now they just pump different numbers.
+- Iteration 3: Keep the accelerating curve from iteration 2. ADD a tier system where investing N points in a skill reveals a hidden sub-tree of 2-3 new skills. These sub-skills also scale infinitely. This creates the fractal depth feeling.
+
