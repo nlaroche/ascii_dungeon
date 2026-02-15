@@ -300,14 +300,12 @@
         {:else if phase === 'dungeon'}
           <button class="btn-primary" on:click={simulateFloor}>Simulate Floor</button>
           <div class="dropdown">
-            <label>
-              End Reason
-              <select bind:value={endReason}>
-                {#each END_REASONS as reason}
-                  <option value={reason}>{reason}</option>
-                {/each}
-              </select>
-            </label>
+            <label for="endReasonSelect">End Reason</label>
+            <select id="endReasonSelect" bind:value={endReason}>
+              {#each END_REASONS as reason}
+                <option value={reason}>{reason}</option>
+              {/each}
+            </select>
             <button class="btn-danger" on:click={() => endCurrentRun(endReason)}>End Run</button>
           </div>
         {:else if phase === 'floor_complete'}
