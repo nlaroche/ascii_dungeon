@@ -81,3 +81,12 @@ Research directions to explore:
 - Ecosystem/ecology approaches where items interact like organisms
 - Mathematical structures (graphs, cellular automata, etc.) for item interactions
 - Real-world inspiration: chemistry, biology, physics, music theory
+
+## Iteration 1: Quantum Phase Items
+
+### Core Concept: Items Have Quantum States That Collapse Based on Context
+
+**The "Phase" Metaphor:** Just as matter exists in different phases (solid, liquid, gas) depending on conditions, items exist in different "phases" depending on game context. When conditions change, items can "phase shift" and gain different properties.
+
+### Phase Types
+
