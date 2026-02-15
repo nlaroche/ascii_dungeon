@@ -215,22 +215,23 @@
 
   .modal {
     background: var(--bg-card);
-    border: 1px solid var(--border-accent);
-    border-radius: var(--radius-lg);
-    box-shadow: 0 25px 50px rgba(0,0,0,0.5), 0 0 1px rgba(255,255,255,0.1);
+    border: 2px solid var(--accent);
+    border-radius: 2px;
+    box-shadow: 0 0 20px rgba(104, 194, 211, 0.15), 0 0 60px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05);
     max-width: 420px;
     width: 100%;
     max-height: 80vh;
     overflow-y: auto;
-    animation: modal-card-in 120ms ease;
+    animation: modal-card-in 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
   }
 
   .modal-header {
     display: flex;
     align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    border-bottom: 1px solid var(--border);
+    gap: 10px;
+    padding: 10px 16px;
+    border-bottom: 2px solid var(--accent);
+    background: linear-gradient(180deg, rgba(104, 194, 211, 0.08) 0%, transparent 100%);
     position: relative;
   }
 
@@ -249,17 +250,21 @@
 
   .close-btn {
     background: transparent;
-    border: none;
+    border: 1px solid var(--fg-dim);
     color: var(--fg-dim);
-    font-size: 24px;
+    font-size: 16px;
     line-height: 1;
     cursor: pointer;
-    padding: 4px 8px;
-    transition: color var(--transition);
+    padding: 2px 6px;
+    border-radius: 2px;
+    transition: all 0.1s ease;
   }
 
   .close-btn:hover {
-    color: var(--fg);
+    color: var(--accent-red);
+    border-color: var(--accent-red);
+    box-shadow: 0 0 6px rgba(180, 82, 82, 0.3);
+    transform: scale(1.1);
   }
 
   .modal-body {
@@ -301,6 +306,7 @@
 
   .item-row:hover {
     background: var(--bg-muted);
+    box-shadow: inset 2px 0 0 var(--accent);
   }
 
   .item-glyph {
@@ -344,14 +350,18 @@
 
   .buy-btn:hover {
     background: rgba(208, 160, 104, 0.15);
+    transform: scale(1.05);
   }
 
   .gold-display {
-    margin-top: 16px;
-    padding-top: 16px;
-    border-top: 1px solid var(--border);
+    margin-top: 12px;
+    padding: 8px 12px;
+    border: 1px solid var(--accent-amber);
+    border-radius: 2px;
     color: var(--accent-amber);
     font-weight: 600;
+    background: rgba(211, 160, 104, 0.08);
+    text-align: center;
   }
 
   .rest-options {
@@ -411,6 +421,11 @@
   }
   .rest-btn:hover {
     background: rgba(104, 194, 211, 0.15);
+    transform: scale(1.05);
+  }
+
+  .buy-btn:active, .accept-btn:active, .upgrade-btn:active, .action-btn:active, .rest-btn:active {
+    transform: scale(0.95);
   }
 
   .rest-cost {
@@ -459,6 +474,13 @@
     justify-content: center;
     font-size: 16px;
     min-height: 40px;
+    transition: all 0.1s ease;
+  }
+
+  .stash-slot.filled:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 6px rgba(104, 194, 211, 0.2);
+    transform: scale(1.08);
   }
 
   .stash-slot.filled {
@@ -485,6 +507,7 @@
   .action-btn:hover {
     border-color: var(--fg-muted);
     color: var(--fg);
+    transform: scale(1.05);
   }
 
   .guild-header {
@@ -546,6 +569,12 @@
     border-radius: var(--radius);
     padding: 8px;
     margin-bottom: 6px;
+    transition: border-color 0.1s, box-shadow 0.1s;
+  }
+
+  .quest-entry:hover {
+    border-color: var(--accent);
+    box-shadow: 0 0 8px rgba(104, 194, 211, 0.1);
   }
 
   .quest-header {
@@ -598,6 +627,7 @@
 
   .accept-btn:hover {
     background: rgba(104, 194, 211, 0.15);
+    transform: scale(1.05);
   }
 
   .equipment-list {
@@ -612,6 +642,11 @@
     align-items: center;
     padding: 10px 0;
     border-bottom: 1px solid var(--border-muted);
+    transition: background 0.1s;
+  }
+
+  .equipment-row:hover {
+    background: rgba(104, 194, 211, 0.05);
   }
 
   .equipment-row:last-child {
@@ -665,6 +700,7 @@
 
   .upgrade-btn:hover {
     background: rgba(208, 160, 104, 0.15);
+    transform: scale(1.05);
   }
 
   .salvage-section .hint {
@@ -684,7 +720,9 @@
   }
 
   @keyframes modal-card-in {
-    from { opacity: 0; transform: translateY(16px) scale(0.96); }
-    to { opacity: 1; transform: translateY(0) scale(1); }
+    0% { opacity: 0; transform: translateY(20px) scale(0.8, 1.2); }
+    50% { opacity: 1; transform: translateY(-4px) scale(1.03, 0.97); }
+    75% { transform: translateY(2px) scale(0.99, 1.01); }
+    100% { transform: translateY(0) scale(1, 1); }
   }
 </style>
