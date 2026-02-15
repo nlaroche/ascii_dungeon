@@ -606,19 +606,26 @@ export function deallocateNode(tree, nodeId) {
 }
 
 export function getVisibleNodes(tree) {
-  const visible = [];
+  // Build set of visible node IDs (allocated + neighbors)
+  const visibleIds = new Set(tree.allocated);
   
-  for (const [nodeId, node] of Object.entries(SKILL_GRAPH_NODES)) {
-    let status;
-    
-    if (tree.allocated.has(nodeId)) {
-      status = 'allocated';
-    } else if (canAllocate(tree, nodeId)) {
-      status = 'available';
-    } else {
-      status = 'locked';
+  // Add neighbors of allocated nodes
+  for (const nodeId of tree.allocated) {
+    const neighbors = SKILL_GRAPH_ADJACENCY[nodeId];
+    if (neighbors) {
+      for (const neighbor of neighbors) {
+        if (!tree.allocated.has(neighbor)) {
+          visibleIds.add(neighbor);
+        }
+      }
     }
-    
+  }
+  
+  // Build visible nodes array
+  const visible = [];
+  for (const nodeId of visibleIds) {
+    const node = SKILL_GRAPH_NODES[nodeId];
+    const status = tree.allocated.has(nodeId) ? 'allocated' : 'available';
     visible.push({
       ...node,
       status
@@ -626,6 +633,23 @@ export function getVisibleNodes(tree) {
   }
   
   return visible;
+}
+
+export function getVisibleEdges(tree) {
+  // Build set of visible node IDs (allocated + neighbors)
+  const visibleIds = new Set(tree.allocated);
+  
+  for (const nodeId of tree.allocated) {
+    const neighbors = SKILL_GRAPH_ADJACENCY[nodeId];
+    if (neighbors) {
+      for (const neighbor of neighbors) {
+        visibleIds.add(neighbor);
+      }
+    }
+  }
+  
+  // Filter edges to only include those where both endpoints are visible
+  return SKILL_GRAPH_EDGES.filter(([a, b]) => visibleIds.has(a) && visibleIds.has(b));
 }
 
 export function getSkillBonuses(tree) {
@@ -693,12 +717,3 @@ export function getTreeStats(tree) {
 
 // Export all regions for convenience
 export { REGIONS };
-
-// Legacy API stubs (SkillTreeLab still references old API)
-export const SKILL_TREE_SCHEMA = SKILL_GRAPH_NODES;
-export const TIER_THRESHOLDS = [0, 1, 3, 5];
-export function getTier(points) { return TIER_THRESHOLDS.filter(t => points >= t).length - 1; }
-export function allocatePoint(tree, id) { return allocateNode(tree, id) ? { ...tree } : tree; }
-export function allocatePoints(tree, id, n) { for (let i = 0; i < n; i++) allocateNode(tree, id); return { ...tree }; }
-export function calcBonus(tree, stat) { const b = getSkillBonuses(tree); return b[stat] || 0; }
-export function getVisibleSkills(tree) { return getVisibleNodes(tree); }
