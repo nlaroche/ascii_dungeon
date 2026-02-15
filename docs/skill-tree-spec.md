@@ -70,3 +70,18 @@ ASCII dungeon roguelike. Player has attack/defense/hp/stamina/gold/level. Combat
 - R6: PASS.
 - CRITICAL: Fix R2. Each point invested must feel BIGGER than the last. Show accelerating numbers like: point 1 = +5, point 10 = +15, point 50 = +100. The curve should reward deep investment.
 
+## Iteration 2: Exponential Momentum System
+**Core idea**: Skills use exponential compounding—each point invested multiplies existing power, rewarding deep investment with dramatically higher returns.
+
+**How growth works**: At level 1 (1 pt), skill gives +5 flat bonus. At level 10, compounding reaches ~5× multiplier, giving +25 per point. At level 100, multiplier explodes to ~500×, giving +2500 per point. At level 1000, the player weaponizes momentum as a passive hurricane that ragdolls enemies and reshapes the dungeon itself.
+
+**Number examples**: Point 1 gives +5 attack, point 10 gives +25 attack (5 per pt ×5× multiplier), point 50 gives +250 attack (5 per pt ×50× multiplier).
+
+**Aha moments**: (1) Stacking momentum triggers "resonance" at thresholds (10, 50, 100 pts) where the skill temporarily pulses the entire screen. (2) Dying doesn't reset points but fractures momentum into "shards" that can be collected for massive one-time buffs.
+
+**3 different builds**: "Berserker" concentrates all points into attack, becoming a one-shot kill machine but leaving survival to timing. "Warden" spreads across defense/dodge, turning damage taken into counter-attack momentum. "Archivist" invests in exploration/collection, converting momentum into permanent item bonuses that persist through death.
+
+**Systems touched**: Combat (attack/defense/counter), dungeon (environment interaction), items (bonus affixes), economy (shard selling).
+
+**Weaknesses**: Early game feels weak, high complexity for new players, death penalties can feel harsh without shard collection.
+
