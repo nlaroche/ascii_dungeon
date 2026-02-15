@@ -76,8 +76,8 @@
           <section>
             <h3 class="section-title">Available Wares</h3>
             <ul class="item-list">
-              {#each vendorItems as item}
-                <li class="item-row">
+              {#each vendorItems as item, i}
+                <li class="item-row" style="animation: pop-in 150ms {i * 30}ms both ease-out">
                   <span class="item-glyph {item.rarity}">{item.glyph}</span>
                   <div class="item-info">
                     <span class="item-name {item.rarity}">{item.name}</span>
@@ -123,7 +123,7 @@
             <h3 class="section-title">Storage (5/20)</h3>
             <div class="stash-grid">
               {#each [...Array(12)] as _, i}
-                <div class="stash-slot" class:filled={i < 4} style={i < 4 ? `color: ${stashItems[i].fg}` : ''} title={i < 4 ? stashItems[i].name : 'Empty'}>
+                <div class="stash-slot" class:filled={i < 4} style={i < 4 ? `color: ${stashItems[i].fg}; animation: pop-in 200ms ${i * 40}ms both ease-out` : ''} title={i < 4 ? stashItems[i].name : 'Empty'}>
                   {#if i < 4}
                     {stashItems[i].char}
                   {/if}
@@ -152,8 +152,8 @@
           <section class="quest-section">
             <h3 class="section-title">Available Quests</h3>
             <ul class="quest-list">
-              {#each quests as quest}
-                <li class="quest-entry">
+              {#each quests as quest, i}
+                <li class="quest-entry" style="animation: pop-in 150ms {i * 50}ms both ease-out">
                   <div class="quest-header">
                     <span class="quest-title">{quest.title}</span>
                     <span class="quest-difficulty {quest.difficultyClass}">{quest.difficulty}</span>
@@ -301,7 +301,7 @@
     gap: 12px;
     padding: 6px 8px;
     border-radius: var(--radius);
-    transition: background var(--transition);
+    transition: background 60ms ease-out;
   }
 
   .item-row:hover {
@@ -345,12 +345,16 @@
     border-radius: var(--radius);
     font-size: 11px;
     cursor: pointer;
-    transition: all var(--transition);
+    transition: all 60ms ease-out;
   }
 
   .buy-btn:hover {
     background: rgba(208, 160, 104, 0.15);
     transform: scale(1.05);
+  }
+
+  .buy-btn:active, .accept-btn:active, .upgrade-btn:active, .action-btn:active, .rest-btn:active {
+    animation: squash-click 150ms ease-out;
   }
 
   .gold-display {
@@ -406,7 +410,7 @@
     border-radius: var(--radius);
     font-size: 11px;
     cursor: pointer;
-    transition: all 0.1s ease;
+    transition: all 60ms ease-out;
   }
   .rest-btn.accent-green {
     border: 1px solid var(--accent-green);
@@ -474,7 +478,7 @@
     justify-content: center;
     font-size: 16px;
     min-height: 40px;
-    transition: all 0.1s ease;
+    transition: all 60ms ease-out;
   }
 
   .stash-slot.filled:hover {
@@ -501,7 +505,7 @@
     padding: 8px 16px;
     border-radius: var(--radius);
     cursor: pointer;
-    transition: all var(--transition);
+    transition: all 60ms ease-out;
   }
 
   .action-btn:hover {
@@ -569,7 +573,7 @@
     border-radius: var(--radius);
     padding: 8px;
     margin-bottom: 6px;
-    transition: border-color 0.1s, box-shadow 0.1s;
+    transition: border-color 60ms ease-out, box-shadow 60ms ease-out;
   }
 
   .quest-entry:hover {
@@ -622,7 +626,7 @@
     border-radius: var(--radius);
     font-size: 11px;
     cursor: pointer;
-    transition: all var(--transition);
+    transition: all 60ms ease-out;
   }
 
   .accept-btn:hover {
@@ -642,7 +646,7 @@
     align-items: center;
     padding: 10px 0;
     border-bottom: 1px solid var(--border-muted);
-    transition: background 0.1s;
+    transition: background 60ms ease-out;
   }
 
   .equipment-row:hover {
@@ -695,7 +699,7 @@
     border-radius: var(--radius);
     font-size: 11px;
     cursor: pointer;
-    transition: all var(--transition);
+    transition: all 60ms ease-out;
   }
 
   .upgrade-btn:hover {
@@ -720,9 +724,24 @@
   }
 
   @keyframes modal-card-in {
-    0% { opacity: 0; transform: translateY(20px) scale(0.8, 1.2); }
-    50% { opacity: 1; transform: translateY(-4px) scale(1.03, 0.97); }
-    75% { transform: translateY(2px) scale(0.99, 1.01); }
-    100% { transform: translateY(0) scale(1, 1); }
+    0% { opacity: 0; transform: scale(0.5) scaleY(1.3); }
+    40% { opacity: 1; transform: scaleX(1.08) scaleY(0.92); }
+    65% { transform: scaleX(0.97) scaleY(1.03); }
+    80% { transform: scaleX(1.01) scaleY(0.99); }
+    100% { transform: scale(1); }
+  }
+
+  @keyframes pop-in {
+    0% { transform: scale(0); opacity: 0; }
+    50% { transform: scaleX(1.15) scaleY(0.85); }
+    75% { transform: scaleX(0.95) scaleY(1.05); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  @keyframes squash-click {
+    0% { transform: scaleX(1) scaleY(1); }
+    40% { transform: scaleX(1.2) scaleY(0.8); }
+    70% { transform: scaleX(0.9) scaleY(1.1); }
+    100% { transform: scaleX(1) scaleY(1); }
   }
 </style>
