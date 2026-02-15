@@ -693,3 +693,12 @@ export function getTreeStats(tree) {
 
 // Export all regions for convenience
 export { REGIONS };
+
+// Legacy API stubs (SkillTreeLab still references old API)
+export const SKILL_TREE_SCHEMA = SKILL_GRAPH_NODES;
+export const TIER_THRESHOLDS = [0, 1, 3, 5];
+export function getTier(points) { return TIER_THRESHOLDS.filter(t => points >= t).length - 1; }
+export function allocatePoint(tree, id) { return allocateNode(tree, id) ? { ...tree } : tree; }
+export function allocatePoints(tree, id, n) { for (let i = 0; i < n; i++) allocateNode(tree, id); return { ...tree }; }
+export function calcBonus(tree, stat) { const b = getSkillBonuses(tree); return b[stat] || 0; }
+export function getVisibleSkills(tree) { return getVisibleNodes(tree); }
