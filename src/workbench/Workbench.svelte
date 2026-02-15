@@ -1,4 +1,5 @@
 <script>
+  import { fade } from 'svelte/transition';
   import Sidebar from './components/Sidebar.svelte';
   import DungeonGen from './sections/DungeonGen.svelte';
   import CombatSim from './sections/CombatSim.svelte';
@@ -9,6 +10,8 @@
   import IntelligenceLab from './sections/IntelligenceLab.svelte';
   import SkillTreeLab from './sections/SkillTreeLab.svelte';
   import ItemLab from './sections/ItemLab.svelte';
+  import JuiceLab from './sections/JuiceLab.svelte';
+  import PaletteLab from './sections/PaletteLab.svelte';
 
   let activeSection = 'dungeon';
 
@@ -21,7 +24,9 @@
     { id: 'items', label: 'Items' },
     { id: 'graphics', label: 'Graphics' },
     { id: 'intelligence', label: 'Intelligence' },
-    { id: 'skilltrees', label: 'Skill Trees' }
+    { id: 'skilltrees', label: 'Skill Trees' },
+    { id: 'juice', label: 'Juice' },
+    { id: 'palette', label: 'Palette' },
   ];
 
   function handleSectionChange(event) {
@@ -42,41 +47,149 @@
   />
 
   <main class="content">
-    {#if activeSection === 'dungeon'}
-      <DungeonGen />
-    {:else if activeSection === 'combat'}
-      <CombatSim />
-    {:else if activeSection === 'player'}
-      <PlayerEditor />
-    {:else if activeSection === 'ai'}
-      <AIViewer />
-    {:else if activeSection === 'economy'}
-      <EconomySim />
-    {:else if activeSection === 'items'}
-      <ItemLab />
-    {:else if activeSection === 'graphics'}
-      <GraphicsLab />
-    {:else if activeSection === 'intelligence'}
-      <IntelligenceLab />
-    {:else if activeSection === 'skilltrees'}
-      <SkillTreeLab />
-    {/if}
+    {#key activeSection}
+      <div class="section-wrapper" in:fade={{ duration: 150, delay: 50 }}>
+        {#if activeSection === 'dungeon'}
+          <DungeonGen />
+        {:else if activeSection === 'combat'}
+          <CombatSim />
+        {:else if activeSection === 'player'}
+          <PlayerEditor />
+        {:else if activeSection === 'ai'}
+          <AIViewer />
+        {:else if activeSection === 'economy'}
+          <EconomySim />
+        {:else if activeSection === 'items'}
+          <ItemLab />
+        {:else if activeSection === 'graphics'}
+          <GraphicsLab />
+        {:else if activeSection === 'intelligence'}
+          <IntelligenceLab />
+        {:else if activeSection === 'skilltrees'}
+          <SkillTreeLab />
+        {:else if activeSection === 'juice'}
+          <JuiceLab />
+        {:else if activeSection === 'palette'}
+          <PaletteLab />
+        {/if}
+      </div>
+    {/key}
   </main>
 </div>
 
 <style>
   .workbench {
+    /* ── Palette (CC-29) ── */
+    --bg:            #212123;
+    --bg-card:       #3a3858;
+    --bg-muted:      #352b42;
+    --bg-accent:     #45444f;
+
+    --border:        #45444f;
+    --border-muted:  #3a3858;
+    --border-accent: #5f556a;
+
+    --fg:            #f2f0e5;
+    --fg-muted:      #b8b5b9;
+    --fg-dim:        #868188;
+
+    --accent:        #68c2d3;
+    --accent-green:  #a2dcc7;
+    --accent-amber:  #d3a068;
+    --accent-red:    #b45252;
+
+    /* ── Scale ── */
+    --radius-sm: 4px;
+    --radius: 6px;
+    --radius-lg: 8px;
+
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+
+    --font-mono: 'Berkeley Mono', 'JetBrains Mono', 'Fira Code', monospace;
+    --transition-fast: 120ms ease;
+    --transition: 200ms ease;
+
+    /* ── Ring (focus-visible) ── */
+    --ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+
+    /* ── Layout ── */
     display: flex;
     width: 100%;
     height: 100vh;
-    background: #111;
-    color: #eee;
-    font-family: monospace;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
   }
 
   .content {
     flex: 1;
+    display: flex;
+    flex-direction: column;
     overflow: auto;
-    padding: 20px;
+    padding: var(--space-lg);
+  }
+
+  .section-wrapper {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    animation: section-in 200ms ease both;
+  }
+
+  /* ── Scrollbar ── */
+  .content::-webkit-scrollbar { width: 6px; }
+  .content::-webkit-scrollbar-track { background: transparent; }
+  .content::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  .content::-webkit-scrollbar-thumb:hover { background: var(--fg-dim); }
+
+  :global(.workbench *) {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  /* ── Keyframes (globally available via -global- prefix) ── */
+  @keyframes -global-section-in {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes -global-fade-in {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+  }
+
+  @keyframes -global-slide-down {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  @keyframes -global-scale-in {
+    from { opacity: 0; transform: scale(0.96); }
+    to   { opacity: 1; transform: scale(1); }
+  }
+
+  /* ── Global focus ring ── */
+  :global(.workbench button:focus-visible),
+  :global(.workbench select:focus-visible),
+  :global(.workbench input:focus-visible) {
+    outline: none;
+    box-shadow: var(--ring);
+  }
+
+  /* ── Global button reset ── */
+  :global(.workbench button) {
+    font-family: var(--font-mono);
+    cursor: pointer;
+  }
+
+  :global(.workbench button:active:not(:disabled)) {
+    transform: scale(0.97);
   }
 </style>
