@@ -389,7 +389,7 @@
     }
 
     // Player at nearest grid cell (camera offset handles smooth visual movement)
-    renderer.setCell(Math.round(px), Math.round(py), '@', '#00ff88', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, 1.0);
+    renderer.setCell(Math.floor(px), Math.floor(py), '@', '#00ff88', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, 1.0);
   }
 
   onMount(async () => {
@@ -425,10 +425,11 @@
         const py = curr.y + (next.y - curr.y) * frac;
 
         // Smooth camera: offset the grid by the fractional part of player position
-        const fracX = px - Math.round(px);
-        const fracY = py - Math.round(py);
-        renderer.cameraOffsetX = -fracX * config.cellSize;
-        renderer.cameraOffsetY = -fracY * config.cellSize * 1.5;
+        const dpr = window.devicePixelRatio || 1;
+        const screenCenterX = (renderer.canvas.width / dpr) / 2;
+        const screenCenterY = (renderer.canvas.height / dpr) / 2;
+        renderer.cameraOffsetX = screenCenterX - px * config.cellSize;
+        renderer.cameraOffsetY = screenCenterY - py * config.cellSize * 1.5;
 
         renderer.cellSize = config.cellSize;
         fillDemoScene(time, px, py);
