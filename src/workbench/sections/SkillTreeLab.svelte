@@ -207,6 +207,13 @@
             on:mouseenter={() => handleNodeHover(node)}
             on:mouseleave={handleNodeUnhover}
           >
+            <!-- Hit area (invisible, prevents hover flicker) -->
+            <circle
+              r={radius + 10}
+              fill="transparent"
+              stroke="none"
+            />
+
             <!-- Glow for allocated nodes -->
             {#if isAllocated}
               <circle
@@ -484,7 +491,8 @@
   }
 
   .node-group:hover {
-    transform: scale(1.2);
+    transform-origin: center;
+    transform: scale(1.15);
   }
 
   .node-group.available .node-circle {
