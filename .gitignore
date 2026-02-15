@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+.env
+*.local
+
+# Aider session files (but keep config files)
+.aider.tags.*
+.aider.chat.history.md
+.aider.input.history
+
+# E2E test artifacts
+tests/e2e/screenshots/
+test-results/

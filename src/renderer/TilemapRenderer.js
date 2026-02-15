@@ -18,6 +18,16 @@ export const CELL_FLAGS = {
   HIGHLIGHTED: 4, // BIT2
 };
 
+export const LAYER_COUNT = 5;
+
+export const LAYERS = {
+  TERRAIN: 0,
+  DECOR: 1,
+  OBJECTS: 2,
+  PLAYER: 3,
+  EFFECTS: 4,
+};
+
 /**
  * Convert CSS hex color to packed RGBA u32.
  * @param {string} cssColor - CSS hex color like "#ff00ff" or "#abc"
@@ -55,30 +65,42 @@ export function colorToU32(cssColor) {
  * @param {number} gridHeight
  * @returns {object}
  */
+export const LIGHT_SUB = 3; // sub-cell resolution multiplier for light map
+
 export function createTilemapRenderer(device, format, atlasTexture, gridWidth, gridHeight) {
-  const cellCount = gridWidth * gridHeight;
-  const cpuBuffer = new ArrayBuffer(cellCount * CELL_SIZE_BYTES);
+  const cellsPerLayer = gridWidth * gridHeight;
+  const totalCells = LAYER_COUNT * cellsPerLayer;
+  const cpuBuffer = new ArrayBuffer(totalCells * CELL_SIZE_BYTES);
   const dataView = new DataView(cpuBuffer);
-  
+
   // Create GPU buffer for cell storage
   const gpuBuffer = device.createBuffer({
     size: cpuBuffer.byteLength,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
-  
+
+  // Light map: 3x sub-cell resolution, vec4<f32> per texel (r, g, b, unused)
+  const lightMapWidth = gridWidth * LIGHT_SUB;
+  const lightMapHeight = gridHeight * LIGHT_SUB;
+  const lightMapCPU = new Float32Array(lightMapWidth * lightMapHeight * 4);
+  const lightMapGPU = device.createBuffer({
+    size: lightMapCPU.byteLength,
+    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+  });
+
   // Create sampler for SDF atlas
   const atlasSampler = device.createSampler({
     magFilter: 'linear',
     minFilter: 'linear',
   });
-  
-  // Uniform buffer matches shader Uniforms struct: 12 x f32 = 48 bytes
-  const UNIFORM_SIZE = 48;
+
+  // Uniform buffer: 14 x f32 = 56 bytes, padded to 64
+  const UNIFORM_SIZE = 64;
   const uniformBuffer = device.createBuffer({
     size: UNIFORM_SIZE,
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
-  
+
   // Create bind group layout
   const bindGroupLayout = device.createBindGroupLayout({
     entries: [
@@ -102,14 +124,19 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
         visibility: GPUShaderStage.FRAGMENT,
         sampler: { type: 'filtering' },
       },
+      {
+        binding: 4,
+        visibility: GPUShaderStage.FRAGMENT,
+        buffer: { type: 'read-only-storage' },
+      },
     ],
   });
-  
+
   // Create pipeline layout
   const pipelineLayout = device.createPipelineLayout({
     bindGroupLayouts: [bindGroupLayout],
   });
-  
+
   // Create render pipeline
   const pipeline = device.createRenderPipeline({
     layout: pipelineLayout,
@@ -120,13 +147,19 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
     fragment: {
       module: device.createShaderModule({ code: tilemapShaderCode }),
       entryPoint: 'fragmentMain',
-      targets: [{ format }],
+      targets: [{
+        format,
+        blend: {
+          color: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+          alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+        },
+      }],
     },
     primitive: {
       topology: 'triangle-list',
     },
   });
-  
+
   // Create bind group
   const bindGroup = device.createBindGroup({
     layout: bindGroupLayout,
@@ -135,11 +168,13 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
       { binding: 1, resource: { buffer: gpuBuffer } },
       { binding: 2, resource: atlasTexture.createView() },
       { binding: 3, resource: atlasSampler },
+      { binding: 4, resource: { buffer: lightMapGPU } },
     ],
   });
   
   /**
    * Write a single cell to the CPU buffer.
+   * @param {number} layer - layer index (0=TERRAIN, 1=DECOR, 2=OBJECTS, 3=PLAYER, 4=EFFECTS)
    * @param {number} x - grid x (0 to gridWidth-1)
    * @param {number} y - grid y (0 to gridHeight-1)
    * @param {number} glyph - ASCII code 32-126
@@ -148,12 +183,15 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
    * @param {number} depth - 0.0=floor, 0.5=entity, 1.0=ceiling
    * @param {number} flags - cell flags (VISIBLE|EXPLORED|HIGHLIGHTED)
    */
-  function setTile(x, y, glyph, fg, bg, depth, flags = 0, light = 1.0, offsetX = 0, offsetY = 0) {
+  function setTile(layer, x, y, glyph, fg, bg, depth, flags = 0, light = 1.0, offsetX = 0, offsetY = 0) {
     if (x < 0 || x >= gridWidth || y < 0 || y >= gridHeight) {
       return;
     }
+    if (layer < 0 || layer >= LAYER_COUNT) {
+      return;
+    }
 
-    const index = y * gridWidth + x;
+    const index = layer * cellsPerLayer + y * gridWidth + x;
     const offset = index * CELL_SIZE_BYTES;
 
     // glyph: u32
@@ -175,11 +213,22 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
   }
   
   /**
-   * Zero the entire CPU buffer.
+   * Zero the entire CPU buffer (all layers).
    */
   function clearGrid() {
-    // Use Uint8Array to clear all bytes
     const uint8 = new Uint8Array(cpuBuffer);
+    uint8.fill(0);
+  }
+
+  /**
+   * Zero a single layer's portion of the CPU buffer.
+   * @param {number} layer - layer index to clear
+   */
+  function clearLayer(layer) {
+    if (layer < 0 || layer >= LAYER_COUNT) return;
+    const byteStart = layer * cellsPerLayer * CELL_SIZE_BYTES;
+    const byteEnd = byteStart + cellsPerLayer * CELL_SIZE_BYTES;
+    const uint8 = new Uint8Array(cpuBuffer, byteStart, byteEnd - byteStart);
     uint8.fill(0);
   }
   
@@ -214,12 +263,14 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
     // cameraOffset: vec2<f32>   offset 32
     // sdfEdge: f32              offset 40
     // sdfSmoothing: f32         offset 44
+    // cellsPerLayer: u32        offset 48
+    // _pad: u32                 offset 52 (padding to 16-byte alignment)
     const uniformData = new ArrayBuffer(UNIFORM_SIZE);
     const v = new DataView(uniformData);
     v.setFloat32(0, canvasWidth, true);
     v.setFloat32(4, canvasHeight, true);
     v.setFloat32(8, time, true);
-    v.setFloat32(12, this.parallaxStrength !== undefined ? this.parallaxStrength : 0.5, true);  // parallaxStrength
+    v.setFloat32(12, 0.0, true); // parallaxStrength (unused, kept for struct alignment)
     v.setFloat32(16, cellPixelWidth, true);
     v.setFloat32(20, cellPixelHeight, true);
     v.setFloat32(24, gridWidth, true);
@@ -228,6 +279,8 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
     v.setFloat32(36, cameraOffsetY, true);
     v.setFloat32(40, 0.5, true);  // sdfEdge
     v.setFloat32(44, 0.05, true); // sdfSmoothing
+    v.setUint32(48, cellsPerLayer, true); // cellsPerLayer
+    v.setFloat32(52, LIGHT_SUB, true);  // lightSubRes
 
     device.queue.writeBuffer(uniformBuffer, 0, uniformData);
     
@@ -242,25 +295,48 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
     
     passEncoder.setPipeline(pipeline);
     passEncoder.setBindGroup(0, bindGroup);
-    passEncoder.draw(6, cellCount);
+    passEncoder.draw(6, totalCells);
     passEncoder.end();
   }
   
+  function setLightTexel(x, y, r, g, b) {
+    if (x < 0 || x >= lightMapWidth || y < 0 || y >= lightMapHeight) return;
+    const idx = (y * lightMapWidth + x) * 4;
+    lightMapCPU[idx] = r;
+    lightMapCPU[idx + 1] = g;
+    lightMapCPU[idx + 2] = b;
+  }
+
+  function clearLightMap() {
+    lightMapCPU.fill(0);
+  }
+
+  function uploadLightMap(device) {
+    device.queue.writeBuffer(lightMapGPU, 0, lightMapCPU);
+  }
+
   return {
     gridWidth,
     gridHeight,
-    cellCount,
+    cellsPerLayer,
+    totalCells,
     cpuBuffer,
     dataView,
     gpuBuffer,
     pipeline,
     bindGroup,
     bindGroupLayout,
+    lightMapWidth,
+    lightMapHeight,
+    lightMapCPU,
     setTile,
     clearGrid,
+    clearLayer,
+    clearLightMap,
+    setLightTexel,
     upload,
+    uploadLightMap,
     render,
-    parallaxStrength: 0.5,
   };
 }
 

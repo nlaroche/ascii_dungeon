@@ -1,7 +1,7 @@
 import { createSDFAtlas } from './SDFAtlas.js';
-import { createTilemapRenderer, colorToU32, CELL_FLAGS } from './TilemapRenderer.js';
+import { createTilemapRenderer, colorToU32, CELL_FLAGS, LAYER_COUNT, LAYERS, LIGHT_SUB } from './TilemapRenderer.js';
 
-export { colorToU32, CELL_FLAGS } from './TilemapRenderer.js';
+export { colorToU32, CELL_FLAGS, LAYER_COUNT, LAYERS, LIGHT_SUB } from './TilemapRenderer.js';
 
 export class Renderer {
   constructor(canvas, config = {}) {
@@ -73,21 +73,41 @@ export class Renderer {
     observer.observe(this.canvas.parentElement || this.canvas);
   }
 
-  setCell(x, y, char, fgColor, bgColor, depth = 0, flags = 0, light = 1.0, offsetX = 0, offsetY = 0) {
+  setCell(x, y, char, fgColor, bgColor, depth = 0, flags = 0, light = 1.0, offsetX = 0, offsetY = 0, layer = 0) {
     const charCode = typeof char === 'string' ? char.charCodeAt(0) : char;
     const fg = colorToU32(fgColor);
     const bg = colorToU32(bgColor);
-    this.tilemap.setTile(x, y, charCode, fg, bg, depth, flags, light, offsetX, offsetY);
+    this.tilemap.setTile(layer, x, y, charCode, fg, bg, depth, flags, light, offsetX, offsetY);
   }
 
   setCells(cellArray) {
     for (const cell of cellArray) {
-      this.setCell(cell.x, cell.y, cell.char, cell.fg, cell.bg, cell.depth, cell.flags, cell.light, cell.offsetX, cell.offsetY);
+      this.setCell(cell.x, cell.y, cell.char, cell.fg, cell.bg, cell.depth, cell.flags, cell.light, cell.offsetX, cell.offsetY, cell.layer);
     }
   }
 
   clearGrid() {
     this.tilemap.clearGrid();
+  }
+
+  clearLayer(layer) {
+    this.tilemap.clearLayer(layer);
+  }
+
+  get lightMapWidth() {
+    return this.tilemap.lightMapWidth;
+  }
+
+  get lightMapHeight() {
+    return this.tilemap.lightMapHeight;
+  }
+
+  setLightTexel(x, y, r, g, b) {
+    this.tilemap.setLightTexel(x, y, r, g, b);
+  }
+
+  clearLightMap() {
+    this.tilemap.clearLightMap();
   }
 
   startLoop() {
@@ -107,6 +127,7 @@ export class Renderer {
     const textureView = this.context.getCurrentTexture().createView();
 
     this.tilemap.upload(this.device);
+    this.tilemap.uploadLightMap(this.device);
     this.tilemap.render(
       commandEncoder,
       textureView,

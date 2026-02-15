@@ -79,8 +79,8 @@ export function generateDungeon(config = {}) {
     const room = rooms[i];
     const enemyChance = 0.3 + (playerLevel * 0.05);
     
-    if (Math.random() <      const ex = room.x + Math enemyChance) {
-.floor(Math.random() * room.w);
+    if (Math.random() < enemyChance) {
+      const ex = room.x + Math.floor(Math.random() * room.w);
       const ey = room.y + Math.floor(Math.random() * room.h);
       if (grid[ey][ex].type === 'floor') {
         grid[ey][ex].contents = {

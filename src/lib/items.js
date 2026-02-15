@@ -1,474 +1,528 @@
-/**
- * Items Module - "Living Records" item system
- * Items grow and transform based on player actions
- * Pure functions, no side effects, no classes
- */
+// Living Records Item System
+// Items grow and transform based on player actions.
+// Kill enemies with a sword -> it gets sharper. Walk far with boots -> they use less stamina.
+// Pair items with matching histories -> they resonate and amplify each other.
 
-// Record type constants
+// ── Record Types (4 core) ──
+
 export const RECORD_TYPES = {
-  KILL: 'kill',
-  TREASURE: 'treasure',
-  EXPLORE: 'explore',
-  SURVIVE: 'survive'
+  KILL: 'kill',         // Combat prowess: damage, crit, attack speed
+  TREASURE: 'treasure', // Fortune: gold bonus, rare item chance
+  EXPLORE: 'explore',   // Wayfinding: stamina efficiency, movement speed, map reveal
+  SURVIVE: 'survive',   // Endurance: defense, damage reduction, max HP, lifesteal
 };
 
-// Item slot constants
-export const ITEM_SLOTS = {
-  WEAPON: 'weapon',
-  ARMOR: 'armor',
-  AMULET: 'amulet'
-};
+export const MAX_LEVEL = 10;
 
-// Item tier constants
+export const ITEM_SLOTS = { WEAPON: 'weapon', ARMOR: 'armor', AMULET: 'amulet' };
+
 export const ITEM_TIERS = {
-  COMMON: 'common',
-  UNCOMMON: 'uncommon',
-  RARE: 'rare',
-  EPIC: 'epic',
-  LEGENDARY: 'legendary'
+  COMMON: 'common', UNCOMMON: 'uncommon', RARE: 'rare', EPIC: 'epic', LEGENDARY: 'legendary',
 };
 
-// Visual mark definitions by record type and level
-const VISUAL_MARKS = {
-  kill: {
-    1: "sharpened edge",
-    2: "blood groove",
-    3: "war notch",
-    4: "vengeful edge",
-    5: "executioner's mark",
-    6: "slayer's groove",
-    7: "champion's edge",
-    8: "legendary blade",
-    9: "mythic wound",
-    10: "godkiller aura"
-  },
-  treasure: {
-    1: "golden tint",
-    2: "wealth glow",
-    3: "fortune's kiss",
-    4: "prosperity rune",
-    5: "merchant's blessing",
-    6: "dragon's hoard",
-    7: "king's ransom",
-    8: "midas touch",
-    9: "eternal wealth",
-    10: "legendary fortune"
-  },
-  explore: {
-    1: "compass rune",
-    2: "pathfinder's mark",
-    3: "wayfinder's sigil",
-    4: "cartographer's ink",
-    5: "explorer's compass",
-    6: "world walker",
-    7: "realm mapper",
-    8: "dimension skip",
-    9: "infinite vista",
-    10: "omniscient eye"
-  },
-  survive: {
-    1: "battle scar",
-    2: "toughened hide",
-    3: "iron will",
-    4: "veteran's plaque",
-    5: "survivor's emblem",
-    6: "immortal resolve",
-    7: "phoenix mark",
-    8: "eternal guardian",
-    9: "death defiance",
-    10: "legendary endurance"
-  }
+// ── Base item templates ──
+
+const BASE_ITEMS = {
+  weapon: [
+    { name: 'Rusty Sword', char: '/', baseDamage: 3 },
+    { name: 'Iron Axe', char: ')', baseDamage: 5 },
+    { name: 'Bone Dagger', char: '-', baseDamage: 2 },
+    { name: 'Crystal Staff', char: '|', baseDamage: 4 },
+    { name: 'War Hammer', char: 'T', baseDamage: 6 },
+  ],
+  armor: [
+    { name: 'Leather Vest', char: '[', baseDefense: 2 },
+    { name: 'Chain Mail', char: '{', baseDefense: 4 },
+    { name: 'Iron Plate', char: '#', baseDefense: 6 },
+    { name: 'Bone Shield', char: '0', baseDefense: 3 },
+    { name: 'Woven Robe', char: '(', baseDefense: 1 },
+  ],
+  amulet: [
+    { name: 'Stone Pendant', char: '"', baseBonus: 1 },
+    { name: 'Glass Eye', char: '*', baseBonus: 2 },
+    { name: 'Tooth Charm', char: ',', baseBonus: 1 },
+    { name: 'Iron Ring', char: 'o', baseBonus: 3 },
+    { name: 'Crystal Shard', char: ';', baseBonus: 2 },
+  ],
 };
 
-// Item name templates by slot and tier
-const ITEM_NAMES = {
-  weapon: {
-    common: ["Iron Sword", "Rusty Dagger", "Wooden Club", "Stone Mace"],
-    uncommon: ["Steel Blade", "Honed Spear", "Battle Axe"],
-    rare: ["Flame Sword", "Frost Blade", "Shadow Dagger"],
-    epic: ["Demon Slayer", "Dragon's Bane", "Void Edge"],
-    legendary: ["Godkiller", "Worldbreaker", "Eternal Chaos"]
-  },
-  armor: {
-    common: ["Leather Vest", "Cloth Armor", "Padded Jacket"],
-    uncommon: ["Chain Mail", "Scale Armor", "Iron Plate"],
-    rare: ["Enchanted Robe", "Guardian Plate", "Shadow Cloak"],
-    epic: ["Dragon Scale", "Demon Hide", "Ethereal Mail"],
-    legendary: ["Armageddon", "World Shield", "Divine Protection"]
-  },
-  amulet: {
-    common: ["Bone Amulet", "Wooden Charm", "Stone Pendant"],
-    uncommon: ["Silver Ring", "Copper Talisman", "Bronze Medallion"],
-    rare: ["Ruby Amulet", "Sapphire Ring", "Emerald Pendant"],
-    epic: ["Dragon Eye", "Phoenix Feather", "Void Crystal"],
-    legendary: ["Destiny", "Fate's Touch", "Eternal Spirit"]
-  }
-};
+// ── XP Curve ──
 
-/**
- * Generate a unique ID for an item
- * @returns {string} Unique ID
- */
-function generateId() {
-  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-    return crypto.randomUUID();
-  }
-  return Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+export function xpToNextLevel(currentLevel) {
+  if (currentLevel >= MAX_LEVEL) return Infinity;
+  return 10 * Math.pow(2, currentLevel); // 10, 20, 40, 80, 160, 320, 640, 1280, 2560, 5120
 }
 
-/**
- * Determine item tier based on floor level
- * @param {number} floorLevel - Current floor level
- * @returns {string} Item tier
- */
-function determineTier(floorLevel) {
-  const rand = Math.random();
-  const total = floorLevel * 0.1;
-  
-  if (rand < 0.01 + total * 0.01) return ITEM_TIERS.LEGENDARY;
-  if (rand < 0.05 + total * 0.02) return ITEM_TIERS.EPIC;
-  if (rand < 0.15 + total * 0.05) return ITEM_TIERS.RARE;
-  if (rand < 0.35 + total * 0.1) return ITEM_TIERS.UNCOMMON;
-  return ITEM_TIERS.COMMON;
-}
+// ── Item Creation ──
 
-/**
- * Get visual mark for a record type at a given level
- * @param {string} recordType - Record type
- * @param {number} level - Record level
- * @returns {string} Visual mark description
- */
-export function getVisualMark(recordType, level) {
-  if (level < 1 || level > 10) return null;
-  return VISUAL_MARKS[recordType]?.[level] || `${recordType} mark`;
-}
+export function createItem(slot, floorLevel = 1, rng = Math.random) {
+  const templates = BASE_ITEMS[slot] || BASE_ITEMS.weapon;
+  const base = templates[Math.floor(rng() * templates.length)];
+  const tier = rollTier(floorLevel, rng);
 
-/**
- * Create a living item with records
- * @param {Object} baseItem - Base item properties (name, slot)
- * @param {number} floorLevel - Floor level when item was created
- * @returns {Object} Living item with records
- */
-export function createLivingItem(baseItem, floorLevel) {
-  const tier = baseItem.tier || determineTier(floorLevel);
-  
   return {
-    ...baseItem,
-    name: baseItem.name,
-    slot: baseItem.slot,
-    tier: tier,
-    id: generateId(),
+    id: Math.floor(rng() * 0xFFFFFF).toString(16).padStart(6, '0'),
+    slot,
+    tier,
+    name: base.name,
+    char: base.char,
+    baseDamage: base.baseDamage || 0,
+    baseDefense: base.baseDefense || 0,
+    baseBonus: base.baseBonus || 0,
     floorCreated: floorLevel,
     records: {
-      kill: { level: 0, xp: 0 },
+      kill:     { level: 0, xp: 0 },
       treasure: { level: 0, xp: 0 },
-      explore: { level: 0, xp: 0 },
-      survive: { level: 0, xp: 0 }
+      explore:  { level: 0, xp: 0 },
+      survive:  { level: 0, xp: 0 },
     },
     primaryRecord: null,
-    visualMarks: []
+    visualMarks: [],
   };
 }
 
-/**
- * Add XP to a record and handle level ups
- * @param {Object} item - Living item
- * @param {string} recordType - Type of record (kill, treasure, explore, survive)
- * @param {number} xp - XP amount to add
- * @returns {Object} Updated item with new record XP/level
- */
-export function addRecordXP(item, recordType, xp) {
-  if (!item.records[recordType]) {
-    return item; // Invalid record type
-  }
-  
-  const record = item.records[recordType];
-  let newXp = record.xp + xp;
-  let newLevel = record.level;
-  const newVisualMarks = [...item.visualMarks];
-  
-  // Check for level ups (max level 10)
-  while (newLevel < 10 && newXp >= getXpForLevel(newLevel + 1)) {
-    newLevel++;
-    newXp -= getXpForLevel(newLevel);
-    
-    // Add visual mark on level up
-    const mark = getVisualMark(recordType, newLevel);
-    if (mark) {
-      newVisualMarks.push(mark);
-    }
-  }
-  
-  // Determine primary record (highest level)
-  let primaryRecord = item.primaryRecord;
-  let highestLevel = -1;
-  
-  const newRecords = { ...item.records };
-  newRecords[recordType] = { level: newLevel, xp: newXp };
-  
-  for (const [type, rec] of Object.entries(newRecords)) {
-    if (rec.level > highestLevel) {
-      highestLevel = rec.level;
-      primaryRecord = type;
-    } else if (rec.level === highestLevel && rec.level > 0) {
-      // Tie-breaker: keep existing primary if levels are equal
-      if (primaryRecord !== type) {
-        // Prefer the one that was just updated
-        primaryRecord = recordType;
+export function createLegacyItem(slot, floorLevel, recordOverrides = {}, rng = Math.random) {
+  const item = createItem(slot, floorLevel, rng);
+  for (const [type, level] of Object.entries(recordOverrides)) {
+    if (item.records[type]) {
+      item.records[type].level = Math.min(level, MAX_LEVEL);
+      for (let i = 1; i <= item.records[type].level; i++) {
+        item.visualMarks.push(getVisualMark(type, i));
       }
     }
   }
-  
-  // If all records are 0, no primary
-  if (highestLevel === 0) {
-    primaryRecord = null;
+  item.primaryRecord = determinePrimaryRecord(item.records);
+  return item;
+}
+
+function rollTier(floorLevel, rng) {
+  const roll = rng() + floorLevel * 0.02;
+  if (roll >= 0.99) return 'legendary';
+  if (roll >= 0.95) return 'epic';
+  if (roll >= 0.80) return 'rare';
+  if (roll >= 0.50) return 'uncommon';
+  return 'common';
+}
+
+// ── Record XP & Leveling ──
+
+export function addRecordXP(item, recordType, xp) {
+  if (!item.records || !item.records[recordType]) return item;
+
+  const record = { ...item.records[recordType] };
+  record.xp += xp;
+  const newMarks = [...item.visualMarks];
+
+  let needed = xpToNextLevel(record.level);
+  while (record.xp >= needed && record.level < MAX_LEVEL) {
+    record.xp -= needed;
+    record.level += 1;
+    newMarks.push(getVisualMark(recordType, record.level));
+    needed = xpToNextLevel(record.level);
   }
-  
+
+  const newRecords = { ...item.records, [recordType]: record };
   return {
     ...item,
     records: newRecords,
-    primaryRecord: primaryRecord,
-    visualMarks: newVisualMarks
+    primaryRecord: determinePrimaryRecord(newRecords),
+    visualMarks: newMarks,
   };
 }
 
-/**
- * Get XP required for a given level
- * @param {number} level - Target level
- * @returns {number} XP required
- */
-function getXpForLevel(level) {
-  return 10 * Math.pow(2, level - 1);
-}
-
-/**
- * Get derived stats from item records
- * @param {Object} item - Living item
- * @returns {Object} Derived stats
- */
-export function getItemStats(item) {
-  const records = item.records;
-  const kill = records.kill || { level: 0 };
-  const treasure = records.treasure || { level: 0 };
-  const explore = records.explore || { level: 0 };
-  const survive = records.survive || { level: 0 };
-  
-  return {
-    attackBonus: kill.level * 3,
-    critChance: kill.level >= 5 ? (kill.level - 4) * 0.05 : 0,
-    defenseBonus: survive.level * 2,
-    hpRegen: survive.level >= 3 ? survive.level * 0.5 : 0,
-    goldMultiplier: 1 + treasure.level * 0.1,
-    visionBonus: explore.level,
-    moveSpeedBonus: explore.level >= 4 ? 0.1 * (explore.level - 3) : 0
-  };
-}
-
-/**
- * Check if equipped items resonate
- * @param {Array} equippedItems - Array of equipped items
- * @returns {Object} Resonance info
- */
-export function checkResonance(equippedItems) {
-  if (!equippedItems || equippedItems.length < 2) {
-    return {
-      active: false,
-      type: null,
-      level: 0,
-      bonuses: {}
-    };
-  }
-  
-  // Group items by primary record type
-  const groups = {};
-  for (const item of equippedItems) {
-    if (item && item.primaryRecord) {
-      const type = item.primaryRecord;
-      if (!groups[type]) {
-        groups[type] = [];
-      }
-      groups[type].push(item);
+function determinePrimaryRecord(records) {
+  let maxLevel = 0;
+  let primary = null;
+  for (const [type, rec] of Object.entries(records)) {
+    if (rec.level > maxLevel || (rec.level === maxLevel && rec.xp > (records[primary]?.xp || 0))) {
+      maxLevel = rec.level;
+      primary = type;
     }
   }
-  
-  // Find group with most items (minimum 2 for resonance)
-  let bestType = null;
-  let bestItems = [];
-  
-  for (const [type, items] of Object.entries(groups)) {
-    if (items.length >= 2 && items.length > bestItems.length) {
-      bestType = type;
-      bestItems = items;
+  return maxLevel > 0 ? primary : null;
+}
+
+export function getTotalLevel(item) {
+  if (!item.records) return 0;
+  return Object.values(item.records).reduce((sum, r) => sum + r.level, 0);
+}
+
+// ── Visual Marks ──
+
+const VISUAL_MARKS = {
+  kill: [
+    'sharpened edge', 'blood groove', 'killing notch', 'deadly gleam',
+    "murderer's edge", "executioner's mark", "champion's blade",
+    'legendary sharpness', 'demon bane', 'godkiller aura',
+  ],
+  treasure: [
+    'golden tint', 'coin impression', 'rich shimmer', "prospector's gleam",
+    'midas touch', "fortune's favor", "kingmaker's glow",
+    'legendary wealth', "dragon's hoard", "fate's fortune",
+  ],
+  explore: [
+    'compass rune', 'map scratch', "pathfinder's mark", "wayfinder's trail",
+    "cartographer's etch", "adventurer's path", "explorer's wisdom",
+    'world walker', 'realm traverser', 'omniscient eye',
+  ],
+  survive: [
+    'battle scar', 'warding mark', 'protective notch', "survivor's patina",
+    "veteran's shell", "guardian's blessing", "immortal's heart",
+    'eternal guardian', 'deathless spirit', "god's protection",
+  ],
+};
+
+export function getVisualMark(recordType, level) {
+  const marks = VISUAL_MARKS[recordType] || VISUAL_MARKS.kill;
+  if (level < 1) return null;
+  return marks[Math.min(level - 1, marks.length - 1)] || 'unknown mark';
+}
+
+// ── Visual Stages (prefix, color per record level) ──
+
+const VISUAL_STAGES = {
+  kill: [
+    { threshold: 0, color: '#666666', prefix: '' },
+    { threshold: 1, color: '#888888', prefix: 'Sharpened' },
+    { threshold: 3, color: '#aa6666', prefix: 'Bloodied' },
+    { threshold: 5, color: '#cc3333', prefix: "Murderer's" },
+    { threshold: 7, color: '#ff0000', prefix: "Champion's" },
+    { threshold: 10, color: '#ff4444', prefix: 'Legendary' },
+  ],
+  treasure: [
+    { threshold: 0, color: '#666666', prefix: '' },
+    { threshold: 1, color: '#888844', prefix: 'Gilded' },
+    { threshold: 3, color: '#aaaa44', prefix: 'Shimmering' },
+    { threshold: 5, color: '#cccc44', prefix: "Fortune's" },
+    { threshold: 7, color: '#ffee44', prefix: "Kingmaker's" },
+    { threshold: 10, color: '#ffff00', prefix: 'Legendary' },
+  ],
+  explore: [
+    { threshold: 0, color: '#666666', prefix: '' },
+    { threshold: 1, color: '#668888', prefix: "Wayfinder's" },
+    { threshold: 3, color: '#6688aa', prefix: "Cartographer's" },
+    { threshold: 5, color: '#4466aa', prefix: "World Walker's" },
+    { threshold: 7, color: '#4444cc', prefix: "Realm Traverser's" },
+    { threshold: 10, color: '#6666ff', prefix: 'Legendary' },
+  ],
+  survive: [
+    { threshold: 0, color: '#666666', prefix: '' },
+    { threshold: 1, color: '#666688', prefix: 'Warded' },
+    { threshold: 3, color: '#6666aa', prefix: "Veteran's" },
+    { threshold: 5, color: '#4444aa', prefix: "Guardian's" },
+    { threshold: 7, color: '#4422cc', prefix: "Immortal's" },
+    { threshold: 10, color: '#4444ff', prefix: 'Legendary' },
+  ],
+};
+
+export function getVisualStage(recordType, level) {
+  const stages = VISUAL_STAGES[recordType] || VISUAL_STAGES.kill;
+  let result = stages[0];
+  for (const stage of stages) {
+    if (level >= stage.threshold) result = stage;
+  }
+  return result;
+}
+
+export function getItemDisplayName(item) {
+  if (!item.primaryRecord) return item.name;
+  const stage = getVisualStage(item.primaryRecord, item.records[item.primaryRecord].level);
+  if (!stage.prefix) return item.name;
+  return `${stage.prefix} ${item.name}`;
+}
+
+export function getItemColor(item) {
+  if (!item.primaryRecord) return '#888888';
+  return getVisualStage(item.primaryRecord, item.records[item.primaryRecord].level).color;
+}
+
+// ── Resonance ──
+
+export const RESONANCE_TYPES = {
+  BLOOD_BROTHERS: 'blood_brothers',
+  GOLDEN_PAIR: 'golden_pair',
+  PATHFINDERS: 'pathfinders',
+  IRON_BOND: 'iron_bond',
+  WARRIOR_SOUL: 'warrior_soul',
+  TREASURE_HUNTER: 'treasure_hunter',
+  BERSERKER: 'berserker',
+  PALADIN: 'paladin',
+};
+
+const RESONANCE_META = {
+  blood_brothers:   { label: 'Blood Brothers',   bonus: 'damage',     color: '#ff0000' },
+  golden_pair:      { label: 'Golden Pair',       bonus: 'gold',       color: '#ffdd00' },
+  pathfinders:      { label: 'Pathfinders',       bonus: 'movement',   color: '#00aaff' },
+  iron_bond:        { label: 'Iron Bond',         bonus: 'defense',    color: '#8888ff' },
+  warrior_soul:     { label: 'Warrior Soul',      bonus: 'all_combat', color: '#ff8800' },
+  treasure_hunter:  { label: 'Treasure Hunter',   bonus: 'loot_speed', color: '#44ff44' },
+  berserker:        { label: 'Berserker',         bonus: 'offense',    color: '#ff4400' },
+  paladin:          { label: 'Paladin',           bonus: 'tank',       color: '#ffff88' },
+};
+
+const COMP_MAP = {
+  'kill,survive':    'warrior_soul',
+  'explore,treasure': 'treasure_hunter',
+  'kill,treasure':   'berserker',
+  'explore,survive': 'paladin',
+};
+
+const MATCH_MAP = {
+  kill: 'blood_brothers',
+  treasure: 'golden_pair',
+  explore: 'pathfinders',
+  survive: 'iron_bond',
+};
+
+const MIN_RESONANCE_LEVEL = 3;
+
+export function detectResonance(itemA, itemB) {
+  if (!itemA?.records || !itemB?.records) return null;
+
+  const pA = getPrimaryRecord(itemA.records);
+  const pB = getPrimaryRecord(itemB.records);
+  if (!pA || !pB) return null;
+  if (pA.level < MIN_RESONANCE_LEVEL || pB.level < MIN_RESONANCE_LEVEL) return null;
+
+  const avgLevel = (pA.level + pB.level) / 2;
+
+  if (pA.type === pB.type) {
+    const rType = MATCH_MAP[pA.type];
+    if (!rType) return null;
+    return buildResonance(rType, avgLevel);
+  }
+
+  const key = [pA.type, pB.type].sort().join(',');
+  const rType = COMP_MAP[key];
+  if (!rType) return null;
+  return buildResonance(rType, avgLevel * 0.8);
+}
+
+function getPrimaryRecord(records) {
+  let best = null;
+  for (const [type, rec] of Object.entries(records)) {
+    if (rec.level > 0 && (!best || rec.level > best.level)) {
+      best = { type, level: rec.level };
     }
   }
-  
-  if (!bestType || bestItems.length < 2) {
-    return {
-      active: false,
-      type: null,
-      level: 0,
-      bonuses: {}
-    };
-  }
-  
-  // Resonance level = minimum level of the shared record
-  const resonanceLevel = Math.min(...bestItems.map(item => item.records[bestType].level));
-  
-  // Calculate scaled bonuses based on resonance level
-  const bonuses = calculateResonanceBonuses(bestType, resonanceLevel);
-  
+  return best;
+}
+
+function buildResonance(type, avgLevel) {
+  const meta = RESONANCE_META[type];
+  const strength = Math.min(50, Math.round(avgLevel * 5));
   return {
-    active: true,
-    type: bestType,
-    level: resonanceLevel,
-    bonuses: bonuses
+    type,
+    label: meta.label,
+    bonus: meta.bonus,
+    color: meta.color,
+    strength,
+    description: `${meta.label}: +${strength}% ${meta.bonus.replace(/_/g, ' ')}`,
   };
 }
 
-/**
- * Calculate resonance bonuses based on type and level
- * @param {string} recordType - Record type
- * @param {number} level - Resonance level
- * @returns {Object} Scaled bonuses
- */
-function calculateResonanceBonuses(recordType, level) {
-  const base = level * 0.5;
-  
-  switch (recordType) {
-    case 'kill':
-      return {
-        attackBonus: base * 2,
-        critChance: level * 0.02,
-        critDamage: level * 0.1
-      };
-    case 'treasure':
-      return {
-        goldMultiplier: 1 + level * 0.15,
-        rareChance: level * 0.02
-      };
-    case 'explore':
-      return {
-        visionBonus: level,
-        moveSpeedBonus: base * 0.05,
-        revealHidden: level >= 3
-      };
-    case 'survive':
-      return {
-        defenseBonus: base * 1.5,
-        hpRegen: base * 0.3,
-        damageReduction: level * 0.03
-      };
-    default:
-      return {};
+export function detectEquipmentResonance(equipment) {
+  const items = [equipment.weapon, equipment.armor, equipment.amulet].filter(Boolean);
+  const resonances = [];
+  for (let i = 0; i < items.length; i++) {
+    for (let j = i + 1; j < items.length; j++) {
+      const r = detectResonance(items[i], items[j]);
+      if (r) resonances.push(r);
+    }
   }
+  return resonances;
 }
 
-/**
- * Get visual display info for an item
- * @param {Object} item - Living item
- * @returns {Object} Display properties
- */
-export function getVisualInfo(item) {
-  // Glyph by slot
-  const glyphs = {
-    weapon: ')',
-    armor: '[',
-    amulet: '"'
-  };
-  
-  // Color by primary record type
-  const colors = {
-    kill: '#ff4444',
-    treasure: '#ffdd00',
-    explore: '#44aaff',
-    survive: '#44ff44',
-    none: '#aaaaaa'
-  };
-  
-  const primaryRecord = item.primaryRecord || 'none';
-  const glyph = glyphs[item.slot] || '?';
-  const color = colors[primaryRecord];
-  
-  // Build title with record suffix
-  let title = item.name;
-  if (item.primaryRecord && item.records[item.primaryRecord].level > 0) {
-    const recordName = item.primaryRecord.charAt(0).toUpperCase() + item.primaryRecord.slice(1);
-    title = `${item.name} of the ${recordName}`;
-  }
-  
-  // Build description
-  const level = item.primaryRecord ? item.records[item.primaryRecord].level : 0;
-  const markCount = item.visualMarks?.length || 0;
-  let description = `A ${item.tier} ${item.slot}`;
-  if (markCount > 0) {
-    description += ` with ${markCount} ${item.primaryRecord} mark${markCount > 1 ? 's' : ''}`;
-  }
-  
-  // Check for glow (resonance handled at equip time)
-  const glowColor = null;
-  
-  return {
-    glyph: glyph,
-    color: color,
-    glowColor: glowColor,
-    name: item.name,
-    title: title,
-    description: description
-  };
+// ── Individual Stat Modifiers ──
+
+export function getRecordDamage(item) {
+  const lv = item.records?.kill?.level || 0;
+  if (lv < 1) return 0;
+  return Math.floor(2 * Math.pow(1.8, lv - 1));
 }
 
-/**
- * Generate a random item with a given slot
- * @param {number} floorLevel - Current floor level
- * @param {string} slot - Item slot (weapon, armor, amulet)
- * @returns {Object} Generated living item
- */
-export function generateRandomItem(floorLevel, slot) {
-  // Scale tier chances with floor level
-  const tierPool = getTierPoolForFloor(floorLevel);
-  const tier = tierPool[Math.floor(Math.random() * tierPool.length)];
-  
-  // Get name from pool
-  const names = ITEM_NAMES[slot]?.[tier] || ITEM_NAMES[slot]?.common || [`${slot} Item`];
-  const name = names[Math.floor(Math.random() * names.length)];
-  
-  return createLivingItem({
-    name: name,
-    slot: slot,
-    tier: tier
-  }, floorLevel);
+export function getRecordCrit(item) {
+  const lv = item.records?.kill?.level || 0;
+  if (lv < 5) return 0;
+  return Math.min(0.30, (lv - 4) * 0.05);
 }
 
-/**
- * Get weighted tier pool for a floor level
- * @param {number} floorLevel - Floor level
- * @returns {Array} Array of possible tiers (weighted)
- */
-function getTierPoolForFloor(floorLevel) {
-  const pool = [];
-  
-  // Always add common
-  for (let i = 0; i < 10; i++) pool.push(ITEM_TIERS.COMMON);
-  
-  // Add uncommon (appears early)
-  if (floorLevel >= 1) {
-    for (let i = 0; i < 6; i++) pool.push(ITEM_TIERS.UNCOMMON);
+export function getRecordDefense(item) {
+  const lv = item.records?.survive?.level || 0;
+  if (lv < 1) return 0;
+  return Math.floor(2 * Math.pow(1.7, lv - 1));
+}
+
+export function getRecordDamageReduction(item) {
+  const lv = item.records?.survive?.level || 0;
+  return Math.min(0.50, lv * 0.05);
+}
+
+export function getRecordMaxHP(item) {
+  return (item.records?.survive?.level || 0) * 5;
+}
+
+export function getRecordLifesteal(item) {
+  const lv = item.records?.survive?.level || 0;
+  if (lv < 3) return 0;
+  return Math.min(0.25, (lv - 2) * 0.05);
+}
+
+export function getRecordStaminaEfficiency(item) {
+  const lv = item.records?.explore?.level || 0;
+  return Math.max(0.50, 1.0 - lv * 0.05);
+}
+
+export function getRecordMovementSpeed(item) {
+  const lv = item.records?.explore?.level || 0;
+  if (lv < 4) return 0;
+  return Math.min(0.50, (lv - 3) * 0.10);
+}
+
+export function getRecordMapReveal(item) {
+  const lv = item.records?.explore?.level || 0;
+  if (lv < 2) return 0;
+  return (lv - 1) * 2;
+}
+
+export function getRecordGoldBonus(item) {
+  const lv = item.records?.treasure?.level || 0;
+  if (lv < 2) return 0;
+  return Math.min(1.0, (lv - 1) * 0.10);
+}
+
+export function getRecordRareChance(item) {
+  const lv = item.records?.treasure?.level || 0;
+  if (lv < 5) return 0;
+  return Math.min(0.25, (lv - 4) * 0.05);
+}
+
+// ── Aggregate Stats Across Equipment ──
+
+export function getEquipmentStats(equipment) {
+  const items = [equipment.weapon, equipment.armor, equipment.amulet].filter(Boolean);
+  const resonances = detectEquipmentResonance(equipment);
+
+  const stats = {
+    bonusDamage: 0, critChance: 0, bonusDefense: 0, damageReduction: 0,
+    bonusMaxHP: 0, lifesteal: 0, staminaEfficiency: 1.0, movementSpeed: 0,
+    mapReveal: 0, goldBonus: 0, rareItemChance: 0,
+  };
+
+  for (const item of items) {
+    stats.bonusDamage += getRecordDamage(item) + (item.baseDamage || 0);
+    stats.critChance += getRecordCrit(item);
+    stats.bonusDefense += getRecordDefense(item) + (item.baseDefense || 0);
+    stats.damageReduction += getRecordDamageReduction(item);
+    stats.bonusMaxHP += getRecordMaxHP(item);
+    stats.lifesteal += getRecordLifesteal(item);
+    stats.staminaEfficiency = Math.min(stats.staminaEfficiency, getRecordStaminaEfficiency(item));
+    stats.movementSpeed += getRecordMovementSpeed(item);
+    stats.mapReveal += getRecordMapReveal(item);
+    stats.goldBonus += getRecordGoldBonus(item);
+    stats.rareItemChance += getRecordRareChance(item);
   }
-  
-  // Add rare (appears around floor 3)
-  if (floorLevel >= 3) {
-    for (let i = 0; i < 4; i++) pool.push(ITEM_TIERS.RARE);
+
+  for (const r of resonances) {
+    const mult = r.strength / 100;
+    switch (r.bonus) {
+      case 'damage':     stats.bonusDamage = Math.floor(stats.bonusDamage * (1 + mult)); break;
+      case 'gold':       stats.goldBonus += mult; break;
+      case 'movement':   stats.movementSpeed += mult * 0.3; break;
+      case 'defense':    stats.bonusDefense = Math.floor(stats.bonusDefense * (1 + mult)); break;
+      case 'all_combat':
+        stats.bonusDamage = Math.floor(stats.bonusDamage * (1 + mult));
+        stats.bonusDefense = Math.floor(stats.bonusDefense * (1 + mult));
+        break;
+      case 'loot_speed':
+        stats.goldBonus += mult;
+        stats.movementSpeed += mult * 0.2;
+        break;
+      case 'offense':
+        stats.bonusDamage = Math.floor(stats.bonusDamage * (1 + mult * 1.5));
+        break;
+      case 'tank':
+        stats.bonusDefense = Math.floor(stats.bonusDefense * (1 + mult));
+        stats.damageReduction += mult * 0.5;
+        break;
+    }
   }
-  
-  // Add epic (appears around floor 7)
-  if (floorLevel >= 7) {
-    for (let i = 0; i < 2; i++) pool.push(ITEM_TIERS.EPIC);
+
+  stats.critChance = Math.min(stats.critChance, 0.50);
+  stats.damageReduction = Math.min(stats.damageReduction, 0.75);
+  stats.lifesteal = Math.min(stats.lifesteal, 0.50);
+  stats.movementSpeed = Math.min(stats.movementSpeed, 1.0);
+  stats.rareItemChance = Math.min(stats.rareItemChance, 0.50);
+
+  return { stats, resonances };
+}
+
+// ── Tooltip ──
+
+export function getItemTooltip(item) {
+  const lines = [];
+  lines.push(getItemDisplayName(item));
+  lines.push(`[${item.tier}] ${item.slot} | Floor ${item.floorCreated}`);
+
+  if (item.baseDamage) lines.push(`Base Damage: ${item.baseDamage}`);
+  if (item.baseDefense) lines.push(`Base Defense: ${item.baseDefense}`);
+  if (item.baseBonus) lines.push(`Base Bonus: ${item.baseBonus}`);
+
+  const hasRecord = Object.values(item.records).some(r => r.level > 0 || r.xp > 0);
+  if (hasRecord) {
+    lines.push('');
+    lines.push('--- RECORDS ---');
+    for (const [type, rec] of Object.entries(item.records)) {
+      if (rec.level === 0 && rec.xp === 0) continue;
+      const needed = rec.level >= MAX_LEVEL ? 'MAX' : `${rec.xp}/${xpToNextLevel(rec.level)}`;
+      const stage = getVisualStage(type, rec.level);
+      const pfx = stage.prefix ? ` (${stage.prefix})` : '';
+      lines.push(`  ${type}: Lv${rec.level}${pfx} [${needed}]`);
+      const bonus = describeRecordBonus(type, rec.level);
+      if (bonus) lines.push(`    > ${bonus}`);
+    }
   }
-  
-  // Add legendary (appears around floor 15+)
-  if (floorLevel >= 15) {
-    pool.push(ITEM_TIERS.LEGENDARY);
+
+  if (item.visualMarks.length > 0) {
+    lines.push('');
+    lines.push('--- MARKS ---');
+    for (const mark of item.visualMarks.slice(-3)) {
+      lines.push(`  * ${mark}`);
+    }
+    if (item.visualMarks.length > 3) {
+      lines.push(`  ...and ${item.visualMarks.length - 3} more`);
+    }
   }
-  
-  return pool;
+
+  return lines;
+}
+
+function describeRecordBonus(type, level) {
+  if (level < 1) return null;
+  switch (type) {
+    case 'kill': {
+      const dmg = Math.floor(2 * Math.pow(1.8, level - 1));
+      const crit = level >= 5 ? `, ${Math.min(30, (level - 4) * 5)}% crit` : '';
+      return `+${dmg} damage${crit}`;
+    }
+    case 'treasure': {
+      const gold = level >= 2 ? `+${(level - 1) * 10}% gold` : 'no bonus yet';
+      const rare = level >= 5 ? `, +${(level - 4) * 5}% rare` : '';
+      return gold + rare;
+    }
+    case 'explore': {
+      const stam = `${level * 5}% less stamina`;
+      const spd = level >= 4 ? `, +${(level - 3) * 10}% speed` : '';
+      const map = level >= 2 ? `, +${(level - 1) * 2} reveal` : '';
+      return stam + spd + map;
+    }
+    case 'survive': {
+      const def = Math.floor(2 * Math.pow(1.7, level - 1));
+      const dr = `${level * 5}% DR`;
+      const hp = `+${level * 5} HP`;
+      const ls = level >= 3 ? `, ${(level - 2) * 5}% lifesteal` : '';
+      return `+${def} def, ${dr}, ${hp}${ls}`;
+    }
+    default: return null;
+  }
 }

@@ -8,11 +8,10 @@
   import GraphicsLab from './sections/GraphicsLab.svelte';
   import IntelligenceLab from './sections/IntelligenceLab.svelte';
   import SkillTreeLab from './sections/SkillTreeLab.svelte';
-  import ItemsLab from './sections/ItemsLab.svelte';
   import ItemLab from './sections/ItemLab.svelte';
 
   let activeSection = 'dungeon';
-  
+
   const sections = [
     { id: 'dungeon', label: 'Dungeon' },
     { id: 'combat', label: 'Combat' },
@@ -21,28 +20,27 @@
     { id: 'economy', label: 'Economy' },
     { id: 'items', label: 'Items' },
     { id: 'graphics', label: 'Graphics' },
-    { id: 'items', label: 'Items' },
     { id: 'intelligence', label: 'Intelligence' },
     { id: 'skilltrees', label: 'Skill Trees' }
   ];
-  
+
   function handleSectionChange(event) {
     activeSection = event.detail;
   }
-  
+
   function goToGame() {
     window.location.hash = 'game';
   }
 </script>
 
 <div class="workbench">
-  <Sidebar 
-    {sections} 
-    {activeSection} 
+  <Sidebar
+    {sections}
+    {activeSection}
     on:sectionChange={handleSectionChange}
     on:goToGame={goToGame}
   />
-  
+
   <main class="content">
     {#if activeSection === 'dungeon'}
       <DungeonGen />
@@ -55,11 +53,9 @@
     {:else if activeSection === 'economy'}
       <EconomySim />
     {:else if activeSection === 'items'}
-      <ItemsLab />
+      <ItemLab />
     {:else if activeSection === 'graphics'}
       <GraphicsLab />
-    {:else if activeSection === 'items'}
-      <ItemLab />
     {:else if activeSection === 'intelligence'}
       <IntelligenceLab />
     {:else if activeSection === 'skilltrees'}
@@ -77,7 +73,7 @@
     color: #eee;
     font-family: monospace;
   }
-  
+
   .content {
     flex: 1;
     overflow: auto;

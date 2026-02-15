@@ -1,81 +1,81 @@
 <script>
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { Renderer } from './renderer/Renderer.js';
   import { Game } from './game/Game.js';
-  
+  import Workbench from './workbench/Workbench.svelte';
+
   let canvas;
   let renderer;
   let game;
   let error = null;
   let currentRoute = 'game';
+  let gameInitialized = false;
 
-  onMount(async () => {
-    // Handle routing
-    const handleHash = () => {
-      const hash = window.location.hash.slice(1) || 'game';
-      currentRoute = hash;
-    };
-    
+  function handleHash() {
+    const hash = window.location.hash.replace(/^#\/?/, '') || 'game';
+    currentRoute = hash;
+  }
+
+  onMount(() => {
     window.addEventListener('hashchange', handleHash);
     handleHash();
-    
-    // Only initialize game if on game route
-    if (currentRoute === 'game') {
-      try {
-        renderer = new Renderer(canvas);
-        await renderer.init();
-        
-        game = new Game(renderer);
-        game.start();
-        
-        renderer.startLoop();
-      } catch (e) {
-        console.error('Failed to initialize:', e);
-        error = e.message;
-      }
+  });
+
+  onDestroy(() => {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('hashchange', handleHash);
     }
   });
 
-  function handleKeydown(event) {
-    if (game) {
-      game.handleInput(event.key);
+  // Initialize game when canvas is bound and we're on the game route
+  $: if (canvas && currentRoute === 'game' && !gameInitialized) {
+    initGame();
+  }
+
+  async function initGame() {
+    if (gameInitialized) return;
+    gameInitialized = true;
+    try {
+      renderer = new Renderer(canvas);
+      await renderer.init();
+      game = new Game(renderer);
+      game.start();
+      renderer.startLoop();
+    } catch (e) {
+      console.error('Failed to initialize:', e);
+      error = e.message;
     }
   }
-  
-  function goToGame() {
-    window.location.hash = 'game';
-  }
-  
-  function goToWorkbench() {
-    window.location.hash = 'workbench';
+
+  function handleKeydown(event) {
+    if (game && currentRoute === 'game') {
+      game.handleInput(event.key);
+    }
   }
 </script>
 
 <svelte:window on:keydown={handleKeydown}/>
 
-<main>
-  {#if currentRoute === 'game'}
+{#if currentRoute === 'game'}
+  <main class="game-view">
     {#if error}
       <div class="error">
         <h1>WebGPU Not Available</h1>
         <p>{error}</p>
         <p>Make sure you're using a WebGPU-enabled browser (Chrome 113+, Edge 113+)</p>
-        <button on:click={goToWorkbench}>Go to Workbench</button>
+        <a href="#workbench" class="btn">Go to Workbench</a>
       </div>
     {:else}
       <canvas bind:this={canvas}></canvas>
       <div class="controls">
         <p>Watch the dungeon run, or press [T] for Town, [R] to restart run</p>
-        <button on:click={goToWorkbench}>Workbench</button>
+        <a href="#workbench" class="btn">Workbench</a>
       </div>
     {/if}
-  {:else if currentRoute === 'workbench'}
-    <script>
-      import Workbench from './workbench/Workbench.svelte';
-    </script>
-    <svelte:component this={Workbench} />
-  {/if}
-</main>
+  </main>
+{:else if currentRoute === 'workbench'}
+  <Workbench />
+{/if}
 
 <style>
   :global(body) {
@@ -87,7 +87,7 @@
     overflow: hidden;
   }
 
-  main {
+  .game-view {
     width: 100%;
     height: 100vh;
     display: flex;
@@ -95,41 +95,41 @@
     align-items: center;
     justify-content: center;
   }
-  
+
   canvas {
     width: 100%;
     height: 100%;
     image-rendering: pixelated;
   }
-  
+
   .error {
     color: #ff4444;
     text-align: center;
-    font-family: monospace;
   }
-  
+
   .controls {
     position: fixed;
     bottom: 10px;
     left: 10px;
     color: #888;
-    font-family: monospace;
     font-size: 12px;
     display: flex;
     gap: 20px;
     align-items: center;
   }
-  
-  button {
+
+  .btn {
     background: #222;
     color: #00ffff;
     border: 1px solid #00ffff;
     padding: 5px 10px;
     font-family: monospace;
     cursor: pointer;
+    text-decoration: none;
+    font-size: 12px;
   }
-  
-  button:hover {
+
+  .btn:hover {
     background: #00ffff;
     color: #111;
   }

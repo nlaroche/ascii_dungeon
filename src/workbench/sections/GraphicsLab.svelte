@@ -1,6 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
-  import { Renderer, CELL_FLAGS } from '../../renderer/Renderer.js';
+  import { Renderer, CELL_FLAGS, LAYERS, LIGHT_SUB } from '../../renderer/Renderer.js';
+  import { createVCam, createController, updateController, getScreenOffset } from '../../lib/camera.js';
   import ParamSlider from '../components/ParamSlider.svelte';
 
   let canvas;
@@ -8,7 +9,7 @@
   let error = null;
   let cleanup = null;
 
-  let config = { cellSize: 20, animSpeed: 1.0, visionRadius: 10, showDust: true, torchIntensity: 1.0, parallax: 0.3 };
+  let config = { cellSize: 20, animSpeed: 1.0, visionRadius: 10, showDust: true, torchIntensity: 1.0 };
 
   // ── Tween State for smooth player movement ──
   const TWEEN_DURATION = 0.25; // seconds per cell transition
@@ -50,19 +51,23 @@
     }
   }
 
-  // Carve corridors (2 cells wide)
+  // Carve corridors (2 cells wide, inclusive of both endpoints)
   function carveCorridor(x1, y1, x2, y2) {
     let cx = x1, cy = y1;
-    while (cx !== x2) {
+    // Horizontal segment (includes endpoint x2)
+    while (true) {
       for (let w = 0; w < 2; w++) {
         if (cy + w < GRID_H && cx >= 0 && cx < GRID_W) { dungeonMap[cy + w][cx] = 3; }
       }
+      if (cx === x2) break;
       cx += Math.sign(x2 - x1);
     }
-    while (cy !== y2) {
+    // Vertical segment (includes endpoint y2)
+    while (true) {
       for (let w = 0; w < 2; w++) {
         if (cx + w < GRID_W && cy >= 0 && cy < GRID_H) { dungeonMap[cy][cx + w] = 3; }
       }
+      if (cy === y2) break;
       cy += Math.sign(y2 - cy);
     }
   }
@@ -171,41 +176,57 @@
   }
 
   const rawPath = [
-    // Room 1 interior
+    // Room 1 interior tour
     { x: 5, y: 5 }, { x: 10, y: 5 }, { x: 10, y: 8 }, { x: 5, y: 8 },
-    // Exit Room 1 through corridor to middle
-    { x: 5, y: 6 }, { x: 13, y: 6 }, { x: 16, y: 6 }, { x: 16, y: 12 },
-    // Middle room
-    { x: 18, y: 14 }, { x: 23, y: 14 },
-    // Corridor to Room 2
-    { x: 25, y: 14 }, { x: 25, y: 6 }, { x: 30, y: 6 },
-    // Room 2 interior
+    { x: 5, y: 6 },
+    // East through R1 + corridor into Room 5 corridor
+    { x: 17, y: 6 },
+    // South through corridor into Room 5 interior
+    { x: 17, y: 14 },
+    // Room 5 interior east
+    { x: 25, y: 14 },
+    // North up corridor to y=6
+    { x: 25, y: 6 },
+    // East through corridor into Room 2
+    { x: 29, y: 6 },
+    // Room 2 interior tour
     { x: 35, y: 5 }, { x: 38, y: 5 }, { x: 38, y: 8 }, { x: 30, y: 8 },
-    // Corridor to Room 6
-    { x: 43, y: 6 }, { x: 52, y: 6 }, { x: 52, y: 10 },
-    // Room 6 interior part 1
+    // Exit R2 east through corridor to Room 6
+    { x: 42, y: 6 }, { x: 53, y: 6 },
+    // South into Room 6
+    { x: 53, y: 10 },
+    // Room 6 interior tour
     { x: 58, y: 10 }, { x: 62, y: 10 }, { x: 62, y: 16 },
-    // Exit Room 6 to Room 4
-    { x: 52, y: 16 }, { x: 52, y: 20 },
-    // Corridor to Room 4
-    { x: 52, y: 30 }, { x: 43, y: 30 },
-    // Room 4 interior
+    // Exit R6 south through corridor
+    { x: 53, y: 16 }, { x: 53, y: 30 },
+    // West through corridor into Room 4
+    { x: 29, y: 30 },
+    // Room 4 interior tour
     { x: 35, y: 30 }, { x: 38, y: 30 }, { x: 38, y: 32 }, { x: 30, y: 32 },
-    // Back to middle via corridor
-    { x: 25, y: 30 }, { x: 25, y: 20 },
-    // Corridor to Room 3
-    { x: 25, y: 30 }, { x: 16, y: 30 },
-    // Room 3 interior
-    { x: 5, y: 30 }, { x: 10, y: 30 }, { x: 10, y: 32 }, { x: 5, y: 32 },
-    // Return to Room 1
-    { x: 5, y: 30 }, { x: 16, y: 30 }, { x: 16, y: 20 }, { x: 16, y: 14 },
-    { x: 16, y: 6 }, { x: 5, y: 6 }, { x: 5, y: 5 },
+    // Exit R4 west through corridor, north into Room 5
+    { x: 30, y: 30 }, { x: 26, y: 30 },
+    { x: 26, y: 19 },
+    // Room 5 interior west
+    { x: 17, y: 19 },
+    // South through corridor toward Room 3
+    { x: 17, y: 30 },
+    // West into Room 3
+    { x: 5, y: 30 },
+    // Room 3 interior tour
+    { x: 5, y: 32 }, { x: 10, y: 32 }, { x: 10, y: 30 },
+    // Return east through corridor, north to Room 1
+    { x: 17, y: 30 },
+    { x: 17, y: 6 },
+    { x: 5, y: 6 }, { x: 5, y: 5 },
   ];
 
-  // Validate path - only keep points on floor (2 or 3)
-  const path = linePath(rawPath.filter(p => dungeonMap[p.y]?.[p.x] >= 2));
+  // Generate full path then filter out any wall/void cells (safety net)
+  const path = linePath(rawPath).filter(p => dungeonMap[p.y]?.[p.x] >= 2);
 
   let explored = new Set();
+  // Track when each cell was last in FOV (for fade-out transition)
+  const lastVisibleTime = new Float32Array(GRID_W * GRID_H);
+  const FADE_DURATION = 0.8; // seconds for visible → explored fade
 
   // ── Shadow-casting FOV ──
   function castFOV(cx, cy, radius, isBlocking) {
@@ -286,20 +307,176 @@
     return true;
   }
 
-  // ── Lighting: compute light at (x,y) from all torches ──
-  function computeLight(x, y, time) {
-    let totalLight = 0;
-    for (const torch of torches) {
-      const dx = x - torch.x;
-      const dy = y - torch.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < 10 && hasLineOfSight(torch.x, torch.y, x, y)) {
-        const flicker = 0.8 + Math.sin(time * 4 + torch.x * 3.7 + torch.y * 2.3) * 0.2;
-        const intensity = Math.max(0, 1.0 - dist / 10) * flicker;
-        totalLight += intensity;
+  // ── Colored Lighting ──
+  const TORCH_COLOR = [1.0, 0.55, 0.15];   // warm amber
+  const PLAYER_COLOR = [0.3, 0.9, 0.5];    // cool green
+
+  // Cell-level light arrays for fg tinting + overlay scalar light
+  const lightR = new Float32Array(GRID_W * GRID_H);
+  const lightG = new Float32Array(GRID_W * GRID_H);
+  const lightB = new Float32Array(GRID_W * GRID_H);
+
+  // Pre-computed AO per cell (doesn't change)
+  const aoMap = new Float32Array(GRID_W * GRID_H);
+  (function precomputeAO() {
+    aoMap.fill(1.0);
+    for (let y = 0; y < GRID_H; y++) {
+      for (let x = 0; x < GRID_W; x++) {
+        if (dungeonMap[y][x] < 2) continue;
+        let wallCount = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            if (dx === 0 && dy === 0) continue;
+            const ny = y + dy, nx = x + dx;
+            if (ny < 0 || ny >= GRID_H || nx < 0 || nx >= GRID_W || dungeonMap[ny][nx] === 1) {
+              wallCount++;
+            }
+          }
+        }
+        if (wallCount > 0) {
+          aoMap[y * GRID_W + x] = 1.0 - wallCount * 0.035;
+        }
       }
     }
-    return Math.min(totalLight, 1.0);
+  })();
+
+  const TORCH_RADIUS = 12;
+  const PLAYER_RADIUS = 8;
+  const SUB = LIGHT_SUB;
+  // Minimum ambient light for all visible floor/corridor cells (prevents pitch-dark hallways)
+  const MIN_AMBIENT = [0.04, 0.04, 0.08]; // faint cool blue
+
+  function computeLightMap(time, px, py, fovVisible) {
+    if (!renderer) return;
+    renderer.clearLightMap();
+
+    // Cell-level: clear for fg tinting
+    lightR.fill(0);
+    lightG.fill(0);
+    lightB.fill(0);
+
+    // Pass 1: Floor cells — compute light at sub-cell resolution
+    for (let y = 0; y < GRID_H; y++) {
+      for (let x = 0; x < GRID_W; x++) {
+        const tile = dungeonMap[y][x];
+        if (tile < 2) continue;
+        const key = (y << 8) | x;
+        if (!fovVisible.has(key)) continue;
+
+        // Cache LOS results for this cell (expensive, do once per cell)
+        const torchLOS = [];
+        for (let ti = 0; ti < torches.length; ti++) {
+          const t = torches[ti];
+          const dx = x - t.x, dy = y - t.y;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          torchLOS[ti] = dist < TORCH_RADIUS && hasLineOfSight(t.x, t.y, x, y);
+        }
+
+        const ao = aoMap[y * GRID_W + x];
+        let cellSumR = 0, cellSumG = 0, cellSumB = 0;
+
+        // Iterate sub-cells within this cell
+        for (let sy = 0; sy < SUB; sy++) {
+          for (let sx = 0; sx < SUB; sx++) {
+            const fx = x + (sx + 0.5) / SUB;
+            const fy = y + (sy + 0.5) / SUB;
+            let r = 0, g = 0, b = 0;
+
+            // Torch contributions at sub-cell position
+            for (let ti = 0; ti < torches.length; ti++) {
+              if (!torchLOS[ti]) continue;
+              const t = torches[ti];
+              const dx = fx - t.x, dy = fy - t.y;
+              const dist = Math.sqrt(dx * dx + dy * dy);
+              if (dist < TORCH_RADIUS) {
+                const flicker = 0.85 + Math.sin(time * 4 + t.x * 3.7 + t.y * 2.3) * 0.15;
+                const falloff = Math.max(0, 1.0 - dist / TORCH_RADIUS);
+                const intensity = falloff * falloff * flicker * config.torchIntensity;
+                r += TORCH_COLOR[0] * intensity;
+                g += TORCH_COLOR[1] * intensity;
+                b += TORCH_COLOR[2] * intensity;
+              }
+            }
+
+            // Player glow at sub-cell position
+            const pdx = fx - px, pdy = fy - py;
+            const pDist = Math.sqrt(pdx * pdx + pdy * pdy);
+            if (pDist < PLAYER_RADIUS) {
+              const pFalloff = Math.max(0, 1.0 - pDist / PLAYER_RADIUS);
+              const pIntensity = pFalloff * pFalloff * 0.6;
+              r += PLAYER_COLOR[0] * pIntensity;
+              g += PLAYER_COLOR[1] * pIntensity;
+              b += PLAYER_COLOR[2] * pIntensity;
+            }
+
+            // Minimum ambient for visible floor cells (hallway consistency)
+            r = Math.max(r, MIN_AMBIENT[0]);
+            g = Math.max(g, MIN_AMBIENT[1]);
+            b = Math.max(b, MIN_AMBIENT[2]);
+
+            // Apply AO
+            r *= ao; g *= ao; b *= ao;
+
+            // Write to light map texture
+            const lmX = x * SUB + sx;
+            const lmY = y * SUB + sy;
+            renderer.setLightTexel(lmX, lmY, r, g, b);
+
+            cellSumR += r; cellSumG += g; cellSumB += b;
+          }
+        }
+
+        // Cell-level average for fg tinting
+        const subCount = SUB * SUB;
+        const idx = y * GRID_W + x;
+        lightR[idx] = cellSumR / subCount;
+        lightG[idx] = cellSumG / subCount;
+        lightB[idx] = cellSumB / subCount;
+      }
+    }
+
+    // Pass 2: Walls inherit max of adjacent floor cells' light (× 0.7)
+    // Fill all sub-cells of wall uniformly
+    for (let y = 0; y < GRID_H; y++) {
+      for (let x = 0; x < GRID_W; x++) {
+        if (dungeonMap[y][x] !== 1) continue;
+        const key = (y << 8) | x;
+        if (!fovVisible.has(key)) continue;
+
+        let maxR = 0, maxG = 0, maxB = 0;
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) {
+            const ny = y + dy, nx = x + dx;
+            if (ny >= 0 && ny < GRID_H && nx >= 0 && nx < GRID_W && dungeonMap[ny][nx] >= 2) {
+              const nIdx = ny * GRID_W + nx;
+              if (lightR[nIdx] > maxR) maxR = lightR[nIdx];
+              if (lightG[nIdx] > maxG) maxG = lightG[nIdx];
+              if (lightB[nIdx] > maxB) maxB = lightB[nIdx];
+            }
+          }
+        }
+
+        const wr = maxR * 0.7, wg = maxG * 0.7, wb = maxB * 0.7;
+        const idx = y * GRID_W + x;
+        lightR[idx] = wr;
+        lightG[idx] = wg;
+        lightB[idx] = wb;
+
+        // Fill all sub-cells with same value
+        for (let sy = 0; sy < SUB; sy++) {
+          for (let sx = 0; sx < SUB; sx++) {
+            renderer.setLightTexel(x * SUB + sx, y * SUB + sy, wr, wg, wb);
+          }
+        }
+      }
+    }
+  }
+
+  // Scalar intensity from cell-level light map for overlay objects
+  function getLightIntensity(x, y) {
+    if (x < 0 || x >= GRID_W || y < 0 || y >= GRID_H) return 0;
+    const idx = y * GRID_W + x;
+    return Math.min(lightR[idx] + lightG[idx] + lightB[idx], 1.0);
   }
 
   function renderString(text, x, y, fg, bg) {
@@ -308,9 +485,14 @@
     }
   }
 
+  // Helper to pack r,g,b (0-255) into a hex color string
+  function rgbHex(r, g, b) {
+    return '#' + (r << 16 | g << 8 | b).toString(16).padStart(6, '0');
+  }
+
   function fillDemoScene(time, px, py) {
     if (!renderer) return;
-    renderer.clearGrid();
+    renderer.clearGrid();  // clears all layers
 
     // Get FOV using shadowcasting - merged from current and next tile for smooth transitions
     const isBlocking = (x, y) => dungeonMap[y]?.[x] === 1;
@@ -321,156 +503,235 @@
     // Merge: union of both FOV sets
     const fovVisible = new Set([...fov1, ...fov2]);
 
+    // Compute colored light map
+    computeLightMap(time, px, py, fovVisible);
+
+    // Base colors for tile types [r, g, b]
+    const BASE_WALL_BG  = [42, 42, 58];   // #2a2a3a
+    const BASE_WALL_FG  = [85, 85, 102];  // #555566
+    const BASE_ROOM_BG  = [26, 26, 46];   // #1a1a2e
+    const BASE_CORR_BG  = [20, 20, 40];   // #141428
+
+    // Explored-only target colors [r, g, b]
+    const EXPLORED_WALL_FG = [51, 51, 68];   // #333344
+    const EXPLORED_WALL_BG = [26, 26, 40];   // #1a1a28
+    const EXPLORED_ROOM_BG = [13, 13, 26];   // #0d0d1a
+    const EXPLORED_CORR_BG = [10, 10, 20];   // #0a0a14
+
     for (let y = 0; y < GRID_H; y++) {
       for (let x = 0; x < GRID_W; x++) {
         const tile = dungeonMap[y][x];
-        if (tile === 0) continue; // void = black (already cleared)
+        if (tile === 0) continue; // void cells handled by shader noise
 
         const key = (y << 8) | x;
         const inVision = fovVisible.has(key);
         const wasExplored = explored.has(key);
 
-        if (inVision) explored.add(key);
+        if (inVision) {
+          explored.add(key);
+          lastVisibleTime[y * GRID_W + x] = time;
+        }
 
-        let char = ' ', fg = '#000000', bg = '#0a0a14', depth = 0, flags = 0, light = 0;
+        if (!inVision && !wasExplored) continue;
 
-        if (tile === 1) { // wall
-          char = '#'; fg = '#555566'; bg = '#2a2a3a'; depth = 1.0;
-          
-          // Wall face shading - brighten toward nearest torch
-          if (inVision) {
-            let maxAdjacentLight = 0;
-            for (let dy = -1; dy <= 1; dy++) {
-              for (let dx = -1; dx <= 1; dx++) {
-                const ny = y + dy, nx = x + dx;
-                if (ny >= 0 && ny < GRID_H && nx >= 0 && nx < GRID_W) {
-                  if (dungeonMap[ny][nx] >= 2) { // floor tile
-                    const floorLight = computeLight(nx, ny, time);
-                    if (floorLight > maxAdjacentLight) maxAdjacentLight = floorLight;
-                  }
-                }
-              }
-            }
-            if (maxAdjacentLight > 0.1) {
-              const warmth = maxAdjacentLight * 0.3;
-              const rr = Math.min(255, parseInt(fg.slice(1,3), 16) + Math.floor(warmth * 80));
-              const gg = Math.min(255, parseInt(fg.slice(3,5), 16) + Math.floor(warmth * 50));
-              fg = '#' + rr.toString(16).padStart(2, '0') + gg.toString(16).padStart(2, '0') + fg.slice(5);
-            }
-          }
-        } else if (tile === 2) { // room floor
-          bg = '#1a1a2e';
-        } else if (tile === 3) { // corridor
-          bg = '#141428';
+        const idx = y * GRID_W + x;
+        let char = ' ', fg, bg, depth = 0, flags = 0, light = 0;
+
+        // Select base colors by tile type
+        let baseBg, baseFg;
+        if (tile === 1) {
+          char = '#'; baseFg = BASE_WALL_FG; baseBg = BASE_WALL_BG; depth = 1.0;
+        } else if (tile === 2) {
+          baseBg = BASE_ROOM_BG; baseFg = [0, 0, 0];
+        } else {
+          baseBg = BASE_CORR_BG; baseFg = [0, 0, 0];
         }
 
         if (inVision) {
           flags = CELL_FLAGS.VISIBLE | CELL_FLAGS.EXPLORED;
-          light = computeLight(x, y, time);
-          // Player proximity adds some ambient light
-          const dx = x - px, dy = y - py;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-          const proxLight = Math.max(0, 1.0 - dist / config.visionRadius) * 0.5;
-          light = Math.min(light + proxLight, 1.0);
-        } else if (wasExplored) {
-          flags = CELL_FLAGS.EXPLORED;
-          light = 0.0;
-          // Dim explored areas - make them darker than before
+          const lr = lightR[idx], lg = lightG[idx], lb = lightB[idx];
+
+          // Scalar intensity for fg lighting (shader uses this for glyph brightness)
+          light = Math.min(lr + lg + lb, 1.0);
+
+          // Send BASE bg color — shader combines with light map for sub-cell lighting
+          bg = rgbHex(baseBg[0], baseBg[1], baseBg[2]);
+
+          // Wall foreground tinting (CPU-side, cell-level)
           if (tile === 1) {
-            fg = '#333344';
-            bg = '#1a1a28';
-          } else if (tile === 2) {
-            bg = '#0d0d1a';
-          } else if (tile === 3) {
-            bg = '#0a0a14';
+            const fgR = Math.min(255, Math.floor(baseFg[0] + lr * 100));
+            const fgG = Math.min(255, Math.floor(baseFg[1] + lg * 70));
+            const fgB = Math.min(255, Math.floor(baseFg[2] + lb * 30));
+            fg = rgbHex(fgR, fgG, fgB);
+          } else {
+            fg = '#000000';
           }
         } else {
-          continue; // not explored = black
+          // Explored but not visible: fade from last-visible colors to dim explored
+          const timeSinceSeen = time - lastVisibleTime[idx];
+          const fadeT = Math.min(timeSinceSeen / FADE_DURATION, 1.0);
+
+          // Target explored colors for this tile type
+          let expBg, expFg;
+          if (tile === 1) {
+            expFg = EXPLORED_WALL_FG; expBg = EXPLORED_WALL_BG;
+          } else if (tile === 2) {
+            expBg = EXPLORED_ROOM_BG; expFg = [0, 0, 0];
+          } else {
+            expBg = EXPLORED_CORR_BG; expFg = [0, 0, 0];
+          }
+
+          if (fadeT < 1.0) {
+            // Fading: interpolate from lit state toward explored
+            flags = CELL_FLAGS.VISIBLE | CELL_FLAGS.EXPLORED; // keep VISIBLE so shader uses light map
+            const lr = lightR[idx], lg = lightG[idx], lb = lightB[idx];
+            const litLight = Math.min(lr + lg + lb, 1.0);
+            light = litLight * (1.0 - fadeT); // fade light to 0
+
+            // Bg: lerp from base to explored
+            const bgR = Math.floor(baseBg[0] + (expBg[0] - baseBg[0]) * fadeT);
+            const bgG = Math.floor(baseBg[1] + (expBg[1] - baseBg[1]) * fadeT);
+            const bgB = Math.floor(baseBg[2] + (expBg[2] - baseBg[2]) * fadeT);
+            bg = rgbHex(bgR, bgG, bgB);
+
+            // Fg: lerp for walls
+            if (tile === 1) {
+              const litFgR = Math.min(255, Math.floor(baseFg[0] + lr * 100));
+              const litFgG = Math.min(255, Math.floor(baseFg[1] + lg * 70));
+              const litFgB = Math.min(255, Math.floor(baseFg[2] + lb * 30));
+              const fR = Math.floor(litFgR + (expFg[0] - litFgR) * fadeT);
+              const fG = Math.floor(litFgG + (expFg[1] - litFgG) * fadeT);
+              const fB = Math.floor(litFgB + (expFg[2] - litFgB) * fadeT);
+              fg = rgbHex(Math.max(0, fR), Math.max(0, fG), Math.max(0, fB));
+            } else {
+              fg = '#000000';
+            }
+
+            // Fade the light map sub-cells too
+            for (let sy = 0; sy < SUB; sy++) {
+              for (let sx = 0; sx < SUB; sx++) {
+                const lmX = x * SUB + sx, lmY = y * SUB + sy;
+                // Read current light map values aren't accessible directly,
+                // so scale the existing values by fading factor
+                // Since we re-compute every frame, just write scaled values
+                renderer.setLightTexel(lmX, lmY,
+                  lightR[idx] * (1.0 - fadeT),
+                  lightG[idx] * (1.0 - fadeT),
+                  lightB[idx] * (1.0 - fadeT)
+                );
+              }
+            }
+          } else {
+            // Fully faded: standard explored state
+            flags = CELL_FLAGS.EXPLORED;
+            light = 0.0;
+            fg = tile === 1 ? rgbHex(expFg[0], expFg[1], expFg[2]) : '#000000';
+            bg = rgbHex(expBg[0], expBg[1], expBg[2]);
+          }
         }
 
-        renderer.setCell(x, y, char, fg, bg, depth, flags, light);
+        renderer.setCell(x, y, char, fg, bg, depth, flags, light, 0, 0, LAYERS.TERRAIN);
       }
     }
 
-    // Torches
+    // Torches (OBJECTS layer)
     for (const torch of torches) {
       const key = (torch.y << 8) | torch.x;
       if (!fovVisible.has(key)) continue;
       const flicker = Math.sin(time * 5 + torch.x) * 0.5 + 0.5;
       const g = Math.floor(102 + flicker * 68).toString(16).padStart(2, '0');
-      renderer.setCell(torch.x, torch.y, '!', '#ff' + g + '00', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE | CELL_FLAGS.HIGHLIGHTED, 1.0);
-      
-      // Enhanced torch particles - sparks, embers, smoke
-      for (let p = 0; p < 6; p++) {
-        const phase = time * 2.5 + p * 1.3 + torch.x * 0.7 + torch.y * 0.3;
-        const sparkLife = phase % 4; // 4-frame lifecycle
-        const sparkY = torch.y - 1 - sparkLife;
-        const sparkX = torch.x + Math.sin(phase * 1.8) * 1.2; // wider scatter
-        const rx = Math.round(sparkX), ry = Math.round(sparkY);
+      renderer.setCell(torch.x, torch.y, '!', '#ff' + g + '00', '#1a1a2e', 0, CELL_FLAGS.VISIBLE | CELL_FLAGS.HIGHLIGHTED, 1.0, 0, 0, LAYERS.OBJECTS);
 
-        if (ry >= 0 && ry < GRID_H && rx >= 0 && rx < GRID_W) {
-          const fade = (1.0 - sparkLife / 4) * config.torchIntensity;
-          if (fade > 0.05) {
-            // Color gradient: bright yellow -> orange -> dim red
-            const r = 'ff';
-            const gVal = Math.floor(fade * 200).toString(16).padStart(2, '0');
-            const bVal = Math.floor(fade * fade * 40).toString(16).padStart(2, '0');
-            const sparkChar = fade > 0.6 ? '*' : fade > 0.3 ? '+' : '.';
-            renderer.setCell(rx, ry, sparkChar, '#' + r + gVal + bVal, '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, fade * 0.8);
+      // Smooth torch particles — float upward with sub-cell offsets + Z projection spread
+      for (let p = 0; p < 8; p++) {
+        // Each particle has a looping lifecycle (0→1)
+        const life = ((time * 0.7 + p * 0.37 + torch.x * 0.13 + torch.y * 0.07) % 3.5) / 3.5;
+
+        // Rise upward smoothly (up to ~5 cells)
+        const rise = life * 5.0;
+        // Spread outward as particles "approach camera" (Z projection)
+        const spreadAmt = life * 1.0;
+        const wobble = Math.sin(time * 1.5 + p * 2.7 + torch.x) * spreadAmt;
+
+        // Smooth sub-cell position
+        const particleX = torch.x + wobble;
+        const particleY = torch.y - 0.5 - rise;
+        const cellX = Math.floor(particleX);
+        const cellY = Math.floor(particleY);
+        const offX = particleX - cellX;
+        const offY = particleY - cellY;
+
+        if (cellY >= 0 && cellY < GRID_H && cellX >= 0 && cellX < GRID_W) {
+          // Fade: bright at birth, dim as they rise and cool
+          const fade = (1.0 - life) * (1.0 - life) * config.torchIntensity;
+          if (fade > 0.04) {
+            // Pseudo-3D: particles gain depth as they rise toward camera
+            const particleDepth = life * 0.4;
+            // Color cools from bright yellow-orange to dim red
+            const rVal = 255;
+            const gVal = Math.floor(fade * 220 + (1.0 - life) * 30);
+            const bVal = Math.floor(fade * fade * 50);
+            const sparkChar = fade > 0.5 ? '*' : fade > 0.25 ? '+' : '.';
+            const fg = rgbHex(rVal, Math.min(255, gVal), bVal);
+            renderer.setCell(cellX, cellY, sparkChar, fg, '#000000', particleDepth, CELL_FLAGS.VISIBLE, fade * 0.9, offX, offY, LAYERS.EFFECTS);
           }
         }
       }
 
-      // Smoke wisps above sparks
-      for (let s = 0; s < 2; s++) {
-        const sPhase = time * 1.2 + s * 3.0 + torch.x;
-        const smokeY = torch.y - 4 - (sPhase % 3);
-        const smokeX = torch.x + Math.sin(sPhase * 0.7) * 1.5;
-        const srx = Math.round(smokeX), sry = Math.round(smokeY);
-        if (sry >= 0 && sry < GRID_H && srx >= 0 && srx < GRID_W) {
-          const sFade = (1.0 - (sPhase % 3) / 3) * config.torchIntensity;
-          if (sFade > 0.1) {
-            renderer.setCell(srx, sry, '~', '#555555', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, sFade * 0.3);
+      // Smoke wisps — smooth sub-cell float above sparks
+      for (let s = 0; s < 3; s++) {
+        const sLife = ((time * 0.5 + s * 1.2 + torch.x * 0.3) % 4.0) / 4.0;
+        const sRise = 3.0 + sLife * 4.0;
+        const sSpread = sLife * 1.5;
+        const sWobble = Math.sin(time * 0.8 + s * 3.0 + torch.x) * sSpread;
+
+        const smokeX = torch.x + sWobble;
+        const smokeY = torch.y - sRise;
+        const sCellX = Math.floor(smokeX);
+        const sCellY = Math.floor(smokeY);
+
+        if (sCellY >= 0 && sCellY < GRID_H && sCellX >= 0 && sCellX < GRID_W) {
+          const sFade = (1.0 - sLife) * (1.0 - sLife) * config.torchIntensity;
+          if (sFade > 0.08) {
+            const sDepth = sLife * 0.3;
+            const grey = Math.floor(60 + sFade * 40);
+            renderer.setCell(sCellX, sCellY, '~', rgbHex(grey, grey, grey), '#000000', sDepth, CELL_FLAGS.VISIBLE, sFade * 0.35, smokeX - sCellX, smokeY - sCellY, LAYERS.EFFECTS);
           }
         }
       }
     }
 
-    // Enemies
+    // Enemies (OBJECTS layer)
     for (const enemy of enemies) {
       const key = (enemy.y << 8) | enemy.x;
       if (!fovVisible.has(key)) continue;
-      const light = computeLight(enemy.x, enemy.y, time) + 0.3;
-      renderer.setCell(enemy.x, enemy.y, enemy.char, enemy.fg, '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, Math.min(light, 1.0));
+      const eLight = getLightIntensity(enemy.x, enemy.y) + 0.3;
+      renderer.setCell(enemy.x, enemy.y, enemy.char, enemy.fg, '#1a1a2e', 0, CELL_FLAGS.VISIBLE, Math.min(eLight, 1.0), 0, 0, LAYERS.OBJECTS);
     }
 
-    // Treasure
+    // Treasure (OBJECTS layer)
     for (const treasure of treasures) {
       const key = (treasure.y << 8) | treasure.x;
       if (!fovVisible.has(key)) continue;
-      renderer.setCell(treasure.x, treasure.y, '$', '#ffdd00', '#1a1a2e', 0.0, CELL_FLAGS.VISIBLE | CELL_FLAGS.HIGHLIGHTED, 1.0);
+      renderer.setCell(treasure.x, treasure.y, '$', '#ffdd00', '#1a1a2e', 0.0, CELL_FLAGS.VISIBLE | CELL_FLAGS.HIGHLIGHTED, 1.0, 0, 0, LAYERS.OBJECTS);
     }
 
-    // Dust motes - floating particles on visible floor tiles
+    // Dust motes (DECOR layer)
     if (config.showDust) {
       for (const mote of dustMotes) {
-        // Gentle sine-wave drift
         const mx = mote.x + Math.sin(time * 0.5 + mote.phase) * 0.8;
         const my = mote.y + Math.cos(time * 0.3 + mote.phase) * 0.4;
         const rx = Math.round(mx) % GRID_W;
         const ry = Math.round(my) % GRID_H;
 
-        // Only render on visible floor tiles
         const key = (ry << 8) | rx;
         if (fovVisible.has(key) && dungeonMap[ry]?.[rx] >= 2) {
-          renderer.setCell(rx, ry, mote.char, '#888866', '#1a1a2e', 0.0, CELL_FLAGS.VISIBLE, 0.15);
+          renderer.setCell(rx, ry, mote.char, '#888866', '#1a1a2e', 0.0, CELL_FLAGS.VISIBLE, 0.15, 0, 0, LAYERS.DECOR);
         }
 
-        // Slowly drift
         mote.x += mote.speedX * 0.016;
         mote.y += mote.speedY * 0.016;
 
-        // Wrap around
         if (mote.x < 0) mote.x += GRID_W;
         if (mote.x >= GRID_W) mote.x -= GRID_W;
         if (mote.y < 0) mote.y += GRID_H;
@@ -478,10 +739,10 @@
       }
     }
 
-    // Player rendered with sub-cell offset for smooth movement
+    // Player (PLAYER layer) with sub-cell offset for smooth movement
     const cellX = Math.floor(px);
     const cellY = Math.floor(py);
-    renderer.setCell(cellX, cellY, '@', '#00ff88', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, 1.0, px - cellX, py - cellY);
+    renderer.setCell(cellX, cellY, '@', '#00ff88', '#1a1a2e', 0, CELL_FLAGS.VISIBLE, 1.0, px - cellX, py - cellY, LAYERS.PLAYER);
   }
 
   onMount(async () => {
@@ -498,17 +759,27 @@
       fromY = toY = path[0].y;
       tweenStart = 0;
 
+      // Camera: follow target object (updated each frame)
+      const followTarget = { x: path[0].x, y: path[0].y };
+      const vcam = createVCam({
+        followTarget,
+        damping: 6.0,
+        deadZoneX: 1.5,
+        deadZoneY: 1.0,
+      });
+      const camCtrl = createController(vcam);
+
       const loop = (now) => {
         if (!running) return;
 
         if (lastFrame === 0) {
           lastFrame = now;
-          tweenStart = now / 1000;
+          tweenStart = 0;
           requestAnimationFrame(loop);
           return;
         }
 
-        const dt = Math.min((now - lastFrame) / 1000, 0.1); // cap dt to 100ms
+        const dt = Math.min((now - lastFrame) / 1000, 0.1);
         lastFrame = now;
         time += dt * config.animSpeed;
 
@@ -516,10 +787,8 @@
         const effectiveDuration = TWEEN_DURATION / config.animSpeed;
         const tweenElapsed = time - tweenStart;
         let tweenT = Math.min(tweenElapsed / effectiveDuration, 1.0);
-        const easedT = easeOutQuint(tweenT);
 
         if (tweenT >= 1.0) {
-          // Move to next path point
           fromX = toX;
           fromY = toY;
           pathIndex = (pathIndex + 1) % path.length;
@@ -529,21 +798,25 @@
           tweenT = 0;
         }
 
-        // Interpolated position with easing
+        // Compute easing AFTER potential path advancement
+        const easedT = easeOutQuint(tweenT);
         const px = fromX + (toX - fromX) * easedT;
         const py = fromY + (toY - fromY) * easedT;
 
-        // Camera centers on eased position for smooth world slide
+        // Update camera follow target and tick
+        followTarget.x = px;
+        followTarget.y = py;
+        updateController(camCtrl, dt);
+
+        // Get pixel offsets from camera
         const dpr = window.devicePixelRatio || 1;
-        const screenCenterX = (renderer.canvas.width / dpr) / 2;
-        const screenCenterY = (renderer.canvas.height / dpr) / 2;
-        renderer.cameraOffsetX = screenCenterX - px * config.cellSize;
-        renderer.cameraOffsetY = screenCenterY - py * config.cellSize * 1.5;
+        const cssW = renderer.canvas.width / dpr;
+        const cssH = renderer.canvas.height / dpr;
+        const cam = getScreenOffset(camCtrl, cssW, cssH, config.cellSize, config.cellSize * 1.5);
+        renderer.cameraOffsetX = cam.offsetX;
+        renderer.cameraOffsetY = cam.offsetY;
 
         renderer.cellSize = config.cellSize;
-        if (renderer.parallaxStrength !== undefined) {
-          renderer.parallaxStrength = config.parallax;
-        }
         fillDemoScene(time, px, py);
         renderer.render();
 
@@ -563,91 +836,106 @@
 </script>
 
 <div class="section">
-  <h2>Graphics Lab</h2>
-
   {#if error}
     <div class="error">WebGPU Error: {error}</div>
   {/if}
 
-  <div class="controls">
-    <ParamSlider
-      label="Cell Size"
-      min={10}
-      max={28}
-      step={1}
-      value={config.cellSize}
-      on:change={e => { config.cellSize = e.detail; if (renderer) renderer.cellSize = e.detail; }}
-    />
-    <ParamSlider
-      label="Anim Speed"
-      min={0}
-      max={5}
-      step={0.1}
-      value={config.animSpeed}
-      on:change={e => config.animSpeed = e.detail}
-    />
-    <ParamSlider
-      label="Vision"
-      min={4}
-      max={20}
-      step={1}
-      value={config.visionRadius}
-      on:change={e => config.visionRadius = e.detail}
-    />
-    <ParamSlider
-      label="Parallax"
-      min={0}
-      max={1.0}
-      step={0.05}
-      value={config.parallax}
-      on:change={e => config.parallax = e.detail}
-    />
-    <label class="checkbox-label">
-      <input type="checkbox" bind:checked={config.showDust} />
-      Dust Motes
-    </label>
-    <ParamSlider
-      label="Torch Intensity"
-      min={0.5}
-      max={2.0}
-      step={0.1}
-      value={config.torchIntensity}
-      on:change={e => config.torchIntensity = e.detail}
-    />
-  </div>
-
-  <div class="preview">
+  <div class="viewport">
     <canvas bind:this={canvas}></canvas>
+
+    <div class="controls-panel">
+      <h3>Graphics Lab</h3>
+      <ParamSlider
+        label="Cell Size"
+        min={10}
+        max={28}
+        step={1}
+        value={config.cellSize}
+        on:change={e => { config.cellSize = e.detail; if (renderer) renderer.cellSize = e.detail; }}
+      />
+      <ParamSlider
+        label="Anim Speed"
+        min={0}
+        max={5}
+        step={0.1}
+        value={config.animSpeed}
+        on:change={e => config.animSpeed = e.detail}
+      />
+      <ParamSlider
+        label="Vision"
+        min={4}
+        max={20}
+        step={1}
+        value={config.visionRadius}
+        on:change={e => config.visionRadius = e.detail}
+      />
+      <label class="checkbox-label">
+        <input type="checkbox" bind:checked={config.showDust} />
+        Dust Motes
+      </label>
+      <ParamSlider
+        label="Torch Intensity"
+        min={0.5}
+        max={2.0}
+        step={0.1}
+        value={config.torchIntensity}
+        on:change={e => config.torchIntensity = e.detail}
+      />
+    </div>
   </div>
 </div>
 
 <style>
-  .section h2 {
-    color: #ffaa00;
-    margin-bottom: 20px;
+  .section {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
   }
-  .controls {
-    margin-bottom: 15px;
-    max-width: 300px;
-  }
-  .preview {
-    width: 100%;
-    height: 700px;
+  .viewport {
+    flex: 1;
+    position: relative;
     background: #000;
     border: 1px solid #333;
     border-radius: 4px;
     overflow: hidden;
+    min-height: 0;
   }
-  .preview canvas {
+  .viewport canvas {
     width: 100%;
     height: 100%;
     display: block;
+  }
+  .controls-panel {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    width: 220px;
+    background: rgba(10, 10, 20, 0.85);
+    backdrop-filter: blur(6px);
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 12px;
+    z-index: 10;
+  }
+  .controls-panel h3 {
+    color: #ffaa00;
+    margin: 0 0 10px 0;
+    font-size: 14px;
+  }
+  .checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #ccc;
+    margin: 4px 0;
+    cursor: pointer;
   }
   .error {
     color: #ff4444;
     background: #330000;
     padding: 10px;
     border-radius: 4px;
-    margin-bottom: 15px;
+    margin-bottom: 8px;
   }
 </style>

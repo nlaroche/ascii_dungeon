@@ -1,0 +1,22 @@
+# =============================================================
+# Aider Project-Level Configuration - ASCII Dungeon
+# =============================================================
+# Overrides global config for this Svelte + Vite project
+# =============================================================
+
+# --- Test ---
+# Build validation via PowerShell script (quick mode = build only)
+test-cmd: powershell -ExecutionPolicy Bypass -File test.ps1 -Quick
+
+# --- Lint ---
+# Disabled: vite build output contains Unicode that crashes aider's
+# rich console on Windows (cp1252 encoding). Build check via test-cmd
+# is sufficient for catching errors.
+# lint-cmd: "javascript: node node_modules/vite/bin/vite.js build --mode development 2>&1"
+
+# --- Files to always include as read-only context ---
+# (spec files are added per-invocation by aider-spec.ps1)
+
+# --- Repo Map ---
+subtree-only: false
+map-tokens: 2048

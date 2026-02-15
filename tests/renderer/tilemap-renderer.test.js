@@ -1,215 +1,195 @@
-// TilemapRenderer tests
-
-import { createMockDevice, createMockCanvas } from '../helpers/gpu-mock.js';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { createMockDevice } from '../helpers/gpu-mock.js';
 import {
   CELL_SIZE_BYTES,
   CELL_FLAGS,
+  LAYER_COUNT,
+  LAYERS,
   colorToU32,
   createTilemapRenderer,
 } from '../../src/renderer/TilemapRenderer.js';
 
-function assert(condition, message) {
-  if (!condition) {
-    throw new Error(`Assertion failed: ${message}`);
-  }
-}
+// Mock WebGPU globals needed by createTilemapRenderer
+beforeAll(() => {
+  globalThis.GPUBufferUsage = { STORAGE: 0x80, COPY_DST: 0x08, UNIFORM: 0x40, COPY_SRC: 0x04 };
+  globalThis.GPUShaderStage = { VERTEX: 0x1, FRAGMENT: 0x2, COMPUTE: 0x4 };
+  globalThis.GPUTextureUsage = { TEXTURE_BINDING: 0x04, COPY_DST: 0x02, RENDER_ATTACHMENT: 0x10 };
+});
 
-function assertEquals(actual, expected, message) {
-  if (actual !== expected) {
-    throw new Error(`Expected ${expected}, got ${actual}: ${message}`);
-  }
-}
-
-function assertArrayEquals(actual, expected, message) {
-  if (actual.length !== expected.length) {
-    throw new Error(`Array length mismatch: ${message}`);
-  }
-  for (let i = 0; i < actual.length; i++) {
-    if (actual[i] !== expected[i]) {
-      throw new Error(`Array mismatch at index ${i}: ${message}`);
-    }
-  }
-}
-
-// Test colorToU32 with various hex formats
-function testColorToU32() {
-  console.log('Testing colorToU32...');
-  
-  // #ff0000 -> red
-  let result = colorToU32('#ff0000');
-  assertEquals(result, 0xff0000ff, '#ff0000 should be red with full alpha');
-  
-  // #0f0 -> green (expanded to #00ff00)
-  result = colorToU32('#0f0');
-  assertEquals(result, 0x00ff00ff, '#0f0 should be green');
-  
-  // #000000 -> black
-  result = colorToU32('#000000');
-  assertEquals(result, 0x000000ff, '#000000 should be black');
-  
-  // #ffffff -> white
-  result = colorToU32('#ffffff');
-  assertEquals(result, 0xffffffff, '#ffffff should be white');
-  
-  // Without # prefix
-  result = colorToU32('ff00ff');
-  assertEquals(result, 0xff00ffff, 'ff00ff should be magenta');
-  
-  console.log('colorToU32 tests passed!');
-}
-
-// Test CELL_SIZE_BYTES equals 24
-function testCellSizeBytes() {
-  console.log('Testing CELL_SIZE_BYTES...');
-  assertEquals(CELL_SIZE_BYTES, 24, 'CELL_SIZE_BYTES must be 24');
-  console.log('CELL_SIZE_BYTES test passed!');
-}
-
-// Test setTile writes correct bytes
-function testSetTile() {
-  console.log('Testing setTile...');
-  
-  const device = createMockDevice();
-  const canvas = createMockCanvas(1024, 512);
-  const ctx = canvas.getContext('webgpu');
-  
-  // Create a dummy atlas texture
-  const atlasTexture = device.createTexture({
-    size: [1024, 384],
-    format: 'r8unorm',
-    usage: GPUTextureUsage.TEXTURE_BINDING,
+describe('colorToU32', () => {
+  it('converts #ff0000 to red with alpha', () => {
+    expect(colorToU32('#ff0000')).toBe((0xff000000 | 0x000000ff) >>> 0);
   });
-  
-  const renderer = createTilemapRenderer(
-    device,
-    'bgra8unorm',
-    atlasTexture,
-    10, // gridWidth
-    5   // gridHeight
-  );
-  
-  // Test setting a single tile
-  const fg = colorToU32('#ff0000');
-  const bg = colorToU32('#0000ff');
-  renderer.setTile(3, 2, 65, fg, bg, 0.5, CELL_FLAGS.VISIBLE | CELL_FLAGS.EXPLORED);
-  
-  // Verify the data was written correctly via DataView
-  const offset = (2 * 10 + 3) * CELL_SIZE_BYTES;
-  
-  // glyph at offset 0
-  assertEquals(renderer.dataView.getUint32(offset, true), 65, 'glyph should be 65');
-  
-  // fg at offset 4
-  assertEquals(renderer.dataView.getUint32(offset + 4, true), fg, 'fg should match');
-  
-  // bg at offset 8
-  assertEquals(renderer.dataView.getUint32(offset + 8, true), bg, 'bg should match');
-  
-  // depth at offset 12
-  assertEquals(renderer.dataView.getFloat32(offset + 12, true), 0.5, 'depth should be 0.5');
-  
-  // light at offset 16 (default 1.0)
-  assertEquals(renderer.dataView.getFloat32(offset + 16, true), 1.0, 'light should default to 1.0');
-  
-  // flags at offset 20 (VISIBLE | EXPLORED = 1 | 2 = 3)
-  assertEquals(renderer.dataView.getUint32(offset + 20, true), 3, 'flags should be 3');
-  
-  console.log('setTile test passed!');
-}
 
-// Test clearGrid zeros buffer
-function testClearGrid() {
-  console.log('Testing clearGrid...');
-  
-  const device = createMockDevice();
-  const canvas = createMockCanvas(1024, 512);
-  
-  const atlasTexture = device.createTexture({
-    size: [1024, 384],
-    format: 'r8unorm',
-    usage: GPUTextureUsage.TEXTURE_BINDING,
+  it('converts 3-char hex #0f0 to green', () => {
+    expect(colorToU32('#0f0')).toBe((0x00ff0000 | 0x000000ff) >>> 0);
   });
-  
-  const renderer = createTilemapRenderer(
-    device,
-    'bgra8unorm',
-    atlasTexture,
-    10,
-    5
-  );
-  
-  // First, write some data
-  renderer.setTile(0, 0, 65, colorToU32('#ffffff'), colorToU32('#000000'), 0.0, CELL_FLAGS.VISIBLE);
-  renderer.setTile(9, 4, 90, colorToU32('#ff00ff'), colorToU32('#00ff00'), 1.0, CELL_FLAGS.HIGHLIGHTED);
-  
-  // Verify data was written
-  const initialGlyph = renderer.dataView.getUint32(0, true);
-  assertEquals(initialGlyph, 65, 'initial glyph should be set');
-  
-  // Now clear the grid
-  renderer.clearGrid();
-  
-  // Verify entire buffer is zero
-  const uint8 = new Uint8Array(renderer.cpuBuffer);
-  for (let i = 0; i < uint8.length; i++) {
-    if (uint8[i] !== 0) {
-      throw new Error(`Buffer byte at index ${i} should be 0 but was ${uint8[i]}`);
-    }
-  }
-  
-  console.log('clearGrid test passed!');
-}
 
-// Test that coordinates outside bounds are ignored
-function testSetTileOutOfBounds() {
-  console.log('Testing setTile out of bounds...');
-  
-  const device = createMockDevice();
-  const canvas = createMockCanvas(1024, 512);
-  
-  const atlasTexture = device.createTexture({
-    size: [1024, 384],
-    format: 'r8unorm',
-    usage: GPUTextureUsage.TEXTURE_BINDING,
+  it('converts #000000 to black with alpha 255', () => {
+    expect(colorToU32('#000000')).toBe(0x000000ff);
   });
-  
-  const renderer = createTilemapRenderer(
-    device,
-    'bgra8unorm',
-    atlasTexture,
-    10,
-    5
-  );
-  
-  // Write some valid data first
-  renderer.setTile(5, 2, 65, colorToU32('#ffffff'), colorToU32('#000000'), 0.0, CELL_FLAGS.VISIBLE);
-  
-  // Try to write outside bounds - should not crash and should not modify buffer
-  renderer.setTile(-1, 2, 99, colorToU32('#ff0000'), colorToU32('#00ff00'), 0.0, 0);
-  renderer.setTile(10, 2, 99, colorToU32('#ff0000'), colorToU32('#00ff00'), 0.0, 0);
-  renderer.setTile(5, -1, 99, colorToU32('#ff0000'), colorToU32('#00ff00'), 0.0, 0);
-  renderer.setTile(5, 5, 99, colorToU32('#ff0000'), colorToU32('#00ff00'), 0.0, 0);
-  
-  // Original data should be unchanged
-  const offset = (2 * 10 + 5) * CELL_SIZE_BYTES;
-  assertEquals(renderer.dataView.getUint32(offset, true), 65, 'original glyph should be unchanged');
-  
-  console.log('Out of bounds test passed!');
-}
 
-// Run all tests
-function runTests() {
-  try {
-    testColorToU32();
-    testCellSizeBytes();
-    testSetTile();
-    testClearGrid();
-    testSetTileOutOfBounds();
-    console.log('All tests passed!');
-  } catch (error) {
-    console.error('Test failed:', error);
-    process.exit(1);
+  it('converts #ffffff to white', () => {
+    expect(colorToU32('#ffffff')).toBe(0xffffffff >>> 0);
+  });
+
+  it('works without # prefix', () => {
+    expect(colorToU32('ff00ff')).toBe((0xff00ff00 | 0x000000ff) >>> 0);
+  });
+});
+
+describe('CELL_SIZE_BYTES', () => {
+  it('is 32 bytes', () => {
+    expect(CELL_SIZE_BYTES).toBe(32);
+  });
+});
+
+describe('CELL_FLAGS', () => {
+  it('has correct bit values', () => {
+    expect(CELL_FLAGS.VISIBLE).toBe(1);
+    expect(CELL_FLAGS.EXPLORED).toBe(2);
+    expect(CELL_FLAGS.HIGHLIGHTED).toBe(4);
+  });
+});
+
+describe('LAYERS', () => {
+  it('has 5 layers', () => {
+    expect(LAYER_COUNT).toBe(5);
+  });
+
+  it('has correct layer indices', () => {
+    expect(LAYERS.TERRAIN).toBe(0);
+    expect(LAYERS.DECOR).toBe(1);
+    expect(LAYERS.OBJECTS).toBe(2);
+    expect(LAYERS.PLAYER).toBe(3);
+    expect(LAYERS.EFFECTS).toBe(4);
+  });
+});
+
+describe('createTilemapRenderer', () => {
+  function makeRenderer(w = 10, h = 5) {
+    const device = createMockDevice();
+    const atlas = device.createTexture({
+      size: [1024, 384],
+      format: 'r8unorm',
+      usage: 0x04,
+    });
+    return createTilemapRenderer(device, 'bgra8unorm', atlas, w, h);
   }
-}
 
-runTests();
+  it('creates correct buffer sizes with layers', () => {
+    const r = makeRenderer(10, 5);
+    expect(r.cellsPerLayer).toBe(50);
+    expect(r.totalCells).toBe(50 * LAYER_COUNT);
+    expect(r.cpuBuffer.byteLength).toBe(50 * LAYER_COUNT * CELL_SIZE_BYTES);
+  });
+
+  describe('setTile', () => {
+    it('writes correct cell data to layer 0', () => {
+      const r = makeRenderer(10, 5);
+      const fg = colorToU32('#ff0000');
+      const bg = colorToU32('#0000ff');
+      r.setTile(0, 3, 2, 65, fg, bg, 0.5, CELL_FLAGS.VISIBLE | CELL_FLAGS.EXPLORED);
+
+      const index = 0 * 50 + 2 * 10 + 3; // layer 0
+      const offset = index * CELL_SIZE_BYTES;
+      expect(r.dataView.getUint32(offset + 0, true)).toBe(65); // glyph
+      expect(r.dataView.getUint32(offset + 4, true)).toBe(fg); // fg
+      expect(r.dataView.getUint32(offset + 8, true)).toBe(bg); // bg
+      expect(r.dataView.getFloat32(offset + 12, true)).toBe(0.5); // depth
+      expect(r.dataView.getFloat32(offset + 16, true)).toBe(1.0); // light default
+      expect(r.dataView.getUint32(offset + 20, true)).toBe(3); // flags
+      expect(r.dataView.getFloat32(offset + 24, true)).toBe(0); // offsetX default
+      expect(r.dataView.getFloat32(offset + 28, true)).toBe(0); // offsetY default
+    });
+
+    it('writes to different layers at same (x,y)', () => {
+      const r = makeRenderer(10, 5);
+      const fg1 = colorToU32('#ff0000');
+      const fg2 = colorToU32('#00ff00');
+
+      r.setTile(LAYERS.TERRAIN, 5, 3, 35, fg1, 0, 0, 1); // '#' on terrain
+      r.setTile(LAYERS.PLAYER, 5, 3, 64, fg2, 0, 0.5, 1); // '@' on player layer
+
+      const terrainIdx = LAYERS.TERRAIN * 50 + 3 * 10 + 5;
+      const playerIdx = LAYERS.PLAYER * 50 + 3 * 10 + 5;
+
+      expect(r.dataView.getUint32(terrainIdx * CELL_SIZE_BYTES, true)).toBe(35);
+      expect(r.dataView.getUint32(playerIdx * CELL_SIZE_BYTES, true)).toBe(64);
+    });
+
+    it('writes sub-cell offsets at byte offsets 24 and 28', () => {
+      const r = makeRenderer(10, 5);
+      const fg = colorToU32('#ff0000');
+      const bg = colorToU32('#0000ff');
+      r.setTile(0, 1, 1, 65, fg, bg, 0, 0, 1.0, 0.25, 0.75);
+
+      const index = 0 * 50 + 1 * 10 + 1;
+      const offset = index * CELL_SIZE_BYTES;
+      expect(r.dataView.getFloat32(offset + 24, true)).toBeCloseTo(0.25);
+      expect(r.dataView.getFloat32(offset + 28, true)).toBeCloseTo(0.75);
+    });
+
+    it('ignores out-of-bounds coordinates', () => {
+      const r = makeRenderer(10, 5);
+      r.setTile(0, 5, 2, 65, 0xffffffff, 0, 0, 1);
+      r.setTile(0, -1, 0, 99, 0, 0, 0, 0);
+      r.setTile(0, 10, 0, 99, 0, 0, 0, 0);
+      r.setTile(0, 0, -1, 99, 0, 0, 0, 0);
+      r.setTile(0, 0, 5, 99, 0, 0, 0, 0);
+      // Original tile should be intact
+      const index = 0 * 50 + 2 * 10 + 5;
+      const offset = index * CELL_SIZE_BYTES;
+      expect(r.dataView.getUint32(offset, true)).toBe(65);
+    });
+
+    it('ignores invalid layer index', () => {
+      const r = makeRenderer(10, 5);
+      r.setTile(0, 0, 0, 65, 0xffffffff, 0, 0, 1);
+      r.setTile(-1, 0, 0, 99, 0, 0, 0, 0);
+      r.setTile(5, 0, 0, 99, 0, 0, 0, 0);
+      // Layer 0, (0,0) should still have glyph 65
+      expect(r.dataView.getUint32(0, true)).toBe(65);
+    });
+  });
+
+  describe('clearGrid', () => {
+    it('zeros the entire buffer (all layers)', () => {
+      const r = makeRenderer(10, 5);
+      r.setTile(0, 0, 0, 65, 0xffffffff, 0xffffffff, 1.0, 7);
+      r.setTile(4, 9, 4, 90, 0xffffffff, 0xffffffff, 1.0, 7);
+      r.clearGrid();
+
+      const bytes = new Uint8Array(r.cpuBuffer);
+      const allZero = bytes.every(b => b === 0);
+      expect(allZero).toBe(true);
+    });
+  });
+
+  describe('clearLayer', () => {
+    it('clears only the specified layer', () => {
+      const r = makeRenderer(10, 5);
+      r.setTile(LAYERS.TERRAIN, 5, 3, 35, 0xffffffff, 0, 0, 1);
+      r.setTile(LAYERS.PLAYER, 5, 3, 64, 0xffffffff, 0, 0.5, 1);
+
+      r.clearLayer(LAYERS.PLAYER);
+
+      // Terrain still intact
+      const terrainIdx = LAYERS.TERRAIN * 50 + 3 * 10 + 5;
+      expect(r.dataView.getUint32(terrainIdx * CELL_SIZE_BYTES, true)).toBe(35);
+
+      // Player layer cleared
+      const playerIdx = LAYERS.PLAYER * 50 + 3 * 10 + 5;
+      expect(r.dataView.getUint32(playerIdx * CELL_SIZE_BYTES, true)).toBe(0);
+    });
+
+    it('ignores invalid layer index', () => {
+      const r = makeRenderer(10, 5);
+      r.setTile(0, 0, 0, 65, 0xffffffff, 0, 0, 1);
+      r.clearLayer(-1);
+      r.clearLayer(5);
+      // Should not crash, original data intact
+      expect(r.dataView.getUint32(0, true)).toBe(65);
+    });
+  });
+});
