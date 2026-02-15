@@ -19,6 +19,7 @@
   let activeTab = 'dungeon';
   let renderer = null;
   let sceneKey = 0;
+  let openBuilding = null;
 
   $: activeScene = TABS.find(t => t.id === activeTab).scene;
   $: gridW = activeScene.gridWidth;
@@ -28,6 +29,7 @@
 
   function switchTab(id) {
     if (id === activeTab) return;
+    openBuilding = null;
     activeTab = id;
     sceneKey++;
   }
@@ -39,6 +41,25 @@
 
   function handleFrame(r, dt) {
     activeScene.onFrame(r, dt);
+  }
+
+  function handleMouseMove(gx, gy) {
+    if (activeTab === 'town') {
+      townScene.setMousePos(gx, gy);
+    }
+  }
+
+  function handleClick(gx, gy) {
+    if (activeTab === 'town') {
+      const building = townScene.getHoveredBuilding();
+      if (building) {
+        openBuilding = building;
+      }
+    }
+  }
+
+  function closeModal() {
+    openBuilding = null;
   }
 
   // Dungeon-specific config
@@ -63,15 +84,19 @@
   </div>
 
   <div class="viewport">
-    {#key sceneKey}
-      <SceneCanvas
-        gridWidth={gridW}
-        gridHeight={gridH}
-        cellSize={sceneCellSize}
-        onSetup={handleSetup}
-        onFrame={handleFrame}
-      />
-    {/key}
+    <div class="canvas-wrap" class:blurred={openBuilding !== null}>
+      {#key sceneKey}
+        <SceneCanvas
+          gridWidth={gridW}
+          gridHeight={gridH}
+          cellSize={sceneCellSize}
+          onSetup={handleSetup}
+          onFrame={handleFrame}
+          onMouseMove={handleMouseMove}
+          onClick={handleClick}
+        />
+      {/key}
+    </div>
 
     {#if activeTab === 'dungeon'}
       <div class="controls-panel">
@@ -162,6 +187,15 @@
     border-radius: 0 0 var(--radius) var(--radius);
     overflow: hidden;
     min-height: 0;
+  }
+  .canvas-wrap {
+    position: absolute;
+    inset: 0;
+    transition: filter 0.3s ease;
+  }
+  .canvas-wrap.blurred {
+    filter: blur(4px) grayscale(0.8) brightness(0.6);
+    pointer-events: none;
   }
   .controls-panel {
     position: absolute;

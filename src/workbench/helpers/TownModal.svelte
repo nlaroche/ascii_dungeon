@@ -28,16 +28,16 @@
   ];
 
   const stashItems = [
-    { char: '⚔', fg: '#c0c0c0', name: 'Iron Sword +1' },
-    { char: '🛡', fg: '#4a9eff', name: 'Leather Armor' },
-    { char: '🧪', fg: '#98ffe0', name: 'Potion x3', empty: false },
-    { char: '🔥', fg: '#d35d5d', name: 'Fire Rune' },
+    { char: '/', fg: 'var(--fg-muted)', name: 'Iron Sword +1' },
+    { char: '[', fg: 'var(--accent)', name: 'Leather Armor' },
+    { char: '!', fg: 'var(--accent-green)', name: 'Potion x3' },
+    { char: '*', fg: 'var(--accent-red)', name: 'Fire Rune' },
   ];
 
   const quests = [
-    { title: 'Clear the Mines', desc: 'Defeat 10 goblins in the abandoned mines', reward: '50g + 100 XP', difficulty: 'Easy', difficultyColor: '#a2dcc7' },
-    { title: 'Lost Artifact', desc: 'Retrieve the ancient rune from floor 5', reward: '120g + 250 XP', difficulty: 'Medium', difficultyColor: '#d3a068' },
-    { title: "Dragon's Lair", desc: 'Slay the elder dragon', reward: '500g + 1000 XP', difficulty: 'Hard', difficultyColor: '#b45252' },
+    { title: 'Clear the Mines', desc: 'Defeat 10 goblins in the abandoned mines', reward: '50g + 100 XP', difficulty: 'Easy', difficultyClass: 'diff-easy' },
+    { title: 'Lost Artifact', desc: 'Retrieve the ancient rune from floor 5', reward: '120g + 250 XP', difficulty: 'Medium', difficultyClass: 'diff-medium' },
+    { title: "Dragon's Lair", desc: 'Slay the elder dragon', reward: '500g + 1000 XP', difficulty: 'Hard', difficultyClass: 'diff-hard' },
   ];
 
   const equipment = [
@@ -150,7 +150,7 @@
                 <li class="quest-entry">
                   <div class="quest-header">
                     <span class="quest-title">{quest.title}</span>
-                    <span class="quest-difficulty" style="color: {quest.difficultyColor}">{quest.difficulty}</span>
+                    <span class="quest-difficulty {quest.difficultyClass}">{quest.difficulty}</span>
                   </div>
                   <p class="quest-desc">{quest.desc}</p>
                   <div class="quest-footer">
@@ -515,6 +515,9 @@
     font-size: 11px;
     font-weight: 600;
   }
+  .quest-difficulty.diff-easy { color: var(--accent-green); }
+  .quest-difficulty.diff-medium { color: var(--accent-amber); }
+  .quest-difficulty.diff-hard { color: var(--accent-red); }
 
   .quest-desc {
     color: var(--fg-dim);
