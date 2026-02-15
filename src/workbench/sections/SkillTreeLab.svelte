@@ -208,11 +208,7 @@
             on:mouseleave={handleNodeUnhover}
           >
             <!-- Hit area (invisible, prevents hover flicker) -->
-            <circle
-              r={radius + 10}
-              fill="transparent"
-              stroke="none"
-            />
+            <circle r={radius + 10} fill="transparent" stroke="none" />
 
             <!-- Glow for allocated nodes -->
             {#if isAllocated}
