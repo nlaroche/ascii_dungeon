@@ -1348,3 +1348,581 @@ export function renderGravityWells(ctx, dungeon, cellSize) {
 3. **Add 6th element**: Light (opposite of NECRO) - heals player in range, enemies avoiding it
 4. **Synergy detection**: Show players when elements work well together
 5. **Difficulty scaling**: Make elements matter more on higher difficulty floors
+
+## Iteration 3: Umbra & Lux - The Duality System
+
+### Core Evolution
+
+Previous iterations suffered from:
+- Too many element types (5) overwhelming players
+- Some elements being strictly unfun (self-damage, unpredictability)
+- Complexity that scales linearly with features
+
+Iteration 3 simplifies to **exactly two forces** but makes their interaction deeply emergent:
+- **Umbra (Shadow)**: Consumes, drains, corrupts, pulls inward
+- **Lux (Light)**: Protects, heals, enhances, pushes outward
+
+Every item has an Umbra-Lux balance (0-100 scale), not discrete types. This creates a **spectrum** rather than categories.
+
+### The Holy Shit Moment
+
+Player finds two items: one is 90% Umbra, one is 90% Lux. When equipped together, they create a **Singularity** - a tiny black hole surrounded by a ring of light. Enemies are sucked in and burned. The player can now walk safely in the light ring but dies if they touch the darkness. They realize EVERY item combination creates unique emergent fields.
+
+### Data Structures
+
+```javascript
+// src/lib/items/duality.js
+
+/**
+ * Umbra-Lux Duality System
+ * Every item has a duality value: -100 (pure Umbra) to +100 (pure Lux)
+ * 0 is neutral (void energy)
+ */
+
+export const DUALITY = {
+  UMBRA: -100,
+  NEUTRAL: 0,
+  LUX: 100
+};
+
+/**
+ * Item with duality properties
+ */
+export function createDualityItem(baseItem, floorLevel) {
+  // Determine base duality based on floor and random
+  const roll = Math.random();
+  let duality;
+  
+  // Higher floors have more extreme duality
+  const extremity = Math.min(0.9, 0.3 + floorLevel * 0.05);
+  
+  if (roll < 0.33) {
+    duality = -100 + Math.floor(Math.random() * 40); // -100 to -60
+  } else if (roll < 0.66) {
+    duality = -20 + Math.floor(Math.random() * 40);  // -20 to +20 (mostly neutral)
+  } else {
+    duality = 60 + Math.floor(Math.random() * 40);  // +60 to +100
+  }
+  
+  // Apply extremity bonus for high floors
+  if (floorLevel > 5 && Math.random() < floorLevel * 0.1) {
+    duality = duality > 0 ? 100 : -100; // Pure items more common
+  }
+  
+  return {
+    ...baseItem,
+    duality, // -100 to +100
+    dualityRange: 3 + Math.floor(Math.abs(duality) / 20), // Stronger items have more range
+    // Umbra/Lux specific properties derived from duality
+    umbraPower: Math.max(0, -duality / 100),
+    luxPower: Math.max(0, duality / 100),
+    corruption: Math.max(0, -duality / 200), // Only for negative
+    blessing: Math.max(0, duality / 200)     // Only for positive
+  };
+}
+
+/**
+ * Calculate combined duality at a position from all equipped items
+ * @param {Object} player - Player with equipment
+ * @param {number} px, py - Position to check
+ * @returns {Object} { umbra, lux, netDuality, isSingularity }
+ */
+export function getDualityAtPosition(player, px, py) {
+  let totalUmbra = 0;
+  let totalLux = 0;
+  let activeItems = 0;
+  
+  const equipment = [player.equipment.weapon, player.equipment.armor, player.equipment.amulet];
+  
+  for (const item of equipment) {
+    if (!item || !item.dualityRange) continue;
+    
+    // Items are "worn" at player position
+    const dist = 0; // Same position
+    const falloff = 1 - (dist / item.dualityRange);
+    
+    if (falloff > 0) {
+      if (item.duality < 0) {
+        totalUmbra += Math.abs(item.duality) * item.umbraPower * falloff;
+      } else {
+        totalLux += item.duality * item.luxPower * falloff;
+      }
+      activeItems++;
+    }
+  }
+  
+  const netDuality = totalLux - totalUmbra;
+  
+  // A singularity forms when opposing forces are nearly balanced
+  const isSingularity = activeItems >= 2 && 
+    Math.abs(totalUmbra - totalLux) < 20 && 
+    (totalUmbra > 30 || totalLux > 30);
+  
+  return {
+    umbra: totalUmbra,
+    lux: totalLux,
+    netDuality,
+    isSingularity,
+    singularityType: totalUmbra > totalLux ? 'umbra' : 'lux',
+    singularityRatio: totalUmbra / (totalLux || 1)
+  };
+}
+
+/**
+ * Get movement cost modifier from duality
+ */
+export function modifyMovementWithDuality(baseCost, duality, dx, dy) {
+  if (!duality) return baseCost;
+  
+  // Umbra makes movement harder (draining)
+  // Lux makes movement easier (blessing)
+  const umbraFactor = duality.umbra * 0.02;
+  const luxFactor = duality.lux * 0.02;
+  
+  // Net effect
+  const dualityMod = luxFactor - umbraFactor;
+  
+  // Singularity creates a gravity well effect
+  if (duality.isSingularity) {
+    // Pull toward singularity center if Lux, push away if Umbra
+    const pullStrength = Math.min(0.5, (duality.umbra + duality.lux) / 200);
+    return Math.max(0.1, baseCost - pullStrength);
+  }
+  
+  return Math.max(0.1, baseCost - dualityMod);
+}
+
+/**
+ * Get combat modifier from duality
+ */
+export function modifyCombatWithDuality(baseValue, duality, isAttack, targetDuality) {
+  if (!duality) return baseValue;
+  
+  let modifier = 1.0;
+  
+  // Umbra: Damage dealt increases, damage taken increases
+  if (duality.umbra > 20) {
+    const umbraBonus = duality.umbra / 200; // Up to +50%
+    if (isAttack) {
+      modifier += umbraBonus;
+    } else {
+      modifier += umbraBonus * 0.5; // Taking more damage
+    }
+  }
+  
+  // Lux: Damage dealt decreases, damage taken decreases
+  if (duality.lux > 20) {
+    const luxBonus = duality.lux / 200; // Up to +50% reduction
+    if (isAttack) {
+      modifier -= luxBonus * 0.5;
+    } else {
+      modifier -= luxBonus;
+    }
+  }
+  
+  // Opposition bonus: Attacking something of opposite duality is more effective
+  if (targetDuality) {
+    if ((duality.netDuality > 30 && targetDuality < -30) ||
+        (duality.netDuality < -30 && targetDuality > 30)) {
+      modifier *= 1.25; // 25% bonus vs opposite
+    }
+    
+    // Same alignment: reduced damage
+    if ((duality.netDuality > 30 && targetDuality > 30) ||
+        (duality.netDuality < -30 && targetDuality < -30)) {
+      modifier *= 0.8; // 20% reduction vs same
+    }
+  }
+  
+  // Singularity creates extreme zones
+  if (duality.isSingularity) {
+    if (duality.singularityType === 'umbra') {
+      // In umbra singularity: massive damage boost but huge vulnerability
+      modifier = isAttack ? 2.0 : 3.0;
+    } else {
+      // In lux singularity: massive protection but low damage
+      modifier = isAttack ? 0.5 : 0.2;
+    }
+  }
+  
+  return baseValue * modifier;
+}
+
+/**
+ * Apply end-of-turn duality effects
+ */
+export function applyDualityEffects(player, duality, turnNumber) {
+  const effects = { hpChange: 0, staminaChange: 0 };
+  
+  if (!duality) return effects;
+  
+  // Umbra drains player slowly
+  if (duality.umbra > 50) {
+    effects.hpChange -= Math.floor(duality.umbra / 100);
+  }
+  
+  // Lux heals player slowly
+  if (duality.lux > 50) {
+    effects.hpChange += Math.floor(duality.lux / 100);
+  }
+  
+  // Singularity effects
+  if (duality.isSingularity) {
+    if (duality.singularityType === 'umbra') {
+      // Sucking everything in - player takes damage but gains attack power
+      effects.staminaChange = -2;
+    } else {
+      // Radiant protection - player heals but can't attack well
+      effects.hpChange += 3;
+    }
+  }
+  
+  return effects;
+}
+```
+
+```javascript
+// src/lib/items/dualityDungeon.js
+
+/**
+ * Place duality items in dungeon generation
+ */
+
+export function placeDualityInDungeon(dungeon, items, player) {
+  // Find rooms and place items
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const roomIndex = Math.min(i + 1, dungeon.rooms.length - 1);
+    const room = dungeon.rooms[roomIndex];
+    
+    if (!room) continue;
+    
+    const centerX = Math.floor(room.x + room.w / 2);
+    const centerY = Math.floor(room.y + room.h / 2);
+    
+    // Place item
+    item.x = centerX;
+    item.y = centerY;
+    
+    // Mark duality zone in grid
+    markDualityZone(dungeon, centerX, centerY, item);
+  }
+  
+  // Store all duality wells for AI reference
+  dungeon.dualityWells = items.map(item => ({
+    x: item.x,
+    y: item.y,
+    duality: item.duality,
+    range: item.dualityRange,
+    umbra: item.umbraPower,
+    lux: item.luxPower
+  }));
+  
+  return dungeon;
+}
+
+function markDualityZone(dungeon, cx, cy, item) {
+  const range = item.dualityRange;
+  
+  for (let dy = -range; dy <= range; dy++) {
+    for (let dx = -range; dx <= range; dx++) {
+      const tx = cx + dx;
+      const ty = cy + dy;
+      
+      if (ty >= 0 && ty < dungeon.height && tx >= 0 && tx < dungeon.width) {
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist <= range) {
+          const falloff = 1 - (dist / range);
+          
+          // Accumulate duality in cell
+          const cell = dungeon.grid[ty][tx];
+          if (!cell.dualityZone) {
+            cell.dualityZone = { umbra: 0, lux: 0 };
+          }
+          
+          if (item.duality < 0) {
+            cell.dualityZone.umbra += Math.abs(item.duality) * falloff;
+          } else {
+            cell.dualityZone.lux += item.duality * falloff;
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Get duality at a specific dungeon cell
+ */
+export function getCellDuality(dungeon, x, y) {
+  const cell = dungeon.grid[y]?.[x];
+  if (!cell?.dualityZone) return null;
+  
+  const { umbra, lux } = cell.dualityZone;
+  return {
+    umbra,
+    lux,
+    net: lux - umbra,
+    isSingularity: Math.abs(umbra - lux) < 20 && (umbra > 30 || lux > 30)
+  };
+}
+```
+
+```javascript
+// src/lib/ai/dualityAI.js
+
+/**
+ * Modify enemy AI based on duality wells
+ */
+
+export function getDualityAIModifier(enemy, dungeon) {
+  const cell = dungeon.grid[enemy.y]?.[enemy.x];
+  if (!cell?.dualityZone) return { dx: 0, dy: 0, aggroMod: 0 };
+  
+  const { umbra, lux } = cell.dualityZone;
+  let dx = 0, dy = 0;
+  let aggroMod = 1.0;
+  
+  // Enemies flee from Lux, drawn to Umbra
+  if (lux > 20) {
+    // Move away from center of Lux (find direction of decreasing lux)
+    dx = -Math.sign(lux) * 0.5;
+    aggroMod = 0.5; // Less aggressive in light
+  }
+  
+  if (umbra > 20) {
+    // Move toward center of Umbra
+    // Find nearest umbra source
+    for (const well of dungeon.dualityWells || []) {
+      if (well.umbra > 0) {
+        const dist = Math.sqrt(Math.pow(well.x - enemy.x, 2) + Math.pow(well.y - enemy.y, 2));
+        if (dist < well.range) {
+          dx += (well.x - enemy.x) / dist * (umbra / 50);
+          dy += (well.y - enemy.y) / dist * (umbra / 50);
+        }
+      }
+    }
+    aggroMod = 1.5; // More aggressive in shadow
+  }
+  
+  return { dx, dy, aggroMod };
+}
+```
+
+```javascript
+// src/lib/renderer/dualityRenderer.js
+
+/**
+ * Render duality zones visually
+ */
+
+export function renderDualityZones(renderer, dungeon) {
+  for (let y = 0; y < dungeon.height; y++) {
+    for (let x = 0; x < dungeon.width; x++) {
+      const cell = dungeon.grid[y][x];
+      if (!cell.dualityZone) continue;
+      
+      const { umbra, lux } = cell.dualityZone;
+      if (umbra < 5 && lux < 5) continue;
+      
+      // Determine color based on dominance
+      let color, symbol, alpha;
+      
+      if (umbra > lux * 1.5 && umbra > 20) {
+        // Dominant Umbra
+        const intensity = Math.min(1, umbra / 100);
+        color = lerpColor('#000000', '#6600cc', intensity);
+        symbol = '▒';
+        alpha = intensity * 0.6;
+      } else if (lux > umbra * 1.5 && lux > 20) {
+        // Dominant Lux
+        const intensity = Math.min(1, lux / 100);
+        color = lerpColor('#000000', '#ffdd44', intensity);
+        symbol = '▒';
+        alpha = intensity * 0.6;
+      } else if (Math.abs(umbra - lux) < 20 && (umbra > 30 || lux > 30)) {
+        // Singularity!
+        const pulse = Math.sin(Date.now() / 100) * 0.3 + 0.7;
+        color = umbra > lux ? '#ff00ff' : '#ffffff';
+        symbol = '✧';
+        alpha = pulse;
+      } else {
+        // Mixed - subtle
+        color = '#444466';
+        symbol = '.';
+        alpha = 0.2;
+      }
+      
+      // Only render if not overwritten by other features
+      if (cell.type === 'floor') {
+        renderer.setCell(x, y, symbol, color, '#000000', alpha, 
+          alpha > 0.5 ? CELL_FLAGS.VISIBLE : CELL_FLAGS.DIM);
+      }
+    }
+  }
+}
+
+/**
+ * Simple color interpolation
+ */
+function lerpColor(a, b, t) {
+  const parse = (c) => {
+    const hex = c.replace('#', '');
+    return [
+      parseInt(hex.substr(0, 2), 16),
+      parseInt(hex.substr(2, 2), 16),
+      parseInt(hex.substr(4, 2), 16)
+    ];
+  };
+  
+  const [ar, ag, ab] = parse(a);
+  const [br, bg, bb] = parse(b);
+  
+  const r = Math.floor(ar + (br - ar) * t);
+  const g = Math.floor(ag + (bg - ag) * t);
+  const b = Math.floor(ab + (bb - ab) * t);
+  
+  return `#${r.toString(16).padStart(2, '0')}${g.toString(16).padStart(2, '0')}${b.toString(16).padStart(2, '0')}`;
+}
+```
+
+```javascript
+// src/lib/ui/dualityTooltip.js
+
+/**
+ * Tooltip for duality items
+ */
+
+export function getDualityTooltip(item) {
+  if (item.duality === undefined) return [];
+  
+  const lines = [];
+  
+  // Duality bar
+  const duality = item.duality;
+  let bar;
+  if (duality < -30) {
+    const umbra = Math.min(10, Math.floor(Math.abs(duality) / 10));
+    bar = '░'.repeat(10 - umbra) + '█'.repeat(umbra);
+    lines.push(`Umbra: [${bar}] ${Math.abs(duality)}`);
+  } else if (duality > 30) {
+    const lux = Math.min(10, Math.floor(duality / 10));
+    bar = '█'.repeat(lux) + '░'.repeat(10 - lux);
+    lines.push(`Lux: [${bar}] ${duality}`);
+  } else {
+    lines.push(`Duality: Neutral (${duality})`);
+  }
+  
+  // Effects summary
+  if (item.duality < -30) {
+    lines.push('↪ Increases damage dealt & taken');
+    lines.push('↪ Drains HP over time');
+    lines.push('↪ Enemies drawn to you');
+  } else if (item.duality > 30) {
+    lines.push('↪ Reduces damage dealt & taken');
+    lines.push('↪ Heals HP over time');
+    lines.push('↪ Enemies flee from you');
+  } else {
+    lines.push('↪ Balanced void energy');
+  }
+  
+  // Range
+  lines.push(`↔ Range: ${item.dualityRange} tiles`);
+  
+  return lines;
+}
+```
+
+### Emergent Combinations (The "Holy Shit" Moments)
+
+1. **Pure Umbra + Pure Lux (Singularity)**: Creates a black hole with event horizon. Inside: instant death. Ring: enemies burn. Outside: safe. Player stands in ring, kills everything that approaches.
+
+2. **Two Lux items**: "Paladin mode" - nearly invulnerable, enemies flee, slow but safe grinding. Can walk through enemy rooms without fighting.
+
+3. **Two Umbra items**: "Berserker mode" - massive damage but taking massive damage. High risk/high reward. Enemies swarm you but you one-shot them.
+
+4. **Neutral + Umbra**: Subtle corruption. You don't notice until it's too late. HP draining, enemies more aggressive, but your sword hits harder.
+
+5. **Lux weapon + Umbra armor**: The "Inquisitor" build. Weapon does reduced damage (Lux) but you take less damage (Umbra armor). Wait, that's backwards... unless you swap based on situation.
+
+6. **Three high-duality items**: Creates zones of pure light/shadow in the dungeon. Walking through your own light zone heals you. Walking through enemy light zone makes them invincible.
+
+7. **Umbra near treasure**: Treasure is in shadow. You can reach it but enemies spawn faster. Do you risk it?
+
+8. **Lux blocking hallway**: Enemies refuse to enter. You can rest safely. But you can't leave either.
+
+### Self-Scoring
+
+#### R1: Simplicity
+**Score: 85**
+- Core concept explainable in 2 sentences: "Items have a duality value from -100 (shadow) to +100 (light). Opposites attract, same poles repel."
+- Umbra/Lux are intuitive (dark/light, shadow/flame)
+- No complex trigger conditions or multiple types
+- -10 for singularity mechanic needing explanation
+- -5 for edge cases (neutral items)
+
+#### R2: Depth
+**Score: 90**
+- Duality is a spectrum (-100 to +100) = 200 values per item
+- 3 slots × 200 values × positioning = massive build space
+- Emergent combinations create more than sum of parts
+- Multiple viable archetypes: Berserker (Umbra), Paladin (Lux), Hybrid (Singularity), Neutral (safe defaults)
+- -10 for some obvious optimal combos
+
+#### R3: Emergence
+**Score: 95**
+- Singularity forming from opposing items is emergent
+- Enemy behavior changing based on zone is emergent  
+- Player discovering that neutral items corrupt over time is emergent
+- Holy shit moments listed above weren't explicitly designed
+- -5 for some predictable interactions
+
+#### R4: Cross-System Impact
+**Score: 95**
+- Combat: damage modification (both dealing and taking)
+- HP: drain (Umbra) or heal (Lux) over time
+- Stamina: movement cost changes
+- FOV: visual rendering of zones
+- Dungeon generation: item placement
+- Enemy AI: aggro/flee behavior
+- Economy: duality affects item value
+- Status effects: DoT from Umbra zones
+- -5 for not yet touching all systems
+
+#### R5: Uniqueness
+**Score: 95**
+- No game has exactly this Umbra/Lux duality system
+- Spectrum-based items (not discrete types) is novel
+- Singularity mechanic is unique
+- -5 for similar light/dark systems in other games
+
+#### R6: Implementability
+**Score: 90**
+- Pure functions, simple math
+- Clear data structures
+- Rendering is straightforward
+- No complex state management
+- -5 for needing AI modifications
+- -5 for edge case handling
+
+**Total Score: (85 + 90 + 95 + 95 + 95 + 90) / 6 = 91.7**
+
+### Weaknesses
+
+1. **Singularity explanation**: Players might not understand why their items suddenly create a black hole. Need clear UI indication when singularity forms.
+
+2. **Neutral items are boring**: Items at 0 duality have no effects. Should they have ANY identity?
+
+3. **Visual clutter**: Dual zones might overlap and create confusing visuals in dense areas.
+
+4. **Difficulty spikes**: Pure Umbra builds might be too strong early or too weak. Balancing needed.
+
+5. **Player confusion**: The spectrum is large. Need to show duality clearly on items without overwhelming.
+
+### Next Iteration Focus
+
+1. **UI Clarity**: Add "Shadow" / "Light" labels with icons, not just numbers
+2. **Neutral identity**: Give neutral items a different but useful property (maybe void immunity?)
+3. **Visual priority**: Only show duality at zone edges, not filling entire area
+4. **Balancing pass**: Tune umbra/lux values for fair gameplay
+5. **Tutorial**: First dungeon should have one Umbra and one Lux item clearly placed
