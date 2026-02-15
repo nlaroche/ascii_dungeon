@@ -21,8 +21,8 @@
 
   // ── State ──
   let tree = createSkillTree();
-  let playerLevel = 1;
-  let floorsCleared = 0;
+  let playerLevel = 20;
+  let floorsCleared = 10;
   let hoveredNode = null;
   let selectedNode = null;
 
@@ -48,6 +48,9 @@
 
   // ── Event Handlers ──
   function handleNodeClick(node) {
+    // Prevent event from bubbling to container (which triggers panning)
+    // Note: This handler is on the node group itself, not the container
+    
     if (node.status === 'allocated') {
       selectedNode = node;
       return;
@@ -91,6 +94,8 @@
   }
 
   function handleMouseDown(e) {
+    // Don't start panning if clicking on a node
+    if (e.target.closest && e.target.closest('.node-group')) return;
     if (e.target === svgElement || e.target.tagName === 'rect') {
       isPanning = true;
       panStart = { x: e.clientX, y: e.clientY };
@@ -208,41 +213,43 @@
             on:mouseenter={() => handleNodeHover(node)}
             on:mouseleave={handleNodeUnhover}
           >
-            <circle r={radius + 10} fill='transparent' stroke='none' />
+            <g class="node-inner">
+              <circle r={radius + 10} fill='transparent' stroke='none' />
 
-            <!-- Glow for allocated nodes -->
-            {#if isAllocated}
+              <!-- Glow for allocated nodes -->
+              {#if isAllocated}
+                <circle
+                  r={radius + 4}
+                  fill={regionColor}
+                  opacity="0.3"
+                  class="node-glow"
+                />
+              {/if}
+              
+              <!-- Node circle -->
               <circle
-                r={radius + 4}
-                fill={regionColor}
-                opacity="0.3"
-                class="node-glow"
+                r={radius}
+                fill={isAllocated ? regionColor : 'var(--bg-muted)'}
+                fill-opacity={isAllocated ? 0.8 : 1}
+                stroke={regionColor}
+                stroke-opacity={isAllocated ? 1 : 0.5}
+                stroke-width="2"
+                class="node-circle"
               />
-            {/if}
-            
-            <!-- Node circle -->
-            <circle
-              r={radius}
-              fill={isAllocated ? regionColor : 'var(--bg-muted)'}
-              fill-opacity={isAllocated ? 0.8 : 1}
-              stroke={regionColor}
-              stroke-opacity={isAllocated ? 1 : 0.5}
-              stroke-width="2"
-              class="node-circle"
-            />
-            
-            <!-- Node char -->
-            <text
-              text-anchor="middle"
-              dominant-baseline="central"
-              fill={isAllocated ? 'white' : regionColor}
-              fill-opacity={isAllocated ? 1 : 0.6}
-              font-size={radius * 1.2}
-              font-family="var(--font-mono)"
-              class="node-char"
-            >
-              {node.char}
-            </text>
+              
+              <!-- Node char -->
+              <text
+                text-anchor="middle"
+                dominant-baseline="central"
+                fill={isAllocated ? 'white' : regionColor}
+                fill-opacity={isAllocated ? 1 : 0.6}
+                font-size={radius * 1.2}
+                font-family="var(--font-mono)"
+                class="node-char"
+              >
+                {node.char}
+              </text>
+            </g>
           </g>
         {/each}
       </svg>
@@ -483,11 +490,14 @@
   /* Node styling */
   .node-group {
     cursor: pointer;
-    transition: transform 0.15s ease-out;
   }
 
-  .node-group:hover {
-    transform-origin: center;
+  .node-inner {
+    transition: transform 0.15s ease-out;
+    transform-origin: 0 0;
+  }
+
+  .node-group:hover .node-inner {
     transform: scale(1.15);
   }
 
