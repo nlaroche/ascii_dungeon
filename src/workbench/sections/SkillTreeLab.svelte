@@ -144,18 +144,21 @@
   <!-- Main Content -->
   <div class="lab-body">
     <!-- SVG Graph Viewport -->
-    <div class="graph-container">
+    <div 
+      class="graph-container"
+      role="application"
+      aria-label="Skill tree graph viewport"
+      tabindex="0"
+      on:wheel={handleWheel}
+      on:mousedown={handleMouseDown}
+      on:mousemove={handleMouseMove}
+      on:mouseup={handleMouseUp}
+      on:mouseleave={handleMouseUp}
+    >
       <svg
         bind:this={svgElement}
         class="graph-svg"
         viewBox="{viewBox.x} {viewBox.y} {viewBox.w} {viewBox.h}"
-        role="img"
-        aria-label="Interactive skill tree graph with pan and zoom"
-        on:wheel={handleWheel}
-        on:mousedown={handleMouseDown}
-        on:mousemove={handleMouseMove}
-        on:mouseup={handleMouseUp}
-        on:mouseleave={handleMouseUp}
       >
         <!-- Background -->
         <rect
