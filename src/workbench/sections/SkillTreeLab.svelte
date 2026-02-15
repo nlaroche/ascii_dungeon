@@ -144,7 +144,7 @@
   <!-- Main Content -->
   <div class="lab-body">
     <!-- SVG Graph Viewport -->
-    <!-- svelte-ignore a11y-no-noninteractive-tabindex -->
+    <!-- svelte-ignore a11y-no-noninteractive-tabindex a11y-no-noninteractive-element-interactions -->
     <div 
       class="graph-container"
       role="application"
