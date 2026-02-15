@@ -628,8 +628,8 @@
   }
 
   .badge-keystone {
-    background: linear-gradient(135deg, #ffd700, #ff8c00);
-    color: #222;
+    background: linear-gradient(135deg, #ede19e, #d3a068);
+    color: #212123;
     font-weight: bold;
   }
 
