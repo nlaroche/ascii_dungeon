@@ -100,3 +100,17 @@ ASCII dungeon roguelike. Player has attack/defense/hp/stamina/gold/level. Combat
 
 **Weaknesses**: UI must clearly show locked vs unlocked tiers, complexity spike at tier 3+, need careful balance so early tiers feel meaningful.
 
+## Judge Feedback (Iteration 3)
+- ALL LITMUS TESTS PASS. This is the winning concept.
+- Iteration 3 "Fractal Skill Layers" with Iteration 2's accelerating curve is the foundation.
+- PHASE B: Now write the architecture. Provide:
+  1. createSkillTree() — initial state object with base skills and empty sub-skill slots
+  2. allocatePoint(tree, skillId) — returns new tree with point invested, checks for tier unlocks
+  3. getSkillBonuses(tree) — returns aggregate stat bonuses from all invested skills
+  4. getVisibleSkills(tree) — returns only the skills the player can currently see (hidden tiers stay hidden)
+  5. Growth formula: bonus = baseValue * (level ^ 1.5) — show examples at level 1, 10, 50, 100, 1000
+  6. Skill point source: 1 per player level + 1 per dungeon floor cleared
+  7. Sub-skill graph: 4 base skills (Attack, Defense, Exploration, Fortune), each with 2 sub-skills at tier 2, 2 more at tier 3, 1 at tier 4
+  8. Integration: how getSkillBonuses() output maps to combat.js, player.js, dungeon.js
+- Keep to ~150 lines max. Show concrete JavaScript data structures.
+
