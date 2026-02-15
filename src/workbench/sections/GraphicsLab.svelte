@@ -1,6 +1,7 @@
 <script>
   import ParamSlider from '../components/ParamSlider.svelte';
   import SceneCanvas from '../helpers/SceneCanvas.svelte';
+  import TownModal from '../helpers/TownModal.svelte';
   import * as dungeonScene from '../scenes/dungeonScene.js';
   import * as townScene from '../scenes/townScene.js';
   import * as characterScene from '../scenes/characterScene.js';
