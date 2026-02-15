@@ -195,7 +195,10 @@
             class:allocated={isAllocated}
             class:available={isAvailable}
             transform="translate({pos.x}, {pos.y})"
+            role="button"
+            tabindex="0"
             on:click={() => handleNodeClick(node)}
+            on:keydown={(e) => (e.key === 'Enter' || e.key === ' ') && handleNodeClick(node)}
             on:mouseenter={() => handleNodeHover(node)}
             on:mouseleave={handleNodeUnhover}
           >
