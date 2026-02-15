@@ -398,9 +398,10 @@
       renderer.setCell(treasure.x, treasure.y, '$', '#ffdd00', '#1a1a2e', 0.0, CELL_FLAGS.VISIBLE | CELL_FLAGS.HIGHLIGHTED, 1.0);
     }
 
-    // Player rendered at nearest cell to eased position
-    // The camera tween creates the visual slide effect
-    renderer.setCell(Math.round(px), Math.round(py), '@', '#00ff88', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, 1.0);
+    // Player rendered with sub-cell offset for smooth movement
+    const cellX = Math.floor(px);
+    const cellY = Math.floor(py);
+    renderer.setCell(cellX, cellY, '@', '#00ff88', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, 1.0, px - cellX, py - cellY);
   }
 
   onMount(async () => {
