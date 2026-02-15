@@ -19,6 +19,8 @@ struct Cell {
   depth: f32,
   light: f32,
   flags: u32,
+  offsetX: f32,
+  offsetY: f32,
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -63,10 +65,10 @@ fn vertexMain(
   let gridY = f32(instanceIndex / gridW);
   let localPos = quadPos[vertexIndex];
 
-  // Cell position in pixels with camera offset (global scroll)
+  // Cell position in pixels with sub-cell offset and camera offset (global scroll)
   var pixelPos = vec2<f32>(
-    (gridX + localPos.x) * uniforms.cellPixelSize.x,
-    (gridY + localPos.y) * uniforms.cellPixelSize.y,
+    (gridX + cell.offsetX + localPos.x) * uniforms.cellPixelSize.x,
+    (gridY + cell.offsetY + localPos.y) * uniforms.cellPixelSize.y,
   );
   pixelPos += uniforms.cameraOffset;
 

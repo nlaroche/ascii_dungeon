@@ -1,14 +1,16 @@
 import tilemapShaderCode from './shaders/tilemap.wgsl?raw';
 
-// Cell struct must match shader exactly (24 bytes total, 4-byte aligned):
+// Cell struct must match shader exactly (32 bytes total, 4-byte aligned):
 // glyph: u32 (offset 0)
 // fg: u32 (offset 4)
 // bg: u32 (offset 8)
 // depth: f32 (offset 12)
 // light: f32 (offset 16)
 // flags: u32 (offset 20)
+// offsetX: f32 (offset 24)
+// offsetY: f32 (offset 28)
 
-export const CELL_SIZE_BYTES = 24;
+export const CELL_SIZE_BYTES = 32;
 
 export const CELL_FLAGS = {
   VISIBLE: 1,      // BIT0
@@ -146,7 +148,7 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
    * @param {number} depth - 0.0=floor, 0.5=entity, 1.0=ceiling
    * @param {number} flags - cell flags (VISIBLE|EXPLORED|HIGHLIGHTED)
    */
-  function setTile(x, y, glyph, fg, bg, depth, flags = 0, light = 1.0) {
+  function setTile(x, y, glyph, fg, bg, depth, flags = 0, light = 1.0, offsetX = 0, offsetY = 0) {
     if (x < 0 || x >= gridWidth || y < 0 || y >= gridHeight) {
       return;
     }
@@ -166,6 +168,10 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
     dataView.setFloat32(offset + 16, light, true);
     // flags: u32
     dataView.setUint32(offset + 20, flags, true);
+    // offsetX: f32
+    dataView.setFloat32(offset + 24, offsetX, true);
+    // offsetY: f32
+    dataView.setFloat32(offset + 28, offsetY, true);
   }
   
   /**

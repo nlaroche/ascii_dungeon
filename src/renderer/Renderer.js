@@ -72,16 +72,16 @@ export class Renderer {
     observer.observe(this.canvas.parentElement || this.canvas);
   }
 
-  setCell(x, y, char, fgColor, bgColor, depth = 0, flags = 0, light = 1.0) {
+  setCell(x, y, char, fgColor, bgColor, depth = 0, flags = 0, light = 1.0, offsetX = 0, offsetY = 0) {
     const charCode = typeof char === 'string' ? char.charCodeAt(0) : char;
     const fg = colorToU32(fgColor);
     const bg = colorToU32(bgColor);
-    this.tilemap.setTile(x, y, charCode, fg, bg, depth, flags, light);
+    this.tilemap.setTile(x, y, charCode, fg, bg, depth, flags, light, offsetX, offsetY);
   }
 
   setCells(cellArray) {
     for (const cell of cellArray) {
-      this.setCell(cell.x, cell.y, cell.char, cell.fg, cell.bg, cell.depth, cell.flags);
+      this.setCell(cell.x, cell.y, cell.char, cell.fg, cell.bg, cell.depth, cell.flags, cell.light, cell.offsetX, cell.offsetY);
     }
   }
 
