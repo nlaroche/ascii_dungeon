@@ -40,8 +40,8 @@
   $: remainingPoints = getRemainingPoints(playerLevel, floorsCleared, tree);
   $: availablePoints = getAvailablePoints(playerLevel, floorsCleared);
 
-  // Map node x,y to SVG coords (spacing = 50)
-  const SPACING = 50;
+  // Map node x,y to SVG coords (spacing = 70)
+  const SPACING = 70;
   function nodeToSvg(node) {
     return { x: node.x * SPACING, y: node.y * SPACING };
   }
@@ -166,13 +166,29 @@
         class="graph-svg"
         viewBox="{viewBox.x} {viewBox.y} {viewBox.w} {viewBox.h}"
       >
+        <!-- Grid pattern definition -->
+        <defs>
+          <pattern id="grid" width="70" height="70" patternUnits="userSpaceOnUse">
+            <circle cx="35" cy="35" r="0.8" fill="#2a2a30" />
+          </pattern>
+        </defs>
+        
         <!-- Background -->
         <rect
           x={viewBox.x - 1000}
           y={viewBox.y - 1000}
           width={viewBox.w + 2000}
           height={viewBox.h + 2000}
-          fill="var(--bg)"
+          fill="#141418"
+        />
+        
+        <!-- Grid overlay -->
+        <rect
+          x={viewBox.x - 1000}
+          y={viewBox.y - 1000}
+          width={viewBox.w + 2000}
+          height={viewBox.h + 2000}
+          fill="url(#grid)"
         />
         
         <!-- Edges -->
@@ -188,8 +204,8 @@
             x2={bPos.x}
             y2={bPos.y}
             stroke={allocated ? 'var(--fg-dim)' : 'var(--border)'}
-            stroke-opacity={allocated ? 1 : 0.3}
-            stroke-width={allocated ? 1.5 : 1}
+            stroke-opacity={allocated ? 1 : 0.15}
+            stroke-width={allocated ? 2 : 1}
           />
         {/each}
 
@@ -219,20 +235,32 @@
               <!-- Glow for allocated nodes -->
               {#if isAllocated}
                 <circle
-                  r={radius + 4}
+                  r={radius + 6}
                   fill={regionColor}
-                  opacity="0.3"
+                  opacity="0.5"
                   class="node-glow"
+                />
+              {/if}
+              
+              <!-- Available node outer ring -->
+              {#if isAvailable}
+                <circle
+                  r={radius + 3}
+                  fill="none"
+                  stroke={regionColor}
+                  stroke-opacity="0.9"
+                  stroke-width="1.5"
+                  class="node-available-ring"
                 />
               {/if}
               
               <!-- Node circle -->
               <circle
                 r={radius}
-                fill={isAllocated ? regionColor : 'var(--bg-muted)'}
+                fill={isAllocated ? regionColor : '#1e1e24'}
                 fill-opacity={isAllocated ? 0.8 : 1}
                 stroke={regionColor}
-                stroke-opacity={isAllocated ? 1 : 0.5}
+                stroke-opacity={isAllocated ? 1 : (isAvailable ? 0.9 : 0.6)}
                 stroke-width="2"
                 class="node-circle"
               />
@@ -242,8 +270,8 @@
                 text-anchor="middle"
                 dominant-baseline="central"
                 fill={isAllocated ? 'white' : regionColor}
-                fill-opacity={isAllocated ? 1 : 0.6}
-                font-size={radius * 1.2}
+                fill-opacity={isAllocated ? 1 : 0.85}
+                font-size={radius * 1.5}
                 font-family="var(--font-mono)"
                 class="node-char"
               >
@@ -261,10 +289,12 @@
           style="
             left: {(hoveredNode.x * SPACING - viewBox.x) / viewBox.w * 100}%;
             top: {(hoveredNode.y * SPACING - viewBox.y) / viewBox.h * 100}%;
+            margin-top: -30px;
           "
         >
           <span class="tooltip-char" style="color: {getRegionColor(hoveredNode.region)}">{hoveredNode.char}</span>
           <span class="tooltip-label">{hoveredNode.label}</span>
+          <span class="tooltip-region">{hoveredNode.region}</span>
           {#if hoveredNode.stat}
             <span class="tooltip-stat">+{hoveredNode.value} {hoveredNode.stat}</span>
           {/if}
@@ -539,6 +569,7 @@
     flex-direction: column;
     align-items: center;
     gap: 2px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
   }
 
   .tooltip-char {
@@ -554,6 +585,12 @@
   .tooltip-stat {
     font-size: 0.75rem;
     color: var(--fg-dim);
+  }
+
+  .tooltip-region {
+    font-size: 0.65rem;
+    color: var(--fg-dim);
+    text-transform: capitalize;
   }
 
   /* Sidebar */

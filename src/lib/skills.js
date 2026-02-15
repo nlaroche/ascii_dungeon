@@ -114,7 +114,26 @@ const REGION_ANGLES = {
   arcane: (5 * Math.PI) / 3
 };
 
-// Generate cluster layout for skill tree
+// Ring radii for each tier (in grid units)
+const RING_RADII = {
+  inner: [3, 4.5, 6],        // 3 rings
+  mid: [8, 9.5, 11],         // 3 rings
+  outer: [13, 14.5, 16, 18], // 4 rings
+  deep: [20, 22, 24]         // 3 rings
+};
+
+// Node counts per tier
+const TIER_CONFIG = {
+  inner: { smallPerRing: 4, notablePerTier: 2 },
+  mid: { smallPerRing: 5, notablePerTier: 3 },
+  outer: { smallPerRing: 6, notablePerTier: 4 },
+  deep: { smallPerRing: 3, notablePerTier: 2 }
+};
+
+// Minimum distance between nodes (grid units)
+const MIN_NODE_DISTANCE = 1.8;
+
+// Generate structured ring-based layout for skill tree
 function generateSkillGraph() {
   const nodes = {};
   const edges = [];
@@ -135,101 +154,127 @@ function generateSkillGraph() {
   };
   nodes['start'] = startNode;
   
-  // Define cluster configuration for each region
-  const clusterConfig = {
-    inner: { distanceMin: 3, distanceMax: 6, smallCount: [8, 12], notableCount: [2, 3] },
-    mid: { distanceMin: 7, distanceMax: 12, smallCount: [10, 15], notableCount: [3, 4] },
-    outer: { distanceMin: 13, distanceMax: 18, smallCount: [12, 18], notableCount: [4, 5] },
-    deep: { distanceMin: 19, distanceMax: 24, smallCount: [5, 8], notableCount: [2, 3] }
-  };
-  
-  // Generate clusters for each region
+  // Store nodes by region and tier for later edge connection
+  const regionNodes = {};
   for (const region of REGIONS) {
-    const angle = REGION_ANGLES[region];
+    regionNodes[region] = { inner: [], mid: [], outer: [], deep: [] };
+  }
+  
+  // Generate nodes for each region using ring layout
+  for (const region of REGIONS) {
+    const baseAngle = REGION_ANGLES[region];
+    const wedgeWidth = Math.PI / 3.5; // slightly less than 60 deg for gaps
     const statPool = STAT_POOLS[region];
-    const clusterTypes = ['inner', 'mid', 'outer', 'deep'];
     
-    let previousClusterNodes = ['start'];
+    const tiers = ['inner', 'mid', 'outer', 'deep'];
     
-    for (let c = 0; c < clusterTypes.length; c++) {
-      const clusterType = clusterTypes[c];
-      const config = clusterConfig[clusterType];
-      const tierPrefix = TIER_PREFIXES[clusterType];
+    for (let t = 0; t < tiers.length; t++) {
+      const tier = tiers[t];
+      const radii = RING_RADII[tier];
+      const config = TIER_CONFIG[tier];
       
-      const clusterCenterDistance = (config.distanceMin + config.distanceMax) / 2;
-      const clusterCenterX = Math.cos(angle) * clusterCenterDistance;
-      const clusterCenterY = Math.sin(angle) * clusterCenterDistance;
+      // Calculate how many slots per ring based on circumference
+      const slotsPerRing = radii.map(r => Math.max(4, Math.floor((r * wedgeWidth) / MIN_NODE_DISTANCE)));
       
-      const clusterNodes = [];
-      
-      // Generate small nodes
-      const smallCount = Math.floor(rng() * (config.smallCount[1] - config.smallCount[0] + 1)) + config.smallCount[0];
-      for (let i = 0; i < smallCount; i++) {
-        const distance = config.distanceMin + rng() * (config.distanceMax - config.distanceMin);
-        const nodeAngle = angle + (rng() - 0.5) * 1.2;
-        const x = Math.cos(nodeAngle) * distance + (rng() - 0.5) * 2;
-        const y = Math.sin(nodeAngle) * distance + (rng() - 0.5) * 2;
+      // Generate small nodes on each ring
+      for (let ringIdx = 0; ringIdx < radii.length; ringIdx++) {
+        const radius = radii[ringIdx];
+        const slots = slotsPerRing[ringIdx];
         
-        const statInfo = statPool[Math.floor(rng() * statPool.length)];
-        const value = Math.floor(2 + distance * 0.5);
+        // Determine how many small nodes to place on this ring
+        const smallCount = Math.max(2, Math.floor(config.smallPerRing * (1 - ringIdx * 0.15)));
         
-        const id = `${region}_${clusterType}_small_${nodeIdCounter++}`;
-        nodes[id] = {
-          id,
-          type: 'small',
-          label: statInfo.label,
-          char: '·',
-          stat: statInfo.stat,
-          value,
-          description: `+${value} ${statInfo.label}`,
-          x,
-          y,
-          region
-        };
-        clusterNodes.push(id);
+        for (let i = 0; i < smallCount; i++) {
+          // Evenly distribute nodes along the arc
+          const angleOffset = (i + 0.5) * wedgeWidth / smallCount;
+          const nodeAngle = baseAngle - wedgeWidth / 2 + angleOffset;
+          
+          const x = Math.cos(nodeAngle) * radius;
+          const y = Math.sin(nodeAngle) * radius;
+          
+          const statInfo = statPool[Math.floor(rng() * statPool.length)];
+          const value = Math.floor(2 + radius * 0.5);
+          
+          const id = `${region}_${tier}_small_${nodeIdCounter++}`;
+          nodes[id] = {
+            id,
+            type: 'small',
+            label: statInfo.label,
+            char: '·',
+            stat: statInfo.stat,
+            value,
+            description: `+${value} ${statInfo.label}`,
+            x,
+            y,
+            region,
+            tier,
+            ring: ringIdx,
+            slot: i,
+            totalSlots: smallCount
+          };
+          regionNodes[region][tier].push(id);
+        }
       }
       
-      // Generate notable nodes
-      const notableCount = Math.floor(rng() * (config.notableCount[1] - config.notableCount[0] + 1)) + config.notableCount[0];
-      for (let i = 0; i < notableCount; i++) {
-        const distance = config.distanceMin + rng() * (config.distanceMax - config.distanceMin);
-        const nodeAngle = angle + (rng() - 0.5) * 0.8;
-        const x = Math.cos(nodeAngle) * distance + (rng() - 0.5) * 1.5;
-        const y = Math.sin(nodeAngle) * distance + (rng() - 0.5) * 1.5;
-        
-        const statInfo = statPool[Math.floor(rng() * statPool.length)];
-        const value = Math.floor(8 + distance * 1.5);
-        
-        const id = `${region}_${clusterType}_notable_${nodeIdCounter++}`;
-        nodes[id] = {
-          id,
-          type: 'notable',
-          label: tierPrefix + statInfo.label,
-          char: NODE_CHARS.notable[region],
-          stat: statInfo.stat,
-          value,
-          description: `+${value} ${statInfo.label}`,
-          x,
-          y,
-          region
-        };
-        clusterNodes.push(id);
+      // Generate notable nodes at key positions (every few slots)
+      const notableCount = config.notablePerTier;
+      const allSmallIds = regionNodes[region][tier].filter(id => nodes[id].type === 'small');
+      
+      if (allSmallIds.length > 0) {
+        for (let i = 0; i < notableCount; i++) {
+          // Pick positions evenly distributed
+          const slotIdx = Math.floor((i + 0.5) * allSmallIds.length / notableCount);
+          const smallNode = nodes[allSmallIds[slotIdx]];
+          
+          // Offset slightly from the small node
+          const offsetAngle = 0.15;
+          const smallNodeAngle = Math.atan2(smallNode.y, smallNode.x);
+          const radius = Math.sqrt(smallNode.x * smallNode.x + smallNode.y * smallNode.y) + 0.8;
+          
+          const x = Math.cos(smallNodeAngle + offsetAngle) * radius;
+          const y = Math.sin(smallNodeAngle + offsetAngle) * radius;
+          
+          const statInfo = statPool[Math.floor(rng() * statPool.length)];
+          const value = Math.floor(8 + radius * 1.5);
+          
+          const id = `${region}_${tier}_notable_${nodeIdCounter++}`;
+          nodes[id] = {
+            id,
+            type: 'notable',
+            label: TIER_PREFIXES[tier] + statInfo.label,
+            char: NODE_CHARS.notable[region],
+            stat: statInfo.stat,
+            value,
+            description: `+${value} ${statInfo.label}`,
+            x,
+            y,
+            region,
+            tier,
+            ring: -1,
+            slot: i,
+            totalSlots: notableCount
+          };
+          regionNodes[region][tier].push(id);
+        }
       }
       
-      // Generate keystone for outer and deep clusters
-      if (clusterType === 'outer' || clusterType === 'deep') {
-        const keystoneCount = clusterType === 'deep' ? 2 : 1;
+      // Generate keystones for outer and deep tiers
+      if (tier === 'outer' || tier === 'deep') {
+        const keystoneCount = tier === 'deep' ? 2 : 1;
+        const lastRingRadius = radii[radii.length - 1] + 1.5;
+        
         for (let i = 0; i < keystoneCount; i++) {
-          const distance = config.distanceMin + 2 + rng() * (config.distanceMax - config.distanceMin - 4);
-          const nodeAngle = angle + (rng() - 0.5) * 0.4;
-          const x = Math.cos(nodeAngle) * distance + (rng() - 0.5) * 1;
-          const y = Math.sin(nodeAngle) * distance + (rng() - 0.5) * 1;
+          const angleOffset = (i + 0.5) * wedgeWidth / keystoneCount - wedgeWidth / 4;
+          const nodeAngle = baseAngle + angleOffset;
+          
+          const x = Math.cos(nodeAngle) * lastRingRadius;
+          const y = Math.sin(nodeAngle) * lastRingRadius;
           
           const keystoneNames = KEYSTONE_NAMES[region];
           const name = keystoneNames[Math.floor(rng() * keystoneNames.length)];
-          const value = Math.floor(30 + distance * 3);
+          const value = Math.floor(30 + lastRingRadius * 3);
           
-          const id = `${region}_${clusterType}_keystone_${nodeIdCounter++}`;
+          const id = `${region}_${tier}_keystone_${nodeIdCounter++}`;
           nodes[id] = {
             id,
             type: 'keystone',
@@ -240,49 +285,155 @@ function generateSkillGraph() {
             description: `+${value} ${name}`,
             x,
             y,
-            region
+            region,
+            tier,
+            ring: -1,
+            slot: i,
+            totalSlots: keystoneCount
           };
-          clusterNodes.push(id);
+          regionNodes[region][tier].push(id);
+        }
+      }
+    }
+  }
+  
+  // Connect nodes within each region using structured approach
+  for (const region of REGIONS) {
+    const tiers = ['inner', 'mid', 'outer', 'deep'];
+    
+    for (let t = 0; t < tiers.length; t++) {
+      const tier = tiers[t];
+      const tierNodes = regionNodes[region][tier];
+      
+      // Get small nodes sorted by angle
+      const smallNodes = tierNodes
+        .map(id => nodes[id])
+        .filter(n => n.type === 'small')
+        .sort((a, b) => Math.atan2(a.y, a.x) - Math.atan2(b.y, b.x));
+      
+      // Connect adjacent small nodes on same ring
+      for (let i = 0; i < smallNodes.length; i++) {
+        const node = smallNodes[i];
+        const nextIdx = (i + 1) % smallNodes.length;
+        
+        // Connect to next node on ring
+        if (!edges.some(e => e[0] === node.id && e[1] === smallNodes[nextIdx].id) &&
+            !edges.some(e => e[1] === node.id && e[0] === smallNodes[nextIdx].id)) {
+          edges.push([node.id, smallNodes[nextIdx].id]);
+        }
+        
+        // Connect to node 2 steps away (create mesh)
+        const nextNextIdx = (i + 2) % smallNodes.length;
+        if (smallNodes.length > 4) {
+          edges.push([node.id, smallNodes[nextNextIdx].id]);
         }
       }
       
-      // Connect nodes within cluster
-      for (let i = 0; i < clusterNodes.length; i++) {
-        const connections = Math.floor(rng() * 2) + 1;
-        for (let j = 0; j < connections; j++) {
-          const targetIdx = Math.floor(rng() * clusterNodes.length);
-          if (targetIdx !== i) {
-            edges.push([clusterNodes[i], clusterNodes[targetIdx]]);
+      // Connect notable nodes to nearby small nodes
+      const notableNodes = tierNodes
+        .map(id => nodes[id])
+        .filter(n => n.type === 'notable' || n.type === 'keystone');
+      
+      for (const notable of notableNodes) {
+        // Find 2 closest small nodes
+        const distances = smallNodes.map(small => ({
+          id: small.id,
+          dist: Math.sqrt((small.x - notable.x) ** 2 + (small.y - notable.y) ** 2)
+        }));
+        distances.sort((a, b) => a.dist - b.dist);
+        
+        for (let i = 0; i < Math.min(2, distances.length); i++) {
+          if (!edges.some(e => (e[0] === notable.id && e[1] === distances[i].id) ||
+                              (e[1] === notable.id && e[0] === distances[i].id))) {
+            edges.push([notable.id, distances[i].id]);
           }
         }
       }
       
-      // Connect to previous cluster
-      const connectCount = Math.floor(rng() * 3) + 3;
-      for (let i = 0; i < connectCount && i < previousClusterNodes.length; i++) {
-        const targetIdx = Math.floor(rng() * clusterNodes.length);
-        edges.push([previousClusterNodes[i], clusterNodes[targetIdx]]);
+      // Connect to previous tier (radial connections)
+      if (t > 0) {
+        const prevTier = tiers[t - 1];
+        const prevTierNodes = regionNodes[region][prevTier]
+          .map(id => nodes[id]);
+        
+        for (const currNode of tierNodes.map(id => nodes[id])) {
+          // Find closest node in previous tier
+          let closest = null;
+          let closestDist = Infinity;
+          
+          for (const prevNode of prevTierNodes) {
+            const dist = Math.sqrt((currNode.x - prevNode.x) ** 2 + (currNode.y - prevNode.y) ** 2);
+            if (dist < closestDist) {
+              closestDist = dist;
+              closest = prevNode;
+            }
+          }
+          
+          if (closest && !edges.some(e => (e[0] === currNode.id && e[1] === closest.id) ||
+                                          (e[1] === currNode.id && e[0] === closest.id))) {
+            edges.push([currNode.id, closest.id]);
+          }
+        }
+      } else {
+        // Connect inner tier to start node
+        const innerSmallNodes = tierNodes
+          .map(id => nodes[id])
+          .filter(n => n.type === 'small');
+        
+        // Connect a few inner nodes to start
+        const connectCount = Math.min(3, innerSmallNodes.length);
+        for (let i = 0; i < connectCount; i++) {
+          if (!edges.some(e => e[0] === 'start' && e[1] === innerSmallNodes[i].id) &&
+              !edges.some(e => e[1] === 'start' && e[0] === innerSmallNodes[i].id)) {
+            edges.push(['start', innerSmallNodes[i].id]);
+          }
+        }
       }
-      
-      previousClusterNodes = clusterNodes;
     }
   }
   
-  // Add cross-links between adjacent regions
+  // Add cross-links between adjacent regions at boundaries
   const regionPairs = [
     ['combat', 'defense'], ['defense', 'vitality'], ['vitality', 'exploration'],
     ['exploration', 'fortune'], ['fortune', 'arcane'], ['arcane', 'combat']
   ];
   
   for (const [regionA, regionB] of regionPairs) {
-    const nodesA = Object.keys(nodes).filter(id => nodes[id].region === regionA && nodes[id].type !== 'keystone');
-    const nodesB = Object.keys(nodes).filter(id => nodes[id].region === regionB && nodes[id].type !== 'keystone');
+    // Get outer tier nodes from each region
+    const nodesA = regionNodes[regionA].outer.map(id => nodes[id]);
+    const nodesB = regionNodes[regionB].outer.map(id => nodes[id]);
     
-    const linkCount = Math.floor(rng() * 5) + 6;
+    // Find closest pair and add a few links
+    const linkCount = 2;
+    
     for (let i = 0; i < linkCount; i++) {
-      const idxA = Math.floor(rng() * nodesA.length);
-      const idxB = Math.floor(rng() * nodesB.length);
-      edges.push([nodesA[idxA], nodesB[idxB]]);
+      let bestA = null;
+      let bestB = null;
+      let bestDist = Infinity;
+      
+      for (const a of nodesA) {
+        for (const b of nodesB) {
+          const dist = Math.sqrt((a.x - b.x) ** 2 + (a.y - b.y) ** 2);
+          if (dist < bestDist) {
+            bestDist = dist;
+            bestA = a;
+            bestB = b;
+          }
+        }
+      }
+      
+      if (bestA && bestB) {
+        if (!edges.some(e => (e[0] === bestA.id && e[1] === bestB.id) ||
+                            (e[1] === bestA.id && e[0] === bestB.id))) {
+          edges.push([bestA.id, bestB.id]);
+        }
+        
+        // Remove used nodes to get diverse connections
+        nodesA.splice(nodesA.indexOf(bestA), 1);
+        nodesB.splice(nodesB.indexOf(bestB), 1);
+        
+        if (nodesA.length === 0 || nodesB.length === 0) break;
+      }
     }
   }
   
