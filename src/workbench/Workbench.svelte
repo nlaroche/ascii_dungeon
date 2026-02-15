@@ -8,7 +8,8 @@
   import GraphicsLab from './sections/GraphicsLab.svelte';
   import IntelligenceLab from './sections/IntelligenceLab.svelte';
   import SkillTreeLab from './sections/SkillTreeLab.svelte';
-  
+  import ItemLab from './sections/ItemLab.svelte';
+
   let activeSection = 'dungeon';
   
   const sections = [
@@ -18,6 +19,7 @@
     { id: 'ai', label: 'AI' },
     { id: 'economy', label: 'Economy' },
     { id: 'graphics', label: 'Graphics' },
+    { id: 'items', label: 'Items' },
     { id: 'intelligence', label: 'Intelligence' },
     { id: 'skilltrees', label: 'Skill Trees' }
   ];
@@ -52,6 +54,8 @@
       <EconomySim />
     {:else if activeSection === 'graphics'}
       <GraphicsLab />
+    {:else if activeSection === 'items'}
+      <ItemLab />
     {:else if activeSection === 'intelligence'}
       <IntelligenceLab />
     {:else if activeSection === 'skilltrees'}
