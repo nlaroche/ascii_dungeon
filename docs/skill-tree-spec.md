@@ -85,10 +85,18 @@ ASCII dungeon roguelike. Player has attack/defense/hp/stamina/gold/level. Combat
 
 **Weaknesses**: Early game feels weak, high complexity for new players, death penalties can feel harsh without shard collection.
 
-## Judge Feedback (Iteration 2)
-- R1: PASS. R2: PASS — accelerating curve is exactly right. R3-R6: PASS.
-- ALL LITMUS TESTS PASS. Good foundation.
-- MISSING: The "tiers and layers" design goal. Where are the HIDDEN LAYERS that reveal themselves as you invest deeper? At 10 points in attack you should discover a new BRANCH of the tree that wasn't visible before. At 50 points, another layer. The tree itself should GROW — not just the numbers.
-- MISSING: Builds need different MECHANICS, not just different stats. A tank build should PLAY differently (position matters, you body-block enemies). An explorer build should interact with the MAP differently (reveal hidden rooms, shortcuts). Right now they just pump different numbers.
-- Iteration 3: Keep the accelerating curve from iteration 2. ADD a tier system where investing N points in a skill reveals a hidden sub-tree of 2-3 new skills. These sub-skills also scale infinitely. This creates the fractal depth feeling.
+## Iteration 3: Fractal Skill Layers
+**Core idea**: Each skill has invisible tiers. At 10, 50, and 200 points invested, the skill "evolves" and reveals hidden sub-skills that didn't exist before, creating a fractal tree that expands as you invest.
+
+**How growth works**: Keep accelerating curve from Iteration 2. At tier 1 (1-9 pts) you see base skill. At tier 2 (10+ pts) a hidden branch unlocks—2 new sub-skills appear, each scaling infinitely with their own accelerating curve. At tier 3 (50+ pts) another branch. At tier 4 (200+ pts) a final branch. The tree literally grows in the UI.
+
+**Number examples**: Base attack at pt1=+5, pt10=+25, pt50=+250. Sub-skill "Cleave" unlocks at 10 pts, giving AoE radius that also accelerates: pt11=1 tile, pt50=5 tiles, pt200=20 tiles.
+
+**Aha moments**: (1) At exactly 10 pts, a completely new skill icon fades in—you didn't know it existed. (2) Sub-skills share momentum: putting 5 pts in sub-skill transfers to parent, letting you "farm" branches then consolidate.
+
+**3 different builds**: "Berserker" invests in Attack tier 2→3→4, unlocking position-based "Leap Slam" (jump over enemies) and "Whirlwind" (spin attack). Gameplay becomes mobile melee dance. "Warden" invests in Defense tier 2→3→4, unlocking "Body Block" (enemies can't walk through you) and "Thorns" (reflect damage). You become a wall enemies must route around. "Archivist" invests in Exploration tier 2→3→4, unlocking "Sense Hidden" (reveal secret rooms) and "Shortcuts" (create temporary passages). You manipulate the map layout.
+
+**Systems touched**: Combat (new attack abilities), Movement (jump/teleport/block), Dungeon (secret rooms, map editing), Vision (hidden reveal), Economy (hidden chests).
+
+**Weaknesses**: UI must clearly show locked vs unlocked tiers, complexity spike at tier 3+, need careful balance so early tiers feel meaningful.
 
