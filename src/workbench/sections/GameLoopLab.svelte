@@ -231,7 +231,7 @@
   // Phase colors
   const phaseColors = {
     town: 'var(--accent-green)',
-    dungeon: 'var(--accent-cyan)',
+    dungeon: 'var(--accent)',
     floor_complete: 'var(--accent-amber)',
     run_complete: 'var(--accent-red)'
   };
@@ -364,7 +364,7 @@
 
               <div class="stamina-section">
                 <label>Stamina</label>
-                <StatBar current={player.stamina} max={player.maxStamina} color="var(--accent-cyan)" />
+                <StatBar current={player.stamina} max={player.maxStamina} color="var(--accent)" />
               </div>
 
               <div class="action-buttons">
@@ -560,13 +560,13 @@
         
         <div class="stat-row">
           <label>HP</label>
-          <StatBar current={player.hp} max={player.maxHp} color="var(--text-red)" />
+          <StatBar current={player.hp} max={player.maxHp} color="var(--accent-red)" />
           <span class="stat-value">{player.hp}/{player.maxHp}</span>
         </div>
         
         <div class="stat-row">
           <label>Stamina</label>
-          <StatBar current={player.stamina} max={player.maxStamina} color="var(--accent-cyan)" />
+          <StatBar current={player.stamina} max={player.maxStamina} color="var(--accent)" />
           <span class="stat-value">{player.stamina}/{player.maxStamina}</span>
         </div>
         
@@ -577,7 +577,7 @@
         
         <div class="stat-row">
           <label>Level {player.level}</label>
-          <StatBar current={player.xp} max={player.xpToNext} color="var(--accent-purple)" />
+          <StatBar current={player.xp} max={player.xpToNext} color="var(--accent)" />
           <span class="stat-value">{player.xp}/{player.xpToNext} XP</span>
         </div>
 
@@ -657,7 +657,7 @@
         </div>
       {/each}
       {#if eventLog.length === 0}
-        <div class="log-entry" style="color: var(--text-muted)">No events yet...</div>
+        <div class="log-entry" style="color: var(--fg-muted)">No events yet...</div>
       {/if}
     </div>
   </footer>
@@ -881,7 +881,7 @@
     flex: 1;
     padding: var(--space-lg);
     overflow-y: auto;
-    background: var(--bg-app);
+    background: var(--bg);
   }
 
   .phase-content {
@@ -896,9 +896,9 @@
   }
 
   .floor-title {
-    font-size: var(--text-2xl);
+    font-size: 20px;
     text-align: center;
-    color: var(--accent-cyan);
+    color: var(--accent);
     margin: 0;
   }
 
