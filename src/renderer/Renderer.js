@@ -1,7 +1,7 @@
 import { createSDFAtlas } from './SDFAtlas.js';
-import { createTilemapRenderer, colorToU32, CELL_FLAGS, LAYERS, LAYER_COUNT, LIGHT_SUB } from './TilemapRenderer.js';
+import { createTilemapRenderer, colorToU32, CELL_FLAGS } from './TilemapRenderer.js';
 
-export { colorToU32, CELL_FLAGS, LAYERS, LAYER_COUNT, LIGHT_SUB } from './TilemapRenderer.js';
+export { colorToU32, CELL_FLAGS } from './TilemapRenderer.js';
 
 export class Renderer {
   constructor(canvas, config = {}) {
@@ -18,6 +18,7 @@ export class Renderer {
     this.tilemap = null;
     this.cameraOffsetX = 0;
     this.cameraOffsetY = 0;
+    this.parallaxStrength = 0.3;
   }
 
   async init() {
@@ -72,37 +73,22 @@ export class Renderer {
     observer.observe(this.canvas.parentElement || this.canvas);
   }
 
-  setCell(x, y, char, fgColor, bgColor, depth = 0, flags = 0, light = 1.0, offsetX = 0, offsetY = 0, layer = 0) {
+  setCell(x, y, char, fgColor, bgColor, depth = 0, flags = 0, light = 1.0, offsetX = 0, offsetY = 0) {
     const charCode = typeof char === 'string' ? char.charCodeAt(0) : char;
     const fg = colorToU32(fgColor);
     const bg = colorToU32(bgColor);
-    this.tilemap.setTile(layer, x, y, charCode, fg, bg, depth, flags, light, offsetX, offsetY);
+    this.tilemap.setTile(x, y, charCode, fg, bg, depth, flags, light, offsetX, offsetY);
   }
 
   setCells(cellArray) {
     for (const cell of cellArray) {
-      this.setCell(cell.x, cell.y, cell.char, cell.fg, cell.bg, cell.depth, cell.flags, cell.light, cell.offsetX, cell.offsetY, cell.layer || 0);
+      this.setCell(cell.x, cell.y, cell.char, cell.fg, cell.bg, cell.depth, cell.flags, cell.light, cell.offsetX, cell.offsetY);
     }
   }
 
   clearGrid() {
     this.tilemap.clearGrid();
   }
-
-  clearLayer(layer) {
-    this.tilemap.clearLayer(layer);
-  }
-
-  clearLightMap() {
-    this.tilemap.clearLightMap();
-  }
-
-  setLightTexel(x, y, r, g, b) {
-    this.tilemap.setLightTexel(x, y, r, g, b);
-  }
-
-  get lightMapWidth() { return this.tilemap.lightMapWidth; }
-  get lightMapHeight() { return this.tilemap.lightMapHeight; }
 
   startLoop() {
     const render = () => {
@@ -114,12 +100,13 @@ export class Renderer {
   }
 
   render() {
+    this.tilemap.parallaxStrength = this.parallaxStrength;
+
     const dpr = window.devicePixelRatio || 1;
     const commandEncoder = this.device.createCommandEncoder();
     const textureView = this.context.getCurrentTexture().createView();
 
     this.tilemap.upload(this.device);
-    this.tilemap.uploadLightMap(this.device);
     this.tilemap.render(
       commandEncoder,
       textureView,
