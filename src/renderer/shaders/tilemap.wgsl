@@ -89,26 +89,46 @@ fn fbm(p: vec2<f32>) -> f32 {
   return val;
 }
 
-// Fog of war color: deep atmospheric void with flowing fog tendrils
+// Fog of war: multi-layered atmospheric void
 fn fogOfWar(worldPos: vec2<f32>, time: f32) -> vec3<f32> {
-  // Slow-flowing fog using fbm at different scales and speeds
-  let flow1 = fbm(worldPos * 0.15 + vec2<f32>(time * 0.08, time * 0.05));
-  let flow2 = fbm(worldPos * 0.08 - vec2<f32>(time * 0.04, time * -0.06));
+  // Layer 1: Large slow-moving fog banks
+  let flow1 = fbm(worldPos * 0.12 + vec2<f32>(time * 0.06, time * 0.04));
+  // Layer 2: Medium counter-flowing wisps
+  let flow2 = fbm(worldPos * 0.2 - vec2<f32>(time * 0.03, time * -0.05));
+  // Layer 3: Fine detail turbulence
+  let detail = valueNoise(worldPos * 0.5 + vec2<f32>(time * 0.1, time * 0.08));
 
-  // Combine for complex fog pattern
-  let fog = flow1 * 0.6 + flow2 * 0.4;
+  // Combine: fog banks with wispy detail
+  let fog = flow1 * 0.5 + flow2 * 0.3 + detail * 0.2;
 
-  // Shape: mostly dark with occasional bright wisps
-  let shaped = smoothstep(0.3, 0.7, fog) * 0.06;
+  // Shape into wisps: mostly dark, with bright fog bands
+  let wisps = smoothstep(0.35, 0.65, fog) * 0.055;
+  // Secondary faint glow in darkest regions (deep ambient)
+  let deepGlow = (1.0 - smoothstep(0.2, 0.5, fog)) * 0.012;
 
-  // Deep blue-purple palette with subtle variation
+  // Runic symbols: sparse, fading in and out
+  let runeGrid = vec2<i32>(floor(worldPos * 0.5)); // one rune per 2x2 cells
+  let runeHash = hash2d(runeGrid.x + 73, runeGrid.y + 191);
+  let runeActive = step(0.92, runeHash); // ~8% of grid has a rune
+  let runePulse = sin(time * 0.4 + runeHash * 20.0) * 0.5 + 0.5;
+  let runeGlow = runeActive * runePulse * 0.02;
+
+  // Deep blue-indigo-purple palette
   let tint = vec3<f32>(
-    shaped * 0.4 + fog * 0.008,                    // faint red
-    shaped * 0.5 + fog * 0.012,                    // slightly more green
-    shaped * 1.0 + fog * 0.025 + flow2 * 0.015     // blue dominant
+    wisps * 0.3 + deepGlow * 0.5 + runeGlow * 0.6,
+    wisps * 0.35 + deepGlow * 0.4 + runeGlow * 0.3,
+    wisps * 1.0 + deepGlow * 1.0 + runeGlow * 1.0
   );
 
   return tint;
+}
+
+// Edge fog: tendrils that reach from void into explored areas
+fn fogEdge(worldPos: vec2<f32>, time: f32) -> f32 {
+  let tendril1 = fbm(worldPos * 0.3 + vec2<f32>(time * 0.07, -time * 0.05));
+  let tendril2 = valueNoise(worldPos * 0.6 - vec2<f32>(time * 0.04, time * 0.09));
+  // Wispy fingers pattern
+  return smoothstep(0.4, 0.6, tendril1 * 0.7 + tendril2 * 0.3) * 0.15;
 }
 
 // Screen-space post effects: vignette + color grading
@@ -122,10 +142,10 @@ fn applyPostFX(color: vec3<f32>, screenPos: vec2<f32>) -> vec3<f32> {
 
   var c = color * vignette;
 
-  // Color grading: warm highlights, cool shadows
+  // Color grading: very subtle warm/cool split (reduced to not distort readability)
   let luminance = dot(c, vec3<f32>(0.299, 0.587, 0.114));
-  let warmShift = vec3<f32>(0.03, 0.015, -0.01) * smoothstep(0.15, 0.5, luminance);
-  let coolShift = vec3<f32>(-0.01, -0.005, 0.02) * (1.0 - smoothstep(0.0, 0.2, luminance));
+  let warmShift = vec3<f32>(0.012, 0.006, -0.004) * smoothstep(0.2, 0.5, luminance);
+  let coolShift = vec3<f32>(-0.004, -0.002, 0.008) * (1.0 - smoothstep(0.0, 0.15, luminance));
   c += warmShift + coolShift;
 
   return max(c, vec3<f32>(0.0, 0.0, 0.0));
@@ -247,8 +267,8 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
     let lg = lightSample.g;
     let lb = lightSample.b;
 
-    // Lit bg: dark base + colored light from light map
-    let litBg = exploredBg * 0.2 + vec3<f32>(lr, lg, lb) * 0.4;
+    // Lit bg: dark base + colored light from light map (reduced color intensity for readability)
+    let litBg = exploredBg * 0.25 + vec3<f32>(lr, lg, lb) * 0.3;
 
     // Smooth blend: explored bg at vis=0, lit bg at vis=1
     var bgColor = mix(exploredBg, litBg, vis);
@@ -279,13 +299,16 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
       result += vec3<f32>(pulse, pulse * 0.8, 0.0);
     }
 
-    // Fog overlay on explored-but-not-visible: fog wisps drift over the memory
-    // Also applies during fade transitions for smooth blending into fog
+    // Fog overlay: wisps and edge tendrils on explored/fading cells
     if (vis < 1.0) {
-      let fogOverlay = fogOfWar(input.worldGridPos + vec2<f32>(50.0, 30.0), uniforms.time * 0.8);
-      // At vis=0 (fully explored), blend 30% fog on top; at vis=1, no fog
-      let fogAmount = (1.0 - vis) * 0.35;
-      result = mix(result, result + fogOverlay * 2.0, fogAmount);
+      let invVis = 1.0 - vis;
+      // Fog tendrils reaching in from the edges
+      let tendrilStrength = fogEdge(input.worldGridPos, uniforms.time);
+      // Fog wisps drifting over remembered terrain
+      let fogWisp = fogOfWar(input.worldGridPos + vec2<f32>(50.0, 30.0), uniforms.time * 0.7);
+      // Combine: tendrils at edges + subtle ambient fog at full explored
+      let fogLayer = fogWisp * 1.5 + vec3<f32>(tendrilStrength * 0.3, tendrilStrength * 0.35, tendrilStrength * 0.8);
+      result = result + fogLayer * invVis * 0.5;
     }
 
     return vec4<f32>(applyPostFX(result, input.position.xy), 1.0);

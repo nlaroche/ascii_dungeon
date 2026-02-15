@@ -229,8 +229,8 @@
   // Track when each cell was FIRST discovered (for fade-in reveal)
   const firstSeenTime = new Float32Array(GRID_W * GRID_H);
   firstSeenTime.fill(-999); // sentinel: never seen
-  const FADE_OUT_DURATION = 1.2; // seconds for visible → explored fade
-  const FADE_IN_DURATION = 0.6;  // seconds for void → visible reveal
+  const FADE_OUT_DURATION = 0.5; // seconds for visible → explored fade
+  const FADE_IN_DURATION = 0.25; // seconds for void → visible reveal
 
   // Snapshot of light values when cell was last visible (so fade has data to fade FROM)
   const cachedLightR = new Float32Array(GRID_W * GRID_H);
@@ -329,8 +329,8 @@
   }
 
   // ── Colored Lighting ──
-  const TORCH_COLOR = [1.0, 0.55, 0.15];   // warm amber
-  const PLAYER_COLOR = [0.3, 0.9, 0.5];    // cool green
+  const TORCH_COLOR = [0.9, 0.65, 0.35];   // warm but less saturated
+  const PLAYER_COLOR = [0.4, 0.7, 0.5];    // softer green
 
   // Cell-level light arrays for fg tinting + overlay scalar light
   const lightR = new Float32Array(GRID_W * GRID_H);
@@ -713,60 +713,75 @@
       const g = Math.floor(102 + flicker * 68).toString(16).padStart(2, '0');
       renderer.setCell(torch.x, torch.y, '!', '#ff' + g + '00', '#1a1a2e', 0, CELL_FLAGS.VISIBLE | CELL_FLAGS.HIGHLIGHTED, 1.0, 0, 0, LAYERS.OBJECTS);
 
-      // Smooth torch particles — float upward with sub-cell offsets + Z projection spread
-      for (let p = 0; p < 8; p++) {
-        // Each particle has a looping lifecycle (0→1)
-        const life = ((time * 0.7 + p * 0.37 + torch.x * 0.13 + torch.y * 0.07) % 3.5) / 3.5;
+      // ── Torch particle system: sparks, embers, heat shimmer, smoke ──
 
-        // Rise upward smoothly (up to ~5 cells)
-        const rise = life * 5.0;
-        // Spread outward as particles "approach camera" (Z projection)
-        const spreadAmt = life * 1.0;
-        const wobble = Math.sin(time * 1.5 + p * 2.7 + torch.x) * spreadAmt;
-
-        // Smooth sub-cell position
-        const particleX = torch.x + wobble;
-        const particleY = torch.y - 0.5 - rise;
-        const cellX = Math.floor(particleX);
-        const cellY = Math.floor(particleY);
-        const offX = particleX - cellX;
-        const offY = particleY - cellY;
-
-        if (cellY >= 0 && cellY < GRID_H && cellX >= 0 && cellX < GRID_W) {
-          // Fade: bright at birth, dim as they rise and cool
+      // Core sparks — bright, fast, rise straight up
+      for (let p = 0; p < 5; p++) {
+        const life = ((time * 1.0 + p * 0.61 + torch.x * 0.17 + torch.y * 0.11) % 2.0) / 2.0;
+        const rise = life * 3.0;
+        const wobble = Math.sin(time * 2.5 + p * 3.1 + torch.x) * life * 0.4;
+        const px = torch.x + wobble;
+        const py = torch.y - 0.3 - rise;
+        const cx = Math.floor(px), cy = Math.floor(py);
+        if (cy >= 0 && cy < GRID_H && cx >= 0 && cx < GRID_W) {
           const fade = (1.0 - life) * (1.0 - life) * config.torchIntensity;
-          if (fade > 0.04) {
-            // Pseudo-3D: particles gain depth as they rise toward camera
-            const particleDepth = life * 0.4;
-            // Color cools from bright yellow-orange to dim red
-            const rVal = 255;
-            const gVal = Math.floor(fade * 220 + (1.0 - life) * 30);
-            const bVal = Math.floor(fade * fade * 50);
-            const sparkChar = fade > 0.5 ? '*' : fade > 0.25 ? '+' : '.';
-            const fg = rgbHex(rVal, Math.min(255, gVal), bVal);
-            renderer.setCell(cellX, cellY, sparkChar, fg, '#000000', particleDepth, CELL_FLAGS.VISIBLE, fade * 0.9, offX, offY, LAYERS.EFFECTS);
+          if (fade > 0.05) {
+            const gVal = Math.min(255, Math.floor(200 * fade + 40));
+            const sparkChar = fade > 0.6 ? '*' : fade > 0.3 ? '\'' : '.';
+            renderer.setCell(cx, cy, sparkChar, rgbHex(255, gVal, Math.floor(fade * 30)), '#000000', life * 0.3, CELL_FLAGS.VISIBLE, fade * 0.8, px - cx, py - cy, LAYERS.EFFECTS);
           }
         }
       }
 
-      // Smoke wisps — smooth sub-cell float above sparks
-      for (let s = 0; s < 3; s++) {
-        const sLife = ((time * 0.5 + s * 1.2 + torch.x * 0.3) % 4.0) / 4.0;
-        const sRise = 3.0 + sLife * 4.0;
-        const sSpread = sLife * 1.5;
-        const sWobble = Math.sin(time * 0.8 + s * 3.0 + torch.x) * sSpread;
+      // Embers — slower, arc sideways, linger longer
+      for (let e = 0; e < 3; e++) {
+        const life = ((time * 0.4 + e * 1.1 + torch.x * 0.31 + torch.y * 0.23) % 5.0) / 5.0;
+        const rise = life * 4.0;
+        // Parabolic arc to one side
+        const side = (e % 2 === 0 ? 1 : -1);
+        const arc = side * life * (1.0 - life) * 4.0 + Math.sin(time * 0.6 + e * 2.0) * 0.3;
+        const px = torch.x + arc;
+        const py = torch.y - 0.5 - rise;
+        const cx = Math.floor(px), cy = Math.floor(py);
+        if (cy >= 0 && cy < GRID_H && cx >= 0 && cx < GRID_W) {
+          const fade = Math.pow(1.0 - life, 1.5) * config.torchIntensity;
+          if (fade > 0.03) {
+            // Embers cool from orange to deep red
+            const rVal = Math.min(255, Math.floor(200 + fade * 55));
+            const gVal = Math.floor(fade * fade * 120);
+            renderer.setCell(cx, cy, ',', rgbHex(rVal, gVal, 0), '#000000', life * 0.2, CELL_FLAGS.VISIBLE, fade * 0.6, px - cx, py - cy, LAYERS.EFFECTS);
+          }
+        }
+      }
 
+      // Heat shimmer — wavy distortion chars near the flame
+      for (let h = 0; h < 2; h++) {
+        const shimmerY = torch.y - 1 - h;
+        if (shimmerY < 0 || shimmerY >= GRID_H) continue;
+        const shimmerPhase = Math.sin(time * 3.0 + h * 1.5 + torch.x * 0.7);
+        const shimmerX = torch.x + shimmerPhase * 0.3;
+        const scx = Math.floor(shimmerX);
+        if (scx >= 0 && scx < GRID_W) {
+          const shimmerAlpha = (0.15 - h * 0.05) * config.torchIntensity;
+          const shimmerChar = shimmerPhase > 0 ? '~' : '-';
+          renderer.setCell(scx, shimmerY, shimmerChar, rgbHex(255, 180, 80), '#000000', 0.1, CELL_FLAGS.VISIBLE, shimmerAlpha, shimmerX - scx, 0, LAYERS.EFFECTS);
+        }
+      }
+
+      // Smoke wisps — slow, wide spread, fade to grey
+      for (let s = 0; s < 2; s++) {
+        const sLife = ((time * 0.35 + s * 1.7 + torch.x * 0.3) % 5.0) / 5.0;
+        const sRise = 2.5 + sLife * 5.0;
+        const sSpread = sLife * 2.0;
+        const sWobble = Math.sin(time * 0.5 + s * 4.0 + torch.x) * sSpread;
         const smokeX = torch.x + sWobble;
         const smokeY = torch.y - sRise;
-        const sCellX = Math.floor(smokeX);
-        const sCellY = Math.floor(smokeY);
-
+        const sCellX = Math.floor(smokeX), sCellY = Math.floor(smokeY);
         if (sCellY >= 0 && sCellY < GRID_H && sCellX >= 0 && sCellX < GRID_W) {
-          const sFade = (1.0 - sLife) * (1.0 - sLife) * config.torchIntensity;
-          if (sFade > 0.08) {
-            const sDepth = sLife * 0.3;
-            const grey = Math.floor(60 + sFade * 40);
-            renderer.setCell(sCellX, sCellY, '~', rgbHex(grey, grey, grey), '#000000', sDepth, CELL_FLAGS.VISIBLE, sFade * 0.35, smokeX - sCellX, smokeY - sCellY, LAYERS.EFFECTS);
+          const sFade = Math.pow(1.0 - sLife, 2) * config.torchIntensity;
+          if (sFade > 0.06) {
+            const grey = Math.floor(50 + sFade * 35);
+            renderer.setCell(sCellX, sCellY, '~', rgbHex(grey, grey, Math.floor(grey * 0.9)), '#000000', sLife * 0.25, CELL_FLAGS.VISIBLE, sFade * 0.25, smokeX - sCellX, smokeY - sCellY, LAYERS.EFFECTS);
           }
         }
       }
