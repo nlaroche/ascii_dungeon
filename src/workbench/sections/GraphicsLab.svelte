@@ -226,7 +226,18 @@
   let explored = new Set();
   // Track when each cell was last in FOV (for fade-out transition)
   const lastVisibleTime = new Float32Array(GRID_W * GRID_H);
-  const FADE_DURATION = 0.8; // seconds for visible → explored fade
+  // Track when each cell was FIRST discovered (for fade-in reveal)
+  const firstSeenTime = new Float32Array(GRID_W * GRID_H);
+  firstSeenTime.fill(-999); // sentinel: never seen
+  const FADE_OUT_DURATION = 1.2; // seconds for visible → explored fade
+  const FADE_IN_DURATION = 0.6;  // seconds for void → visible reveal
+
+  // Snapshot of light values when cell was last visible (so fade has data to fade FROM)
+  const cachedLightR = new Float32Array(GRID_W * GRID_H);
+  const cachedLightG = new Float32Array(GRID_W * GRID_H);
+  const cachedLightB = new Float32Array(GRID_W * GRID_H);
+  // Previous FOV set to detect cells leaving vision
+  let prevFovVisible = new Set();
 
   // ── Shadow-casting FOV ──
   function castFOV(cx, cy, radius, isBlocking) {
@@ -292,17 +303,27 @@
   }
 
   // ── Line of sight for torch lighting ──
-  function hasLineOfSight(x0, y0, x1, y1) {
+  // skipSourceWall: if true, don't block on the first wall cell adjacent to
+  // the source (allows wall-mounted torches to emit past their own wall)
+  function hasLineOfSight(x0, y0, x1, y1, skipSourceWall = false) {
     let dx = Math.abs(x1 - x0), dy = Math.abs(y1 - y0);
     let sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
     let err = dx - dy;
     let cx = x0, cy = y0;
+    let skippedFirst = false;
     while (cx !== x1 || cy !== y1) {
       const e2 = 2 * err;
       if (e2 > -dy) { err -= dy; cx += sx; }
       if (e2 < dx) { err += dx; cy += sy; }
       if (cx === x1 && cy === y1) break;
-      if (dungeonMap[cy]?.[cx] === 1) return false;
+      if (dungeonMap[cy]?.[cx] === 1) {
+        // Skip first wall hit when source is wall-mounted
+        if (skipSourceWall && !skippedFirst) {
+          skippedFirst = true;
+          continue;
+        }
+        return false;
+      }
     }
     return true;
   }
@@ -343,12 +364,24 @@
   const TORCH_RADIUS = 12;
   const PLAYER_RADIUS = 8;
   const SUB = LIGHT_SUB;
-  // Minimum ambient light for all visible floor/corridor cells (prevents pitch-dark hallways)
-  const MIN_AMBIENT = [0.04, 0.04, 0.08]; // faint cool blue
+  // Minimum ambient light for all visible floor/corridor cells (prevents pitch-dark areas)
+  const MIN_AMBIENT = [0.08, 0.08, 0.14]; // cool blue ambient, always present in visible areas
 
   function computeLightMap(time, px, py, fovVisible) {
     if (!renderer) return;
     renderer.clearLightMap();
+
+    // Snapshot current light for cells leaving FOV (before zeroing)
+    for (const key of prevFovVisible) {
+      if (!fovVisible.has(key)) {
+        const x = key & 0xFF, y = key >> 8;
+        const idx = y * GRID_W + x;
+        cachedLightR[idx] = lightR[idx];
+        cachedLightG[idx] = lightG[idx];
+        cachedLightB[idx] = lightB[idx];
+      }
+    }
+    prevFovVisible = fovVisible;
 
     // Cell-level: clear for fg tinting
     lightR.fill(0);
@@ -369,7 +402,9 @@
           const t = torches[ti];
           const dx = x - t.x, dy = y - t.y;
           const dist = Math.sqrt(dx * dx + dy * dy);
-          torchLOS[ti] = dist < TORCH_RADIUS && hasLineOfSight(t.x, t.y, x, y);
+          // Torches are wall-mounted: skip first wall cell in LOS trace
+          const isWallTorch = dungeonMap[t.y]?.[t.x] === 1;
+          torchLOS[ti] = dist < TORCH_RADIUS && hasLineOfSight(t.x, t.y, x, y, isWallTorch);
         }
 
         const ao = aoMap[y * GRID_W + x];
@@ -432,6 +467,60 @@
         lightR[idx] = cellSumR / subCount;
         lightG[idx] = cellSumG / subCount;
         lightB[idx] = cellSumB / subCount;
+      }
+    }
+
+    // Pass 1.5: Light bleed — visible floor cells with no direct light
+    // pick up light from adjacent lit floor cells (softens LOS corner clipping)
+    const bleedR = new Float32Array(GRID_W * GRID_H);
+    const bleedG = new Float32Array(GRID_W * GRID_H);
+    const bleedB = new Float32Array(GRID_W * GRID_H);
+    for (let y = 0; y < GRID_H; y++) {
+      for (let x = 0; x < GRID_W; x++) {
+        if (dungeonMap[y][x] < 2) continue;
+        const key = (y << 8) | x;
+        if (!fovVisible.has(key)) continue;
+        const idx = y * GRID_W + x;
+        // Already has decent light? Keep it
+        if (lightR[idx] + lightG[idx] + lightB[idx] > 0.05) {
+          bleedR[idx] = lightR[idx];
+          bleedG[idx] = lightG[idx];
+          bleedB[idx] = lightB[idx];
+          continue;
+        }
+        // Average neighbors' light (cardinal only, × 0.5 falloff)
+        let sumR = 0, sumG = 0, sumB = 0, count = 0;
+        for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) {
+          const nx = x + dx, ny = y + dy;
+          if (nx >= 0 && nx < GRID_W && ny >= 0 && ny < GRID_H && dungeonMap[ny][nx] >= 2) {
+            const nIdx = ny * GRID_W + nx;
+            sumR += lightR[nIdx]; sumG += lightG[nIdx]; sumB += lightB[nIdx];
+            count++;
+          }
+        }
+        if (count > 0) {
+          bleedR[idx] = (sumR / count) * 0.5;
+          bleedG[idx] = (sumG / count) * 0.5;
+          bleedB[idx] = (sumB / count) * 0.5;
+        }
+      }
+    }
+    // Write bleed results back
+    for (let y = 0; y < GRID_H; y++) {
+      for (let x = 0; x < GRID_W; x++) {
+        if (dungeonMap[y][x] < 2) continue;
+        const idx = y * GRID_W + x;
+        if (bleedR[idx] > lightR[idx]) {
+          lightR[idx] = bleedR[idx];
+          lightG[idx] = bleedG[idx];
+          lightB[idx] = bleedB[idx];
+          // Update sub-cell light map too
+          for (let sy = 0; sy < SUB; sy++) {
+            for (let sx = 0; sx < SUB; sx++) {
+              renderer.setLightTexel(x * SUB + sx, y * SUB + sy, bleedR[idx], bleedG[idx], bleedB[idx]);
+            }
+          }
+        }
       }
     }
 
@@ -527,106 +616,88 @@
         const inVision = fovVisible.has(key);
         const wasExplored = explored.has(key);
 
+        const idx = y * GRID_W + x;
+
         if (inVision) {
+          // Record first discovery time
+          if (!wasExplored && firstSeenTime[idx] < 0) {
+            firstSeenTime[idx] = time;
+          }
           explored.add(key);
-          lastVisibleTime[y * GRID_W + x] = time;
+          lastVisibleTime[idx] = time;
         }
 
         if (!inVision && !wasExplored) continue;
 
-        const idx = y * GRID_W + x;
         let char = ' ', fg, bg, depth = 0, flags = 0, light = 0;
 
-        // Select base colors by tile type
-        let baseBg, baseFg;
+        // Select base + explored colors by tile type
+        let baseFg, expBg, expFg;
         if (tile === 1) {
-          char = '#'; baseFg = BASE_WALL_FG; baseBg = BASE_WALL_BG; depth = 1.0;
+          char = '#'; baseFg = BASE_WALL_FG; depth = 1.0;
+          expBg = EXPLORED_WALL_BG; expFg = EXPLORED_WALL_FG;
         } else if (tile === 2) {
-          baseBg = BASE_ROOM_BG; baseFg = [0, 0, 0];
+          baseFg = [0, 0, 0]; expBg = EXPLORED_ROOM_BG; expFg = [0, 0, 0];
         } else {
-          baseBg = BASE_CORR_BG; baseFg = [0, 0, 0];
+          baseFg = [0, 0, 0]; expBg = EXPLORED_CORR_BG; expFg = [0, 0, 0];
         }
 
+        // Compute visibility: 1.0 = fully in vision, fading 1→0, 0 = explored-only
+        let vis;
         if (inVision) {
-          flags = CELL_FLAGS.VISIBLE | CELL_FLAGS.EXPLORED;
-          const lr = lightR[idx], lg = lightG[idx], lb = lightB[idx];
-
-          // Scalar intensity for fg lighting (shader uses this for glyph brightness)
-          light = Math.min(lr + lg + lb, 1.0);
-
-          // Send BASE bg color — shader combines with light map for sub-cell lighting
-          bg = rgbHex(baseBg[0], baseBg[1], baseBg[2]);
-
-          // Wall foreground tinting (CPU-side, cell-level)
-          if (tile === 1) {
-            const fgR = Math.min(255, Math.floor(baseFg[0] + lr * 100));
-            const fgG = Math.min(255, Math.floor(baseFg[1] + lg * 70));
-            const fgB = Math.min(255, Math.floor(baseFg[2] + lb * 30));
-            fg = rgbHex(fgR, fgG, fgB);
-          } else {
-            fg = '#000000';
-          }
+          // Fade-in: ramp from 0 to 1 over FADE_IN_DURATION on first discovery
+          const timeSinceDiscovered = time - firstSeenTime[idx];
+          vis = Math.min(1.0, timeSinceDiscovered / FADE_IN_DURATION);
+          // Update cached light for when this cell eventually leaves FOV
+          cachedLightR[idx] = lightR[idx];
+          cachedLightG[idx] = lightG[idx];
+          cachedLightB[idx] = lightB[idx];
         } else {
-          // Explored but not visible: fade from last-visible colors to dim explored
           const timeSinceSeen = time - lastVisibleTime[idx];
-          const fadeT = Math.min(timeSinceSeen / FADE_DURATION, 1.0);
+          vis = Math.max(0.0, 1.0 - timeSinceSeen / FADE_OUT_DURATION);
+        }
 
-          // Target explored colors for this tile type
-          let expBg, expFg;
-          if (tile === 1) {
-            expFg = EXPLORED_WALL_FG; expBg = EXPLORED_WALL_BG;
-          } else if (tile === 2) {
-            expBg = EXPLORED_ROOM_BG; expFg = [0, 0, 0];
-          } else {
-            expBg = EXPLORED_CORR_BG; expFg = [0, 0, 0];
-          }
+        // Use current light for visible cells, cached light for fading cells
+        const lr = inVision ? lightR[idx] : cachedLightR[idx];
+        const lg = inVision ? lightG[idx] : cachedLightG[idx];
+        const lb = inVision ? lightB[idx] : cachedLightB[idx];
 
-          if (fadeT < 1.0) {
-            // Fading: interpolate from lit state toward explored
-            flags = CELL_FLAGS.VISIBLE | CELL_FLAGS.EXPLORED; // keep VISIBLE so shader uses light map
-            const lr = lightR[idx], lg = lightG[idx], lb = lightB[idx];
-            const litLight = Math.min(lr + lg + lb, 1.0);
-            light = litLight * (1.0 - fadeT); // fade light to 0
+        // Always set EXPLORED; set VISIBLE when any visibility remains
+        flags = CELL_FLAGS.EXPLORED;
+        if (vis > 0.001) flags |= CELL_FLAGS.VISIBLE;
 
-            // Bg: lerp from base to explored
-            const bgR = Math.floor(baseBg[0] + (expBg[0] - baseBg[0]) * fadeT);
-            const bgG = Math.floor(baseBg[1] + (expBg[1] - baseBg[1]) * fadeT);
-            const bgB = Math.floor(baseBg[2] + (expBg[2] - baseBg[2]) * fadeT);
-            bg = rgbHex(bgR, bgG, bgB);
+        // light = continuous visibility (shader uses this as the blend factor)
+        light = vis;
 
-            // Fg: lerp for walls
-            if (tile === 1) {
-              const litFgR = Math.min(255, Math.floor(baseFg[0] + lr * 100));
-              const litFgG = Math.min(255, Math.floor(baseFg[1] + lg * 70));
-              const litFgB = Math.min(255, Math.floor(baseFg[2] + lb * 30));
-              const fR = Math.floor(litFgR + (expFg[0] - litFgR) * fadeT);
-              const fG = Math.floor(litFgG + (expFg[1] - litFgG) * fadeT);
-              const fB = Math.floor(litFgB + (expFg[2] - litFgB) * fadeT);
-              fg = rgbHex(Math.max(0, fR), Math.max(0, fG), Math.max(0, fB));
-            } else {
-              fg = '#000000';
+        // Bg: shader will blend between explored and lit based on vis
+        // Send explored bg — shader adds light map on top scaled by vis
+        let baseBg;
+        if (tile === 1) baseBg = BASE_WALL_BG;
+        else if (tile === 2) baseBg = BASE_ROOM_BG;
+        else baseBg = BASE_CORR_BG;
+        bg = rgbHex(expBg[0], expBg[1], expBg[2]);
+
+        // Fg: walls get tinted by light when visible, lerp to explored fg
+        if (tile === 1) {
+          const litFgR = Math.min(255, Math.floor(baseFg[0] + lr * 100));
+          const litFgG = Math.min(255, Math.floor(baseFg[1] + lg * 70));
+          const litFgB = Math.min(255, Math.floor(baseFg[2] + lb * 30));
+          const fR = Math.floor(expFg[0] + (litFgR - expFg[0]) * vis);
+          const fG = Math.floor(expFg[1] + (litFgG - expFg[1]) * vis);
+          const fB = Math.floor(expFg[2] + (litFgB - expFg[2]) * vis);
+          fg = rgbHex(Math.max(0, fR), Math.max(0, fG), Math.max(0, fB));
+        } else {
+          fg = '#000000';
+        }
+
+        // Write fading light map sub-cells for cells losing visibility
+        if (!inVision && vis > 0.001) {
+          for (let sy = 0; sy < SUB; sy++) {
+            for (let sx = 0; sx < SUB; sx++) {
+              renderer.setLightTexel(x * SUB + sx, y * SUB + sy,
+                cachedLightR[idx] * vis, cachedLightG[idx] * vis, cachedLightB[idx] * vis
+              );
             }
-
-            // Fade the light map sub-cells too
-            for (let sy = 0; sy < SUB; sy++) {
-              for (let sx = 0; sx < SUB; sx++) {
-                const lmX = x * SUB + sx, lmY = y * SUB + sy;
-                // Read current light map values aren't accessible directly,
-                // so scale the existing values by fading factor
-                // Since we re-compute every frame, just write scaled values
-                renderer.setLightTexel(lmX, lmY,
-                  lightR[idx] * (1.0 - fadeT),
-                  lightG[idx] * (1.0 - fadeT),
-                  lightB[idx] * (1.0 - fadeT)
-                );
-              }
-            }
-          } else {
-            // Fully faded: standard explored state
-            flags = CELL_FLAGS.EXPLORED;
-            light = 0.0;
-            fg = tile === 1 ? rgbHex(expFg[0], expFg[1], expFg[2]) : '#000000';
-            bg = rgbHex(expBg[0], expBg[1], expBg[2]);
           }
         }
 

@@ -53,12 +53,82 @@ fn unpackColor(packed: u32) -> vec4<f32> {
   return vec4<f32>(r, g, b, a);
 }
 
-// Integer hash for void texture noise (deterministic per-cell)
+// ── Fog of War noise functions ──
+
+// Integer hash for noise
 fn hash2d(ix: i32, iy: i32) -> f32 {
   var n = ix * 374761393 + iy * 668265263;
   n = (n ^ (n >> 13u)) * 1274126177;
   n = n ^ (n >> 16u);
   return f32(n & 0x7FFFFFFF) / f32(0x7FFFFFFF);
+}
+
+// Smooth value noise (bilinear interpolation of hash)
+fn valueNoise(p: vec2<f32>) -> f32 {
+  let i = vec2<i32>(floor(p));
+  let f = fract(p);
+  // Smoothstep interpolation
+  let u = f * f * (3.0 - 2.0 * f);
+  let a = hash2d(i.x, i.y);
+  let b = hash2d(i.x + 1, i.y);
+  let c = hash2d(i.x, i.y + 1);
+  let d = hash2d(i.x + 1, i.y + 1);
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// Fractal Brownian motion — layered noise for cloud-like fog
+fn fbm(p: vec2<f32>) -> f32 {
+  var val = 0.0;
+  var amp = 0.5;
+  var pos = p;
+  for (var i = 0; i < 4; i++) {
+    val += amp * valueNoise(pos);
+    pos *= 2.1;
+    amp *= 0.5;
+  }
+  return val;
+}
+
+// Fog of war color: deep atmospheric void with flowing fog tendrils
+fn fogOfWar(worldPos: vec2<f32>, time: f32) -> vec3<f32> {
+  // Slow-flowing fog using fbm at different scales and speeds
+  let flow1 = fbm(worldPos * 0.15 + vec2<f32>(time * 0.08, time * 0.05));
+  let flow2 = fbm(worldPos * 0.08 - vec2<f32>(time * 0.04, time * -0.06));
+
+  // Combine for complex fog pattern
+  let fog = flow1 * 0.6 + flow2 * 0.4;
+
+  // Shape: mostly dark with occasional bright wisps
+  let shaped = smoothstep(0.3, 0.7, fog) * 0.06;
+
+  // Deep blue-purple palette with subtle variation
+  let tint = vec3<f32>(
+    shaped * 0.4 + fog * 0.008,                    // faint red
+    shaped * 0.5 + fog * 0.012,                    // slightly more green
+    shaped * 1.0 + fog * 0.025 + flow2 * 0.015     // blue dominant
+  );
+
+  return tint;
+}
+
+// Screen-space post effects: vignette + color grading
+fn applyPostFX(color: vec3<f32>, screenPos: vec2<f32>) -> vec3<f32> {
+  let uv = screenPos / uniforms.resolution;
+
+  // Vignette: smooth darkening toward edges
+  let center = uv - vec2<f32>(0.5, 0.5);
+  let vignetteDist = length(center) * 1.3;
+  let vignette = 1.0 - smoothstep(0.4, 1.1, vignetteDist);
+
+  var c = color * vignette;
+
+  // Color grading: warm highlights, cool shadows
+  let luminance = dot(c, vec3<f32>(0.299, 0.587, 0.114));
+  let warmShift = vec3<f32>(0.03, 0.015, -0.01) * smoothstep(0.15, 0.5, luminance);
+  let coolShift = vec3<f32>(-0.01, -0.005, 0.02) * (1.0 - smoothstep(0.0, 0.2, luminance));
+  c += warmShift + coolShift;
+
+  return max(c, vec3<f32>(0.0, 0.0, 0.0));
 }
 
 @vertex
@@ -149,8 +219,8 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
   let spread = uniforms.sdfSmoothing;
   let sdfAlpha = 1.0 - smoothstep(edge - spread, edge + spread, sdfValue);
 
-  // Minimum ambient so nothing is pure black
-  let lit = max(input.light, 0.05);
+  // Visibility factor (continuous 0→1, used for fog-of-war blending)
+  let vis = clamp(input.light, 0.0, 1.0);
 
   // Sample light map at sub-cell resolution (stepped/pixelated lookup)
   let subRes = uniforms.lightSubRes;
@@ -159,46 +229,45 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
   let lmY = u32(clamp(floor(input.worldGridPos.y * subRes), 0.0, uniforms.gridSize.y * subRes - 1.0));
   let lightSample = lightMap[lmY * lmWidth + lmX];
 
-  // ── Layer 0 (TERRAIN): existing opaque logic ──
+  // ── Layer 0 (TERRAIN): opaque with smooth fog-of-war blending ──
   if (input.layer == 0u) {
-    // Not visible and not explored: subtle void texture
+    // Fog of war base: always computed for blending at edges
+    let fogColor = fogOfWar(input.worldGridPos, uniforms.time);
+
+    // Not visible and not explored: pure fog of war
     if ((input.flags & 3u) == 0u) {
-      let gx = i32(floor(input.worldGridPos.x));
-      let gy = i32(floor(input.worldGridPos.y));
-      let h = hash2d(gx, gy);
-      // Very subtle noise: most cells near-black, occasional faint speckle
-      let voidBright = select(0.0, h * 0.03, h > 0.85);
-      // Slight blue tint for depth feeling
-      let voidColor = vec3<f32>(voidBright * 0.4, voidBright * 0.5, voidBright * 1.0);
-      return vec4<f32>(voidColor, 1.0);
+      return vec4<f32>(applyPostFX(fogColor, input.position.xy), 1.0);
     }
 
-    // Explored but not currently visible: bg from CPU (pre-dimmed)
-    if ((input.flags & 1u) == 0u) {
-      return vec4<f32>(input.bg.rgb, 1.0);
-    }
+    // ── Explored or visible terrain ──
+    let exploredBg = input.bg.rgb;
 
-    // Visible: sub-cell lighting from light map on base bg
-    let baseBg = input.bg.rgb;
+    // Light map sample (faded by vis on CPU for fading cells)
     let lr = lightSample.r;
     let lg = lightSample.g;
     let lb = lightSample.b;
-    var bgColor = baseBg * 0.2 + vec3<f32>(lr, lg, lb) * 0.4;
+
+    // Lit bg: dark base + colored light from light map
+    let litBg = exploredBg * 0.2 + vec3<f32>(lr, lg, lb) * 0.4;
+
+    // Smooth blend: explored bg at vis=0, lit bg at vis=1
+    var bgColor = mix(exploredBg, litBg, vis);
 
     // Wall shadow: darken bottom portion of stretched wall quads
     let localY = fract(input.worldGridPos.y);
     if (input.depth > 0.5 && localY > 0.82) {
       let shadowFade = (localY - 0.82) / 0.18;
-      // Shadow tinted by light color instead of pure black
       let shadowTint = vec3<f32>(lr, lg, lb) * 0.08;
-      bgColor = mix(bgColor, shadowTint, shadowFade * 0.7);
+      bgColor = mix(bgColor, shadowTint, shadowFade * 0.7 * vis);
     }
 
-    // Foreground with scalar lighting
-    let fgColor = vec3<f32>(input.fg.rgb * lit);
+    // Foreground: walls always show glyph, brightness scales with vis
+    let fgBrightness = select(vis, max(vis, 0.25), input.depth > 0.5);
+    let fgColor = input.fg.rgb * fgBrightness;
 
-    // Mix foreground over background
-    var result = mix(bgColor, fgColor, sdfAlpha);
+    // Mix foreground glyph over background
+    let glyphStrength = select(sdfAlpha * vis, sdfAlpha * max(vis, 0.4), input.depth > 0.5);
+    var result = mix(bgColor, fgColor, glyphStrength);
 
     // Depth fog: walls are slightly darker
     let depthDim = 1.0 - input.depth * 0.08;
@@ -210,7 +279,16 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
       result += vec3<f32>(pulse, pulse * 0.8, 0.0);
     }
 
-    return vec4<f32>(result, 1.0);
+    // Fog overlay on explored-but-not-visible: fog wisps drift over the memory
+    // Also applies during fade transitions for smooth blending into fog
+    if (vis < 1.0) {
+      let fogOverlay = fogOfWar(input.worldGridPos + vec2<f32>(50.0, 30.0), uniforms.time * 0.8);
+      // At vis=0 (fully explored), blend 30% fog on top; at vis=1, no fog
+      let fogAmount = (1.0 - vis) * 0.35;
+      result = mix(result, result + fogOverlay * 2.0, fogAmount);
+    }
+
+    return vec4<f32>(applyPostFX(result, input.position.xy), 1.0);
   }
 
   // ── Layers 1-4 (overlay): transparent with premultiplied alpha ──
@@ -226,8 +304,9 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
   }
 
   // Glyph foreground with premultiplied alpha
+  let overlayLit = max(vis, 0.05);
   let glyphAlpha = sdfAlpha * input.fg.a;
-  let glyphColor = input.fg.rgb * lit * glyphAlpha;
+  let glyphColor = input.fg.rgb * overlayLit * glyphAlpha;
 
   return vec4<f32>(glyphColor, glyphAlpha);
 }
