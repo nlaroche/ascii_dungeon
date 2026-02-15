@@ -19,12 +19,12 @@
   }
 
   const vendorItems = [
-    { name: 'Iron Sword', price: '12g' },
-    { name: 'Leather Armor', price: '8g' },
-    { name: 'Health Potion', price: '3g' },
-    { name: 'Torch Bundle', price: '2g' },
-    { name: 'Map Fragment', price: '5g' },
-    { name: 'Lucky Charm', price: '15g' },
+    { name: 'Iron Sword', glyph: '/', price: '12g', stat: '+8 ATK', rarity: 'common' },
+    { name: 'Leather Armor', glyph: '[', price: '8g', stat: '+5 DEF', rarity: 'common' },
+    { name: 'Health Potion', glyph: '!', price: '3g', stat: '+50 HP', rarity: 'common' },
+    { name: 'Torch Bundle', glyph: '*', price: '2g', stat: 'Light +3', rarity: 'common' },
+    { name: 'Map Fragment', glyph: '?', price: '5g', stat: 'Reveal floor', rarity: 'uncommon' },
+    { name: 'Lucky Charm', glyph: '=', price: '15g', stat: '+5% Crit', rarity: 'rare' },
   ];
 
   const stashItems = [
@@ -41,9 +41,9 @@
   ];
 
   const equipment = [
-    { name: 'Iron Sword', action: 'Upgrade to +2', cost: '25g', stat: '+3 ATK' },
-    { name: 'Chain Mail', action: 'Repair (80%)', cost: '10g', stat: '' },
-    { name: 'Buckler', action: 'Reinforce', cost: '15g', stat: '+2 DEF' },
+    { name: 'Iron Sword', glyph: '/', action: 'Upgrade to +2', cost: '25g', stat: '+3 ATK', statColor: 'var(--accent-green)' },
+    { name: 'Chain Mail', glyph: '[', action: 'Repair (80%)', cost: '10g', stat: '80% → 100%', statColor: 'var(--accent-amber)' },
+    { name: 'Buckler', glyph: ')', action: 'Reinforce', cost: '15g', stat: '+2 DEF', statColor: 'var(--accent-green)' },
   ];
 </script>
 
@@ -56,7 +56,7 @@
     on:keydown={(e) => e.key === 'Enter' && handleBackdropClick()}
     role="button"
     tabindex="0"
-    transition:fade={{ duration: 250 }}
+    transition:fade={{ duration: 100 }}
   >
     <div
       class="modal"
@@ -78,7 +78,11 @@
             <ul class="item-list">
               {#each vendorItems as item}
                 <li class="item-row">
-                  <span class="item-name">{item.name}</span>
+                  <span class="item-glyph {item.rarity}">{item.glyph}</span>
+                  <div class="item-info">
+                    <span class="item-name {item.rarity}">{item.name}</span>
+                    <span class="item-stat">{item.stat}</span>
+                  </div>
                   <span class="item-price">{item.price}</span>
                   <button class="buy-btn">Buy</button>
                 </li>
@@ -98,6 +102,7 @@
                   <div class="rest-effect">Restore 50% HP</div>
                   <div class="hp-bar-label">Current HP: 85/120</div>
                   <div class="hp-bar"><div class="hp-fill" style="width: 70.8%"></div></div>
+                  <button class="rest-btn accent-green">Rest (5g)</button>
                 </div>
               </div>
               <div class="rest-card">
@@ -107,6 +112,7 @@
                   <div class="rest-effect">Restore 100% HP + MP</div>
                   <div class="hp-bar-label">Current HP: 85/120</div>
                   <div class="hp-bar"><div class="hp-fill" style="width: 70.8%"></div></div>
+                  <button class="rest-btn accent">Rest (15g)</button>
                 </div>
               </div>
             </div>
@@ -116,8 +122,8 @@
           <section>
             <h3 class="section-title">Storage (5/20)</h3>
             <div class="stash-grid">
-              {#each [...Array(20)] as _, i}
-                <div class="stash-slot" class:filled={i < 4} style={i < 4 ? `color: ${stashItems[i].fg}` : ''}>
+              {#each [...Array(12)] as _, i}
+                <div class="stash-slot" class:filled={i < 4} style={i < 4 ? `color: ${stashItems[i].fg}` : ''} title={i < 4 ? stashItems[i].name : 'Empty'}>
                   {#if i < 4}
                     {stashItems[i].char}
                   {/if}
@@ -169,12 +175,13 @@
             <ul class="equipment-list">
               {#each equipment as item}
                 <li class="equipment-row">
+                  <span class="equip-glyph" style="color: var(--fg-muted)">{item.glyph}</span>
                   <div class="equipment-info">
                     <span class="equipment-name">{item.name}</span>
                     <span class="equipment-action">{item.action}</span>
                   </div>
                   <div class="equipment-right">
-                    {#if item.stat}<span class="equipment-stat">{item.stat}</span>{/if}
+                    {#if item.stat}<span class="equipment-stat" style="color: {item.statColor}">{item.stat}</span>{/if}
                     <button class="upgrade-btn">{item.cost}</button>
                   </div>
                 </li>
@@ -198,12 +205,12 @@
     position: fixed;
     inset: 0;
     z-index: 100;
-    background: rgba(0, 0, 0, 0.65);
+    background: rgba(0, 0, 0, 0.4);
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 20px;
-    animation: modal-backdrop-in 250ms ease;
+    animation: modal-backdrop-in 100ms ease;
   }
 
   .modal {
@@ -211,30 +218,30 @@
     border: 1px solid var(--border-accent);
     border-radius: var(--radius-lg);
     box-shadow: 0 25px 50px rgba(0,0,0,0.5), 0 0 1px rgba(255,255,255,0.1);
-    max-width: 480px;
+    max-width: 420px;
     width: 100%;
     max-height: 80vh;
     overflow-y: auto;
-    animation: modal-card-in 300ms ease;
+    animation: modal-card-in 120ms ease;
   }
 
   .modal-header {
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 20px 24px;
+    padding: 12px 16px;
     border-bottom: 1px solid var(--border);
     position: relative;
   }
 
   .modal-header .icon {
-    font-size: 32px;
+    font-size: 24px;
     line-height: 1;
   }
 
   .modal-header h2 {
     flex: 1;
-    font-size: 18px;
+    font-size: 15px;
     font-weight: 600;
     margin: 0;
     color: var(--fg);
@@ -256,14 +263,14 @@
   }
 
   .modal-body {
-    padding: 24px;
+    padding: 12px 16px;
   }
 
   .section-title {
     color: var(--accent-amber);
     font-size: 14px;
     font-weight: 600;
-    margin: 0 0 12px;
+    margin: 0 0 8px;
   }
 
   .section-title.center {
@@ -287,7 +294,7 @@
     display: flex;
     align-items: center;
     gap: 12px;
-    padding: 10px 12px;
+    padding: 6px 8px;
     border-radius: var(--radius);
     transition: background var(--transition);
   }
@@ -296,10 +303,28 @@
     background: var(--bg-muted);
   }
 
-  .item-name {
-    flex: 1;
-    color: var(--fg);
+  .item-glyph {
+    font-size: 16px;
+    width: 24px;
+    text-align: center;
+    flex-shrink: 0;
   }
+  .item-info {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .item-stat {
+    font-size: 10px;
+    color: var(--fg-dim);
+  }
+  .item-glyph.common { color: var(--fg-muted); }
+  .item-glyph.uncommon { color: var(--accent-green); }
+  .item-glyph.rare { color: var(--accent); }
+  .item-name.common { color: var(--fg); }
+  .item-name.uncommon { color: var(--accent-green); }
+  .item-name.rare { color: var(--accent); }
 
   .item-price {
     color: var(--accent-amber);
@@ -343,7 +368,7 @@
   }
 
   .rest-card-header {
-    padding: 12px;
+    padding: 8px;
     font-weight: 600;
     font-size: 13px;
     text-align: center;
@@ -360,7 +385,32 @@
   }
 
   .rest-card-body {
-    padding: 12px;
+    padding: 8px;
+  }
+
+  .rest-btn {
+    width: 100%;
+    margin-top: 8px;
+    padding: 6px;
+    background: transparent;
+    border-radius: var(--radius);
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.1s ease;
+  }
+  .rest-btn.accent-green {
+    border: 1px solid var(--accent-green);
+    color: var(--accent-green);
+  }
+  .rest-btn.accent-green:hover {
+    background: rgba(162, 220, 199, 0.15);
+  }
+  .rest-btn.accent {
+    border: 1px solid var(--accent);
+    color: var(--accent);
+  }
+  .rest-btn:hover {
+    background: rgba(104, 194, 211, 0.15);
   }
 
   .rest-cost {
@@ -401,15 +451,14 @@
   }
 
   .stash-slot {
-    aspect-ratio: 1;
     background: var(--bg-muted);
     border: 1px dashed var(--border);
     border-radius: var(--radius);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 20px;
-    min-height: 56px;
+    font-size: 16px;
+    min-height: 40px;
   }
 
   .stash-slot.filled {
@@ -457,7 +506,7 @@
 
   .guild-rank {
     background: var(--bg-muted);
-    padding: 12px;
+    padding: 8px;
     border-radius: var(--radius);
   }
 
@@ -482,7 +531,7 @@
   }
 
   .quest-section {
-    margin-top: 16px;
+    margin-top: 10px;
   }
 
   .quest-list {
@@ -495,8 +544,8 @@
     background: var(--bg-muted);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    padding: 12px;
-    margin-bottom: 8px;
+    padding: 8px;
+    margin-bottom: 6px;
   }
 
   .quest-header {
@@ -522,7 +571,7 @@
   .quest-desc {
     color: var(--fg-dim);
     font-size: 12px;
-    margin: 0 0 8px;
+    margin: 0 0 4px;
   }
 
   .quest-footer {
@@ -567,6 +616,13 @@
 
   .equipment-row:last-child {
     border-bottom: none;
+  }
+
+  .equip-glyph {
+    font-size: 16px;
+    width: 24px;
+    text-align: center;
+    flex-shrink: 0;
   }
 
   .equipment-info {
@@ -632,4 +688,3 @@
     to { opacity: 1; transform: translateY(0) scale(1); }
   }
 </style>
-```

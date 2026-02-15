@@ -194,7 +194,7 @@
     transition: filter 0.3s ease;
   }
   .canvas-wrap.blurred {
-    filter: blur(4px) grayscale(0.8) brightness(0.6);
+    filter: blur(3px) grayscale(0.5) brightness(0.75);
     pointer-events: none;
   }
   .controls-panel {
