@@ -61,3 +61,12 @@ ASCII dungeon roguelike. Player has attack/defense/hp/stamina/gold/level. Combat
 
 **Weaknesses**: Momentum loss on death, requires constant engagement to maintain, single-focus builds are brittle.
 
+## Judge Feedback (Iteration 1)
+- R1: PASS (barely). Level 1/10/100/1000 described but difference between 500 and 1000 unclear.
+- R2: FAIL. +5 per point is LINEAR and FLAT. Point 50 gives the same +5 as point 1. This is boring. Growth MUST accelerate — later points should give MORE than earlier points. Think polynomial or exponential.
+- R3: PASS. Overflow and breakthrough are good surprises.
+- R4: PASS (weak). Builds differ in stats, not gameplay loops.
+- R5: PASS. 4 systems.
+- R6: PASS.
+- CRITICAL: Fix R2. Each point invested must feel BIGGER than the last. Show accelerating numbers like: point 1 = +5, point 10 = +15, point 50 = +100. The curve should reward deep investment.
+
