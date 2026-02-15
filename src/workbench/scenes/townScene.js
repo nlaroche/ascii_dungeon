@@ -4,7 +4,7 @@
 // Uses drawArena for lighting, then paints terrain tiles on top.
 
 import { CELL_FLAGS, LAYERS } from '../../renderer/Renderer.js';
-import { drawPanel, drawList, drawText, drawTooltip, BOX_DOUBLE, drawHLine } from '../../lib/ui.js';
+import { drawText } from '../../lib/ui.js';
 import { drawArena } from '../helpers/drawArena.js';
 import { COLORS } from '../../lib/palette.js';
 
@@ -27,6 +27,9 @@ let buildings = null;
 let torches = null;
 let npcs = null;
 let lastW = 0, lastH = 0;
+let hoveredBuilding = null;
+let mouseGridX = -1, mouseGridY = -1;
+let canvasEl = null;
 
 const vendorItems = [
   { label: 'Iron Sword      12g' },
@@ -170,6 +173,32 @@ export function onSetup(renderer) {
   lastW = 0;
   lastH = 0;
   townMap = null;
+  canvasEl = renderer.canvas;
+}
+
+/** Called by GraphicsLab when mouse moves over canvas */
+export function setMousePos(gx, gy) {
+  mouseGridX = gx;
+  mouseGridY = gy;
+  hoveredBuilding = null;
+  if (!buildings) return;
+  for (const b of buildings) {
+    if (gx >= b.x && gx < b.x + b.w && gy >= b.y && gy < b.y + b.h) {
+      hoveredBuilding = b;
+      break;
+    }
+  }
+  if (canvasEl) canvasEl.style.cursor = hoveredBuilding ? 'pointer' : 'default';
+}
+
+/** Get the currently hovered building (or null) */
+export function getHoveredBuilding() {
+  return hoveredBuilding;
+}
+
+/** Get all buildings for the current layout */
+export function getBuildings() {
+  return buildings || [];
 }
 
 export function onFrame(renderer, dt) {
@@ -232,6 +261,19 @@ export function onFrame(renderer, dt) {
       CELL_FLAGS.VISIBLE, 1.0, 0, 0, LAYERS.OBJECTS);
   }
 
+  // Hover highlight on buildings
+  if (hoveredBuilding) {
+    const b = hoveredBuilding;
+    for (let x = b.x; x < b.x + b.w; x++) {
+      renderer.setCell(x, b.y, '-', COLORS.accent, COLORS.bgAccent, 0, CELL_FLAGS.VISIBLE, 1.0, 0, 0, LAYERS.EFFECTS);
+      renderer.setCell(x, b.y + b.h - 1, '-', COLORS.accent, COLORS.bgAccent, 0, CELL_FLAGS.VISIBLE, 1.0, 0, 0, LAYERS.EFFECTS);
+    }
+    for (let y = b.y; y < b.y + b.h; y++) {
+      renderer.setCell(b.x, y, '|', COLORS.accent, COLORS.bgAccent, 0, CELL_FLAGS.VISIBLE, 1.0, 0, 0, LAYERS.EFFECTS);
+      renderer.setCell(b.x + b.w - 1, y, '|', COLORS.accent, COLORS.bgAccent, 0, CELL_FLAGS.VISIBLE, 1.0, 0, 0, LAYERS.EFFECTS);
+    }
+  }
+
   // ── Animate and draw NPCs ──
   for (const npc of npcs) {
     // Simple patrol: walk back and forth
@@ -286,14 +328,6 @@ export function onFrame(renderer, dt) {
   for (let i = 0; i < stashItems.length; i++) {
     drawText(renderer, panelX + 2, 22 + i, stashItems[i].label, { fg: stashItems[i].fg });
   }
-
-  // Tooltip for active NPC
-  const activeNpc = npcs[Math.floor(sceneTime * 0.3) % npcs.length];
-  const lineIdx = Math.floor(sceneTime) % activeNpc.lines.length;
-  const ttX = Math.round(activeNpc.x);
-  drawTooltip(renderer, ttX, activeNpc.y, [activeNpc.name, activeNpc.lines[lineIdx]], W, H, {
-    borderFg: activeNpc.fg,
-  });
 
   renderer.render();
 }

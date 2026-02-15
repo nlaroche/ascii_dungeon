@@ -13,6 +13,11 @@
   /** @type {(renderer: Renderer, dt: number, time: number) => void} */
   export let onFrame = null;
 
+  /** @type {((gx: number, gy: number, px: number, py: number) => void) | null} */
+  export let onMouseMove = null;
+  /** @type {((gx: number, gy: number, px: number, py: number) => void) | null} */
+  export let onClick = null;
+
   let canvas;
   let renderer = null;
   let error = null;
@@ -123,9 +128,37 @@
 
       let animFrame = requestAnimationFrame(loop);
 
+      // Mouse event handlers
+      if (onMouseMove || onClick) {
+        canvas.addEventListener('mousemove', handleMouseMove);
+        canvas.addEventListener('click', handleClick);
+        canvas.addEventListener('mouseleave', handleMouseLeave);
+      }
+
+      const handleMouseMove = (e) => {
+        if (!renderer) return;
+        const { gx, gy, px, py } = pixelToGrid(e);
+        if (onMouseMove) onMouseMove(gx, gy, px, py);
+      };
+
+      const handleClick = (e) => {
+        if (!renderer) return;
+        const { gx, gy, px, py } = pixelToGrid(e);
+        if (onClick) onClick(gx, gy, px, py);
+      };
+
+      const handleMouseLeave = () => {
+        if (onMouseMove) onMouseMove(-1, -1, 0, 0);
+      };
+
       cleanup = () => {
         running = false;
         cancelAnimationFrame(animFrame);
+        if (canvas) {
+          canvas.removeEventListener('mousemove', handleMouseMove);
+          canvas.removeEventListener('click', handleClick);
+          canvas.removeEventListener('mouseleave', handleMouseLeave);
+        }
         if (typeof userCleanup === 'function') userCleanup();
       };
 
@@ -135,7 +168,14 @@
     }
   });
 
-  let cleanup = null;
+  function pixelToGrid(e) {
+    const rect = canvas.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const gx = Math.floor((px - renderer.gridOffsetX) / renderer.cellSize);
+    const gy = Math.floor((py - renderer.gridOffsetY) / (renderer.cellSize * 1.5));
+    return { gx, gy, px, py };
+  }
 
   onDestroy(() => {
     if (cleanup) cleanup();
