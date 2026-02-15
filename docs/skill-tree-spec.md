@@ -82,4 +82,35 @@ Stats: bonusDamage, critChance, bonusDefense, damageReduction, maxHP, lifesteal,
 
 ## Iterations
 
-(To be filled by the AI agent)
+## Iteration 1: The Mutation Model
+
+### Theme
+Skills are living entities that evolve based on investment patterns. Each skill has a "DNA" of attributes (blood, ichor, bile, phlegm). Invest in enough blood skills and they mutate into a Vampire strain - gaining lifesteal and cold abilities. Keep investing and they evolve again into something unprecedented.
+
+### Three Key Ideas
+1. **Mutation Strains**: Each skill belongs to a strain. At thresholds (5, 15, 30, 50, 100 total strain points), the strain mutates into a new form with completely different child skills. Blood → Vampire → Nosferatu → Leviathan. Player never sees what's next until they reach it.
+
+2. **Resonance Cascade**: Pairs of strains create resonance. Blood (attack) + Bile (magic) = Hemomancy (blood magic). Resonance unlocks at strain level 3+ in both. Multiple resonances stack multiplicatively. Player discovers new resonances by exploring strain combinations.
+
+3. **The Hollow**: Some skills are "void" skills - they exist as absence. Investing in opposite strains (Blood vs Phlegm) creates void space. At critical mass, void skills manifest - these are the most powerful but only reachable through conflict between your strains.
+
+### How it feels to play
+You start with basic Attack/Defense/Intelligence. First dungeon run you dump everything into Attack. At 5 Attack points, your strain mutates: "Blood Knight" - now every attack heals you. Your next 10 points feel like a superpower unlock. By run 10, you're dual-stacking Blood + Bile and accidentally discover Hemomancy - your attacks now burn enemies. You scream to your friend "holy shit, there's BLOOD MAGIC?" This is the moment.
+
+### Score
+- R1 Endless Scaling: 90 - Each mutation unlocks NEW skills, not just +5% bonuses. Strains go infinite.
+- R2 Number Feel: 95 - Mutations at 5/15/30/50/100 are VISIBLE power spikes. Each feels like a new game layer.
+- R3 Discovery Depth: 100 - Hidden mutations, hidden resonances, void skills. Player finds things developers didn't plan.
+- R4 Build Diversity: 90 - 4 strains × 5 mutations × resonance combinations × void unlock = 50+ viable builds.
+- R5 Integration: 80 - Strains modify combat directly. Equipment can boost strain affinity. Dungeon enemies have strain weaknesses. Town shops stock strain-specific items.
+- R6 Implementability: 85 - Pure functions. Strain is just a number. Mutation is a lookup table. Resonance is a pair check. Data-driven.
+
+Total: 90
+
+### Weaknesses
+- Player might feel "locked in" after mutation - need a respec or mutation reversal mechanic
+- Too many hidden things could feel arbitrary - need clear UI hints about what's mutating
+- Balancing mutations vs resonances vs void could be complex
+
+### Next Focus
+Add the architecture: strain data structures, mutation thresholds, resonance pairing rules, and void unlock formula. Show concrete numbers.
