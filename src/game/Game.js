@@ -3,6 +3,7 @@ import { generateDungeon } from '../lib/index.js';
 import { resolveCombat, collectTreasure } from '../lib/index.js';
 import { decideAction } from '../lib/index.js';
 import { CELL_FLAGS } from '../renderer/Renderer.js';
+import { ECHO_TYPES, createEchoState, incrementEcho, getEchoBonuses, clearNewAffinityFlag } from '../lib/echoes.js';
 
 /**
  * Main Game Logic
@@ -15,6 +16,7 @@ export class Game {
       phase: 'dungeon', // 'dungeon' | 'summary' | 'town'
       dungeon: null,
       player: createPlayer(),
+      echoes: createEchoState(),
       runStats: {
         enemiesKilled: 0,
         treasureFound: 0,
@@ -33,6 +35,9 @@ export class Game {
   }
 
   startDungeonRun() {
+    // Check for echo bonuses for run start
+    const echoBonuses = getEchoBonuses(this.state.echoes);
+    
     this.state.phase = 'dungeon';
     this.state.dungeon = generateDungeon({
       width: 20,
@@ -40,8 +45,19 @@ export class Game {
       roomCount: 5,
       playerLevel: this.state.player.level
     });
+    
+    // Apply echo bonuses to player
+    let baseMaxHp = this.state.player.maxHp;
+    let baseHp = this.state.player.hp;
+    
+    // Start HP multiplier (e.g., Revenant)
+    const hpMultiplier = echoBonuses.startHpMultiplier;
+    const bonusMaxHp = echoBonuses.maxHpBonus;
+    
     this.state.player = {
       ...this.state.player,
+      hp: Math.floor(baseHp * hpMultiplier) + bonusMaxHp,
+      maxHp: Math.floor(baseMaxHp * hpMultiplier) + bonusMaxHp,
       stamina: this.state.player.maxStamina,
       x: 1,
       y: 1
@@ -53,7 +69,18 @@ export class Game {
       damageDealt: 0,
       damageTaken: 0
     };
+    this.state.echoes = clearNewAffinityFlag(this.state.echoes);
     this.log("Entered the dungeon...");
+    
+    // Check for new affinity unlocks to display
+    if (this.state.echoes.newAffinityThisRun) {
+      const { getAffinityInfo } = require('../lib/echoes.js');
+      const affinities = getAffinityInfo(this.state.echoes);
+      const latest = affinities[affinities.length - 1];
+      if (latest) {
+        this.log(`✨ AFFINITY UNLOCKED: ${latest.label} - ${latest.description}`);
+      }
+    }
   }
 
   gameLoop() {
@@ -117,6 +144,22 @@ export class Game {
         cell.explored = true;
         this.state.runStats.stepsTaken++;
         
+        // Track EXPLORE echo every 10 steps
+        if (this.state.runStats.stepsTaken % 10 === 0) {
+          this.state.echoes = incrementEcho(this.state.echoes, ECHO_TYPES.EXPLORE);
+          
+          // Check for new affinity
+          if (this.state.echoes.newAffinityThisRun) {
+            const { getAffinityInfo } = require('../lib/echoes.js');
+            const affinities = getAffinityInfo(this.state.echoes);
+            const latest = affinities[affinities.length - 1];
+            if (latest) {
+              this.log(`✨ AFFINITY UNLOCKED: ${latest.label} - ${latest.description}`);
+            }
+            this.state.echoes = clearNewAffinityFlag(this.state.echoes);
+          }
+        }
+        
         // Check for treasure
         if (cell.contents && cell.contents.type === 'treasure') {
           this.handleTreasure(nx, ny, cell.contents);
@@ -144,12 +187,42 @@ export class Game {
     } else {
       // Enemy killed!
       this.state.runStats.enemiesKilled++;
-      this.state.runStats.gold = (this.state.runStats.gold || 0) + result.loot.gold;
+      
+      // Apply echo bonuses
+      const echoBonuses = getEchoBonuses(this.state.echoes);
+      let goldGained = result.loot.gold;
+      let xpGained = result.loot.xp;
+      
+      // Gold per kill (e.g., Treasure Hunter combo)
+      if (echoBonuses.goldPerKill > 0) {
+        goldGained += echoBonuses.goldPerKill;
+      }
+      
+      // Gold bonus from echoes
+      if (echoBonuses.goldBonus > 0) {
+        goldGained = Math.floor(goldGained * (1 + echoBonuses.goldBonus));
+      }
+      
+      this.state.runStats.gold = (this.state.runStats.gold || 0) + goldGained;
       this.state.dungeon.grid[enemy.y][enemy.x].contents = null;
-      this.log(`Killed ${enemy.symbol}! +${result.loot.gold} gold, +${result.loot.xp} XP`);
+      this.log(`Killed ${enemy.symbol}! +${goldGained} gold, +${xpGained} XP`);
+      
+      // Track KILL echo
+      this.state.echoes = incrementEcho(this.state.echoes, ECHO_TYPES.KILL);
+      
+      // Check for new affinity
+      if (this.state.echoes.newAffinityThisRun) {
+        const { getAffinityInfo } = require('../lib/echoes.js');
+        const affinities = getAffinityInfo(this.state.echoes);
+        const latest = affinities[affinities.length - 1];
+        if (latest) {
+          this.log(`✨ AFFINITY UNLOCKED: ${latest.label} - ${latest.description}`);
+        }
+        this.state.echoes = clearNewAffinityFlag(this.state.echoes);
+      }
       
       // Update player with loot
-      this.state.player = addXp(addGold(player, result.loot.gold), result.loot.xp);
+      this.state.player = addXp(addGold(player, goldGained), xpGained);
     }
     
     // Handle counter-attack if enemy survived
@@ -167,7 +240,9 @@ export class Game {
     
     // Check if player died
     if (this.state.player.hp <= 0) {
-      this.log("You were defeated! Escaping...");
+      // Track VOID echo on death
+      this.state.echoes = incrementEcho(this.state.echoes, ECHO_TYPES.VOID);
+      this.log("You were defeated! Gained Void echo...");
       this.endDungeonRun();
     }
   }
@@ -175,11 +250,40 @@ export class Game {
   handleTreasure(x, y, treasure) {
     const loot = collectTreasure(treasure);
     
+    // Apply echo bonuses
+    const echoBonuses = getEchoBonuses(this.state.echoes);
+    let goldGained = loot.gold;
+    let xpGained = loot.xp;
+    
+    // Treasure gold multiplier (e.g., Lucky Explorer combo)
+    if (echoBonuses.treasureGoldMultiplier > 1.0) {
+      goldGained = Math.floor(goldGained * echoBonuses.treasureGoldMultiplier);
+    }
+    
+    // Gold bonus from echoes
+    if (echoBonuses.goldBonus > 0) {
+      goldGained = Math.floor(goldGained * (1 + echoBonuses.goldBonus));
+    }
+    
     // Update player with treasure
-    this.state.player = addXp(addGold(this.state.player, loot.gold), loot.xp);
+    this.state.player = addXp(addGold(this.state.player, goldGained), xpGained);
     this.state.runStats.treasureFound++;
-    this.state.runStats.gold = (this.state.runStats.gold || 0) + loot.gold;
-    this.log(`Found treasure! +${loot.gold} gold, +${loot.xp} XP`);
+    this.state.runStats.gold = (this.state.runStats.gold || 0) + goldGained;
+    this.log(`Found treasure! +${goldGained} gold, +${xpGained} XP`);
+    
+    // Track TREASURE echo
+    this.state.echoes = incrementEcho(this.state.echoes, ECHO_TYPES.TREASURE);
+    
+    // Check for new affinity
+    if (this.state.echoes.newAffinityThisRun) {
+      const { getAffinityInfo } = require('../lib/echoes.js');
+      const affinities = getAffinityInfo(this.state.echoes);
+      const latest = affinities[affinities.length - 1];
+      if (latest) {
+        this.log(`✨ AFFINITY UNLOCKED: ${latest.label} - ${latest.description}`);
+      }
+      this.state.echoes = clearNewAffinityFlag(this.state.echoes);
+    }
   }
 
   endDungeonRun() {
@@ -265,6 +369,8 @@ export class Game {
 
   renderTown() {
     const player = this.state.player;
+    const echoes = this.state.echoes;
+    const { getAffinityInfo, getNextAffinityHint } = require('../lib/echoes.js');
     
     this.renderString(2, 2, '=== THE TOWN ===', '#00ffff');
     this.renderString(2, 4, 'Welcome, ' + player.name + ' the Level ' + player.level + ' Hero!', '#ffffff');
@@ -273,9 +379,39 @@ export class Game {
     this.renderString(2, 8, 'Attack: ' + player.attack, '#ff6666');
     this.renderString(2, 9, 'Defense: ' + player.defense, '#66ff66');
     this.renderString(2, 10, 'Intelligence: ' + player.intelligence, '#6666ff');
-    this.renderString(2, 12, '[T] Train Intelligence (+1, costs 50g)', '#888888');
-    this.renderString(2, 13, '[R] Return to Dungeon', '#888888');
-    this.renderString(2, 14, '[Q] Quit', '#888888');
+    
+    // Display Echoes
+    let echoY = 12;
+    this.renderString(2, echoY, '=== ECHOES ===', '#aa88ff');
+    echoY++;
+    this.renderString(2, echoY++, `Kill: ${echoes.kill}`, '#ff6666');
+    this.renderString(2, echoY++, `Treasure: ${echoes.treasure}`, '#ffdd00');
+    this.renderString(2, echoY++, `Explore: ${echoes.explore}`, '#00aaff');
+    this.renderString(2, echoY++, `Survive: ${echoes.survive}`, '#66ff66');
+    if (echoes.void > 0) {
+      this.renderString(2, echoY++, `Void: ${echoes.void}`, '#8800ff');
+    }
+    
+    // Display unlocked affinities
+    const affinities = getAffinityInfo(echoes);
+    if (affinities.length > 0) {
+      echoY++;
+      this.renderString(2, echoY++, '=== AFFINITIES ===', '#aa88ff');
+      for (const affinity of affinities) {
+        this.renderString(2, echoY++, `* ${affinity.label}`, '#ffffff');
+      }
+    }
+    
+    // Show hint for next affinity
+    const hint = getNextAffinityHint(echoes);
+    if (hint) {
+      echoY++;
+      this.renderString(2, echoY++, `Hint: ${hint.label} soon...`, '#888888');
+    }
+    
+    echoY++;
+    this.renderString(2, echoY++, '[R] Return to Dungeon', '#888888');
+    this.renderString(2, echoY++, '[Q] Quit', '#888888');
   }
 
   renderHUD() {
