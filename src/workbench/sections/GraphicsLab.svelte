@@ -10,6 +10,16 @@
 
   let config = { cellSize: 20, animSpeed: 1.0, visionRadius: 10 };
 
+  // ── Tween State for smooth player movement ──
+  const TWEEN_DURATION = 0.25; // seconds per cell transition
+  let pathIndex = 0;
+  let tweenStart = 0;
+  let fromX, fromY, toX, toY;
+
+  function easeOutQuint(t) {
+    return 1 - Math.pow(1 - t, 5);
+  }
+
   // ── Dungeon Layout ──
   const GRID_W = 80, GRID_H = 45;
   const dungeonMap = [];
@@ -388,8 +398,9 @@
       renderer.setCell(treasure.x, treasure.y, '$', '#ffdd00', '#1a1a2e', 0.0, CELL_FLAGS.VISIBLE | CELL_FLAGS.HIGHLIGHTED, 1.0);
     }
 
-    // Player at nearest grid cell (camera offset handles smooth visual movement)
-    renderer.setCell(Math.floor(px), Math.floor(py), '@', '#00ff88', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, 1.0);
+    // Player rendered at nearest cell to eased position
+    // The camera tween creates the visual slide effect
+    renderer.setCell(Math.round(px), Math.round(py), '@', '#00ff88', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, 1.0);
   }
 
   onMount(async () => {
@@ -401,11 +412,17 @@
       let time = 0;
       let lastFrame = 0;
 
+      // Initialize tween state
+      fromX = toX = path[0].x;
+      fromY = toY = path[0].y;
+      tweenStart = 0;
+
       const loop = (now) => {
         if (!running) return;
 
         if (lastFrame === 0) {
           lastFrame = now;
+          tweenStart = now / 1000;
           requestAnimationFrame(loop);
           return;
         }
@@ -414,17 +431,28 @@
         lastFrame = now;
         time += dt * config.animSpeed;
 
-        const moveSpeed = 1.5; // Slower for smoother visibility
-        const t = ((time * moveSpeed) % path.length + path.length) % path.length;
-        const idx = Math.floor(t);
-        const frac = t - idx;
-        const curr = path[idx];
-        const next = path[(idx + 1) % path.length];
+        // Discrete tween movement
+        const effectiveDuration = TWEEN_DURATION / config.animSpeed;
+        const tweenElapsed = time - tweenStart;
+        let tweenT = Math.min(tweenElapsed / effectiveDuration, 1.0);
+        const easedT = easeOutQuint(tweenT);
 
-        const px = curr.x + (next.x - curr.x) * frac;
-        const py = curr.y + (next.y - curr.y) * frac;
+        if (tweenT >= 1.0) {
+          // Move to next path point
+          fromX = toX;
+          fromY = toY;
+          pathIndex = (pathIndex + 1) % path.length;
+          toX = path[pathIndex].x;
+          toY = path[pathIndex].y;
+          tweenStart = time;
+          tweenT = 0;
+        }
 
-        // Smooth camera: offset the grid by the fractional part of player position
+        // Interpolated position with easing
+        const px = fromX + (toX - fromX) * easedT;
+        const py = fromY + (toY - fromY) * easedT;
+
+        // Camera centers on eased position for smooth world slide
         const dpr = window.devicePixelRatio || 1;
         const screenCenterX = (renderer.canvas.width / dpr) / 2;
         const screenCenterY = (renderer.canvas.height / dpr) / 2;
