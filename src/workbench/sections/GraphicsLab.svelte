@@ -597,12 +597,12 @@
 
     // Base colors for tile types [r, g, b]
     const BASE_WALL_BG  = [42, 42, 58];   // #2a2a3a
-    const BASE_WALL_FG  = [85, 85, 102];  // #555566
+    const BASE_WALL_FG  = [58, 58, 76];   // #3a3a4c — closer to wall bg for subtle texture
     const BASE_ROOM_BG  = [26, 26, 46];   // #1a1a2e
     const BASE_CORR_BG  = [20, 20, 40];   // #141428
 
     // Explored-only target colors [r, g, b]
-    const EXPLORED_WALL_FG = [51, 51, 68];   // #333344
+    const EXPLORED_WALL_FG = [36, 36, 52];   // #242434 — subtle against explored wall bg
     const EXPLORED_WALL_BG = [26, 26, 40];   // #1a1a28
     const EXPLORED_ROOM_BG = [13, 13, 26];   // #0d0d1a
     const EXPLORED_CORR_BG = [10, 10, 20];   // #0a0a14
@@ -679,9 +679,9 @@
 
         // Fg: walls get tinted by light when visible, lerp to explored fg
         if (tile === 1) {
-          const litFgR = Math.min(255, Math.floor(baseFg[0] + lr * 100));
-          const litFgG = Math.min(255, Math.floor(baseFg[1] + lg * 70));
-          const litFgB = Math.min(255, Math.floor(baseFg[2] + lb * 30));
+          const litFgR = Math.min(255, Math.floor(baseFg[0] + lr * 50));
+          const litFgG = Math.min(255, Math.floor(baseFg[1] + lg * 35));
+          const litFgB = Math.min(255, Math.floor(baseFg[2] + lb * 15));
           const fR = Math.floor(expFg[0] + (litFgR - expFg[0]) * vis);
           const fG = Math.floor(expFg[1] + (litFgG - expFg[1]) * vis);
           const fB = Math.floor(expFg[2] + (litFgB - expFg[2]) * vis);

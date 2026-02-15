@@ -281,12 +281,15 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
       bgColor = mix(bgColor, shadowTint, shadowFade * 0.7 * vis);
     }
 
-    // Foreground: walls always show glyph, brightness scales with vis
-    let fgBrightness = select(vis, max(vis, 0.25), input.depth > 0.5);
+    // Foreground: walls show glyph subtly blended into bg, not stark
+    // Non-interactive glyphs (#) stay close to their bg color
+    let isWall = select(0.0, 1.0, input.depth > 0.5);
+    // Walls: fg closer to bg (0.4 blend), floors: normal vis-based
+    let fgBrightness = select(vis, mix(0.15, 0.5, vis), isWall > 0.5);
     let fgColor = input.fg.rgb * fgBrightness;
 
-    // Mix foreground glyph over background
-    let glyphStrength = select(sdfAlpha * vis, sdfAlpha * max(vis, 0.4), input.depth > 0.5);
+    // Glyph blending: walls are subtle texture, not bold marks
+    let glyphStrength = select(sdfAlpha * vis, sdfAlpha * mix(0.3, 0.6, vis), isWall > 0.5);
     var result = mix(bgColor, fgColor, glyphStrength);
 
     // Depth fog: walls are slightly darker
