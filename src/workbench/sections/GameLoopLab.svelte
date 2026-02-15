@@ -962,15 +962,15 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
-    color: var(--text-primary);
+    color: var(--fg);
     cursor: pointer;
-    font-size: var(--text-sm);
+    font-size: 11px;
     transition: all 0.2s;
   }
 
   .btn-action:hover {
-    background: var(--bg-hover);
-    border-color: var(--accent-cyan);
+    background: var(--bg-accent);
+    border-color: var(--accent);
   }
 
   .btn-action.btn-heal:hover {
