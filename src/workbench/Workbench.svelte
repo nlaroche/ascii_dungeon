@@ -12,10 +12,12 @@
   import ItemLab from './sections/ItemLab.svelte';
   import JuiceLab from './sections/JuiceLab.svelte';
   import PaletteLab from './sections/PaletteLab.svelte';
+  import GameLoopLab from './sections/GameLoopLab.svelte';
 
-  let activeSection = 'dungeon';
+  let activeSection = 'gameloop';
 
   const sections = [
+    { id: 'gameloop', label: 'Game Loop' },
     { id: 'dungeon', label: 'Dungeon' },
     { id: 'combat', label: 'Combat' },
     { id: 'player', label: 'Player' },
@@ -49,7 +51,9 @@
   <main class="content">
     {#key activeSection}
       <div class="section-wrapper" in:fade={{ duration: 150, delay: 50 }}>
-        {#if activeSection === 'dungeon'}
+        {#if activeSection === 'gameloop'}
+          <GameLoopLab />
+        {:else if activeSection === 'dungeon'}
           <DungeonGen />
         {:else if activeSection === 'combat'}
           <CombatSim />
