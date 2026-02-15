@@ -114,3 +114,92 @@ ASCII dungeon roguelike. Player has attack/defense/hp/stamina/gold/level. Combat
   8. Integration: how getSkillBonuses() output maps to combat.js, player.js, dungeon.js
 - Keep to ~150 lines max. Show concrete JavaScript data structures.
 
+## Iteration 4: Fractal Skill Architecture
+
+```javascript
+// Growth formula: bonus = baseValue * (level ^ 1.5)
+// Point 1:    5 * 1^1.5     = 5
+// Point 10:   5 * 10^1.5    = 158
+// Point 50:   5 * 50^1.5    = 1,768
+// Point 100:  5 * 100^1.5   = 5,000
+// Point 1000: 5 * 1000^1.5  = 158,113
+
+const SKILL_TREE_SCHEMA = {
+  attack: {
+    base: { stat: 'attack', baseValue: 5 },
+    tier2: [
+      { id: 'cleave', stat: 'aoeRadius', baseValue: 1 },
+      { id: 'rush', stat: 'moveBonus', baseValue: 2 }
+    ],
+    tier3: [
+      { id: 'leap', stat: 'jumpRange', baseValue: 1 },
+      { id: 'whirlwind', stat: 'spinDamage', baseValue: 10 }
+    ],
+    tier4: [
+      { id: 'berserk', stat: 'critMultiplier', baseValue: 5 }
+    ]
+  },
+  defense: {
+    base: { stat: 'defense', baseValue: 5 },
+    tier2: [
+      { id: 'dodge', stat: 'dodgeFlat', baseValue: 3 },
+      { id: 'block', stat: 'blockFlat', baseValue: 5 }
+    ],
+    tier3: [
+      { id: 'bodyblock', stat: 'enemySlow', baseValue: 10 },
+      { id: 'thorns', stat: 'reflectDamage', baseValue: 5 }
+    ],
+    tier4: [
+      { id: 'fortress', stat: 'auraDefense', baseValue: 8 }
+    ]
+  },
+  exploration: {
+    base: { stat: 'staminaBonus', baseValue: 5 },
+    tier2: [
+      { id: 'sense', stat: 'secretDetect', baseValue: 1 },
+      { id: 'mapping', stat: 'revealRadius', baseValue: 2 }
+    ],
+    tier3: [
+      { id: 'shortcut', stat: 'doorCreate', baseValue: 1 },
+      { id: 'teleport', stat: 'blinkRange', baseValue: 2 }
+    ],
+    tier4: [
+      { id: 'cartographer', stat: 'autoReveal', baseValue: 5 }
+    ]
+  },
+  fortune: {
+    base: { stat: 'goldFind', baseValue: 5 },
+    tier2: [
+      { id: 'greed', stat: 'chestGold', baseValue: 10 },
+      { id: 'luck', stat: 'dropBonus', baseValue: 5 }
+    ],
+    tier3: [
+      { id: 'midas', stat: 'sellBonus', baseValue: 15 },
+      { id: 'hoarder', stat: 'carryBonus', baseValue: 20 }
+    ],
+    tier4: [
+      { id: 'tycoon', stat: 'shopDiscount', baseValue: 25 }
+    ]
+  }
+};
+
+// Tier unlock thresholds (base skill points needed)
+const TIER_THRESHOLDS = { 2: 10, 3: 50, 4: 200 };
+
+// API:
+// createSkillTree() → { skills: { attack: { points: 0, subSkills: {} }, ... } }
+// allocatePoint(tree, 'attack') → new tree with attack.points++, auto tier unlock
+// allocatePoint(tree, 'attack.cleave') → new tree with subSkills.cleave++
+// getSkillBonuses(tree) → { attack: 158, defense: 0, aoeRadius: 5, ... }
+// getVisibleSkills(tree) → only shows unlocked tiers (hidden ones omitted)
+// calcBonus(baseValue, points) → Math.floor(baseValue * Math.pow(points, 1.5))
+```
+
+**Skill point source**: 1 per player level + 1 per dungeon floor cleared.
+
+**Integration map**:
+- `combat.js`: use `bonuses.attack` to modify damage, `bonuses.defense` for reduction, `bonuses.critMultiplier` for crits, `bonuses.dodgeFlat`/`bonuses.blockFlat` for avoidance
+- `player.js`: `bonuses.staminaBonus` added to maxStamina, bonuses merged in `addXp` flow
+- `dungeon.js`: `bonuses.secretDetect` affects hidden room generation, `bonuses.revealRadius` for FOV, `bonuses.doorCreate` for shortcut passages
+- `items.js`: `bonuses.goldFind`/`bonuses.dropBonus` multiply loot rolls, `bonuses.chestGold` scales treasure
+
