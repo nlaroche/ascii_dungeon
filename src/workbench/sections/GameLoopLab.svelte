@@ -300,7 +300,8 @@
         {:else if phase === 'dungeon'}
           <button class="btn-primary" on:click={simulateFloor}>Simulate Floor</button>
           <div class="dropdown">
-            <select bind:value={endReason}>
+            <label for="endReason">End Reason</label>
+            <select id="endReason" bind:value={endReason}>
               {#each END_REASONS as reason}
                 <option value={reason}>{reason}</option>
               {/each}
@@ -868,6 +869,12 @@
     border-radius: var(--radius);
     color: var(--fg);
     font-size: 11px;
+  }
+
+  .dropdown label {
+    font-size: 10px;
+    color: var(--fg-dim);
+    margin-bottom: var(--space-xs);
   }
 
   .params {
