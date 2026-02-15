@@ -1,0 +1,38 @@
+
+#### How It Affects Multiple Systems
+
+**Combat:**
+- Attack and defense scale with resonance/phase combinations
+- Dissonant items (-50%) can actually weaken you
+- High intelligence from harmonic combos boosts spell power
+
+**FOV/Vision:**
+- Items with FOV bonus stack (highest wins, multiplied by harmony)
+- Harmonic combos create "vision radius" - see more dungeon
+
+**Lighting:**
+- Light radius from items combines additively when harmonic
+- Dissonant combos create "darkness" - reduced light
+
+**Movement:**
+- Movement cost modifier: harmonic = faster movement through dungeon
+- Dissonant = slower, stamina drains faster
+
+**Dungeon Generation (Advanced):**
+- Player's "resonance signature" (sum of all item resonances) influences room generation
+- Certain "notable" rooms only spawn for specific resonance signatures
+- Creates replayability - different builds see different dungeons
+
+**Economy:**
+- High-resonance items are inherently more valuable
+- Trading - NPCs may only trade with players whose resonance matches theirs
+- "Dissonant" items (hard to use) are cheaper but risky
+
+**Enemy Behavior:**
+- Enemies have their own resonance/phase
+- Matching resonance with enemy = they notice you more (aggro)
+- Opposite phase = you blend in, sneak bonus
+- Creates tactical choice: hide or fight?
+
+#### Example Items
+
