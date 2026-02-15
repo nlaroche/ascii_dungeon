@@ -8,7 +8,7 @@
   let error = null;
   let cleanup = null;
 
-  let config = { cellSize: 20, animSpeed: 1.0, visionRadius: 10 };
+  let config = { cellSize: 20, animSpeed: 1.0, visionRadius: 10, showDust: true, torchIntensity: 1.0, parallax: 0.3 };
 
   // ── Tween State for smooth player movement ──
   const TWEEN_DURATION = 0.25; // seconds per cell transition
@@ -122,6 +122,19 @@
     // Corridors to Room 6
     { x: 48, y: 6 }, { x: 50, y: 30 },
   ];
+
+  // Generate dust motes once
+  const dustMotes = [];
+  for (let i = 0; i < 20; i++) {
+    dustMotes.push({
+      x: Math.random() * GRID_W,
+      y: Math.random() * GRID_H,
+      char: Math.random() > 0.5 ? '.' : ',',
+      speedX: (Math.random() - 0.5) * 0.3,
+      speedY: (Math.random() - 0.5) * 0.15,
+      phase: Math.random() * Math.PI * 2
+    });
+  }
 
   const enemies = [
     { x: 8, y: 5, char: 'G', fg: '#cc4400' },
@@ -323,6 +336,28 @@
 
         if (tile === 1) { // wall
           char = '#'; fg = '#555566'; bg = '#2a2a3a'; depth = 1.0;
+          
+          // Wall face shading - brighten toward nearest torch
+          if (inVision) {
+            let maxAdjacentLight = 0;
+            for (let dy = -1; dy <= 1; dy++) {
+              for (let dx = -1; dx <= 1; dx++) {
+                const ny = y + dy, nx = x + dx;
+                if (ny >= 0 && ny < GRID_H && nx >= 0 && nx < GRID_W) {
+                  if (dungeonMap[ny][nx] >= 2) { // floor tile
+                    const floorLight = computeLight(nx, ny, time);
+                    if (floorLight > maxAdjacentLight) maxAdjacentLight = floorLight;
+                  }
+                }
+              }
+            }
+            if (maxAdjacentLight > 0.1) {
+              const warmth = maxAdjacentLight * 0.3;
+              const rr = Math.min(255, parseInt(fg.slice(1,3), 16) + Math.floor(warmth * 80));
+              const gg = Math.min(255, parseInt(fg.slice(3,5), 16) + Math.floor(warmth * 50));
+              fg = '#' + rr.toString(16).padStart(2, '0') + gg.toString(16).padStart(2, '0') + fg.slice(5);
+            }
+          }
         } else if (tile === 2) { // room floor
           bg = '#1a1a2e';
         } else if (tile === 3) { // corridor
@@ -365,19 +400,37 @@
       const g = Math.floor(102 + flicker * 68).toString(16).padStart(2, '0');
       renderer.setCell(torch.x, torch.y, '!', '#ff' + g + '00', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE | CELL_FLAGS.HIGHLIGHTED, 1.0);
       
-      // Torch particles
-      for (let p = 0; p < 3; p++) {
-        const phase = time * 2 + p * 2.1 + torch.x * 0.7;
-        const sparkY = torch.y - 1 - (phase % 3);
-        const sparkX = torch.x + Math.sin(phase * 1.5) * 0.8;
+      // Enhanced torch particles - sparks, embers, smoke
+      for (let p = 0; p < 6; p++) {
+        const phase = time * 2.5 + p * 1.3 + torch.x * 0.7 + torch.y * 0.3;
+        const sparkLife = phase % 4; // 4-frame lifecycle
+        const sparkY = torch.y - 1 - sparkLife;
+        const sparkX = torch.x + Math.sin(phase * 1.8) * 1.2; // wider scatter
         const rx = Math.round(sparkX), ry = Math.round(sparkY);
+
         if (ry >= 0 && ry < GRID_H && rx >= 0 && rx < GRID_W) {
-          const fade = 1.0 - (phase % 3) / 3;
-          if (fade > 0.1) {
-            const sparkChar = fade > 0.5 ? '*' : '.';
+          const fade = (1.0 - sparkLife / 4) * config.torchIntensity;
+          if (fade > 0.05) {
+            // Color gradient: bright yellow -> orange -> dim red
             const r = 'ff';
-            const gVal = Math.floor(fade * 170).toString(16).padStart(2, '0');
-            renderer.setCell(rx, ry, sparkChar, '#' + r + gVal + '00', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, fade);
+            const gVal = Math.floor(fade * 200).toString(16).padStart(2, '0');
+            const bVal = Math.floor(fade * fade * 40).toString(16).padStart(2, '0');
+            const sparkChar = fade > 0.6 ? '*' : fade > 0.3 ? '+' : '.';
+            renderer.setCell(rx, ry, sparkChar, '#' + r + gVal + bVal, '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, fade * 0.8);
+          }
+        }
+      }
+
+      // Smoke wisps above sparks
+      for (let s = 0; s < 2; s++) {
+        const sPhase = time * 1.2 + s * 3.0 + torch.x;
+        const smokeY = torch.y - 4 - (sPhase % 3);
+        const smokeX = torch.x + Math.sin(sPhase * 0.7) * 1.5;
+        const srx = Math.round(smokeX), sry = Math.round(smokeY);
+        if (sry >= 0 && sry < GRID_H && srx >= 0 && srx < GRID_W) {
+          const sFade = (1.0 - (sPhase % 3) / 3) * config.torchIntensity;
+          if (sFade > 0.1) {
+            renderer.setCell(srx, sry, '~', '#555555', '#1a1a2e', 0.5, CELL_FLAGS.VISIBLE, sFade * 0.3);
           }
         }
       }
@@ -396,6 +449,33 @@
       const key = (treasure.y << 8) | treasure.x;
       if (!fovVisible.has(key)) continue;
       renderer.setCell(treasure.x, treasure.y, '$', '#ffdd00', '#1a1a2e', 0.0, CELL_FLAGS.VISIBLE | CELL_FLAGS.HIGHLIGHTED, 1.0);
+    }
+
+    // Dust motes - floating particles on visible floor tiles
+    if (config.showDust) {
+      for (const mote of dustMotes) {
+        // Gentle sine-wave drift
+        const mx = mote.x + Math.sin(time * 0.5 + mote.phase) * 0.8;
+        const my = mote.y + Math.cos(time * 0.3 + mote.phase) * 0.4;
+        const rx = Math.round(mx) % GRID_W;
+        const ry = Math.round(my) % GRID_H;
+
+        // Only render on visible floor tiles
+        const key = (ry << 8) | rx;
+        if (fovVisible.has(key) && dungeonMap[ry]?.[rx] >= 2) {
+          renderer.setCell(rx, ry, mote.char, '#888866', '#1a1a2e', 0.0, CELL_FLAGS.VISIBLE, 0.15);
+        }
+
+        // Slowly drift
+        mote.x += mote.speedX * 0.016;
+        mote.y += mote.speedY * 0.016;
+
+        // Wrap around
+        if (mote.x < 0) mote.x += GRID_W;
+        if (mote.x >= GRID_W) mote.x -= GRID_W;
+        if (mote.y < 0) mote.y += GRID_H;
+        if (mote.y >= GRID_H) mote.y -= GRID_H;
+      }
     }
 
     // Player rendered with sub-cell offset for smooth movement
@@ -461,6 +541,9 @@
         renderer.cameraOffsetY = screenCenterY - py * config.cellSize * 1.5;
 
         renderer.cellSize = config.cellSize;
+        if (renderer.parallaxStrength !== undefined) {
+          renderer.parallaxStrength = config.parallax;
+        }
         fillDemoScene(time, px, py);
         renderer.render();
 
@@ -510,6 +593,26 @@
       step={1}
       value={config.visionRadius}
       on:change={e => config.visionRadius = e.detail}
+    />
+    <ParamSlider
+      label="Parallax"
+      min={0}
+      max={1.0}
+      step={0.05}
+      value={config.parallax}
+      on:change={e => config.parallax = e.detail}
+    />
+    <label class="checkbox-label">
+      <input type="checkbox" bind:checked={config.showDust} />
+      Dust Motes
+    </label>
+    <ParamSlider
+      label="Torch Intensity"
+      min={0.5}
+      max={2.0}
+      step={0.1}
+      value={config.torchIntensity}
+      on:change={e => config.torchIntensity = e.detail}
     />
   </div>
 
