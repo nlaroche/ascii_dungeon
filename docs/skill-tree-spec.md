@@ -46,5 +46,18 @@ FAIL = Requires engine changes or complex state.
 ## Game Context (brief)
 ASCII dungeon roguelike. Player has attack/defense/hp/stamina/gold/level. Combat is flat attack-defense. Items have "Living Records" (kill/treasure/explore/survive) that level 0-10 and give stat bonuses. Equipment: weapon/armor/amulet. Pure JS functions, Svelte workbench.
 
-## Iterations
+## Iteration 1: Momentum System
+**Core idea**: Skills build "momentum" that compounds over time—the more you use a skill, the stronger it gets. Switching focus decays unused momentum.
+
+**How growth works**: At level 1 (1 pt), skill adds flat bonus to its domain. At level 10, unlocks "chain" effect where kills cascade to nearby actions. At level 100, momentum "overflows" into adjacent skills. At level 1000, player becomes a walking aura passively affecting the world.
+
+**Number examples**: Point 1 gives +5 attack, point 10 gives +50 attack (5 per pt), point 50 gives +250 attack (5 per pt).
+
+**Aha moments**: (1) Stacking momentum in one skill causes "overflow" that unexpectedly boosts related skills you didn't invest in. (2) Momentum decay can be reversed mid-combat by triggering a "breakthrough" at low HP.
+
+**3 different builds**: "Berserker" focuses all momentum into attack for massive single hits but leaves defense vulnerable. "Warden" spreads across defense, creating an aura that damages attackers. "Merchant" converts momentum into gold and item find.
+
+**Systems touched**: Combat (attack/defense), economy (gold gain), dungeon (exploration speed), items (drop rates).
+
+**Weaknesses**: Momentum loss on death, requires constant engagement to maintain, single-focus builds are brittle.
 
