@@ -56,7 +56,7 @@
     on:keydown={(e) => e.key === 'Enter' && handleBackdropClick()}
     role="button"
     tabindex="0"
-    transition:fade={{ duration: 250 }}
+    transition:fade={{ duration: 100 }}
   >
     <div
       class="modal"
@@ -205,12 +205,12 @@
     position: fixed;
     inset: 0;
     z-index: 100;
-    background: rgba(0, 0, 0, 0.65);
+    background: rgba(0, 0, 0, 0.4);
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 20px;
-    animation: modal-backdrop-in 250ms ease;
+    animation: modal-backdrop-in 100ms ease;
   }
 
   .modal {
@@ -222,7 +222,7 @@
     width: 100%;
     max-height: 80vh;
     overflow-y: auto;
-    animation: modal-card-in 300ms ease;
+    animation: modal-card-in 120ms ease;
   }
 
   .modal-header {
