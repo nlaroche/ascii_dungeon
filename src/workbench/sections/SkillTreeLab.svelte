@@ -149,6 +149,8 @@
         bind:this={svgElement}
         class="graph-svg"
         viewBox="{viewBox.x} {viewBox.y} {viewBox.w} {viewBox.h}"
+        role="img"
+        aria-label="Interactive skill tree graph with pan and zoom"
         on:wheel={handleWheel}
         on:mousedown={handleMouseDown}
         on:mousemove={handleMouseMove}
