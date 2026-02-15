@@ -18,6 +18,7 @@ export class Renderer {
     this.tilemap = null;
     this.cameraOffsetX = 0;
     this.cameraOffsetY = 0;
+    this.parallaxStrength = 0.3;
   }
 
   async init() {
@@ -99,6 +100,8 @@ export class Renderer {
   }
 
   render() {
+    this.tilemap.parallaxStrength = this.parallaxStrength;
+
     const dpr = window.devicePixelRatio || 1;
     const commandEncoder = this.device.createCommandEncoder();
     const textureView = this.context.getCurrentTexture().createView();

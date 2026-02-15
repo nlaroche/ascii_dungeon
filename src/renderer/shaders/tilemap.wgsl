@@ -35,6 +35,7 @@ struct VertexOutput {
   @location(2) @interpolate(flat) bg: vec4<f32>,
   @location(3) @interpolate(flat) light: f32,
   @location(4) @interpolate(flat) flags: u32,
+  @location(5) @interpolate(flat) depth: f32,
 };
 
 fn unpackColor(packed: u32) -> vec4<f32> {
@@ -70,7 +71,13 @@ fn vertexMain(
     (gridX + cell.offsetX + localPos.x) * uniforms.cellPixelSize.x,
     (gridY + cell.offsetY + localPos.y) * uniforms.cellPixelSize.y,
   );
-  pixelPos += uniforms.cameraOffset;
+
+  // Parallax: walls (depth=1) shift less than floors (depth=0) when camera pans
+  let parallaxScale = 1.0 - cell.depth * uniforms.parallaxStrength;
+  pixelPos += uniforms.cameraOffset * parallaxScale;
+
+  // Wall height: walls shift upward to create "rising" illusion
+  pixelPos.y -= cell.depth * uniforms.cellPixelSize.y * 0.3;
 
   // NDC
   let ndc = vec2<f32>(
@@ -98,6 +105,7 @@ fn vertexMain(
   output.bg = unpackColor(cell.bg);
   output.light = cell.light;
   output.flags = cell.flags;
+  output.depth = cell.depth;
   return output;
 }
 
@@ -106,7 +114,8 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
   // Minimum ambient so nothing is pure black
   let lit = max(input.light, 0.05);
 
-  let bgColor = vec4<f32>(input.bg.rgb * lit * 0.3, 1.0);
+  let bgLightScale = mix(0.4, 0.2, input.depth);
+  let bgColor = vec4<f32>(input.bg.rgb * lit * bgLightScale, 1.0);
 
   // Sample SDF atlas BEFORE any non-uniform branches (WGSL requirement)
   let sdfValue = textureSample(sdfAtlas, atlasSampler, input.atlasUV).r;
@@ -133,6 +142,10 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
   var result = vec3<f32>(
     mix(bgColor.rgb, fgColor.rgb, alpha),
   );
+
+  // Depth fog: walls are slightly darker, creating visual separation
+  let depthDim = 1.0 - input.depth * 0.12;
+  result *= depthDim;
 
   // Highlighted cells get a subtle additive tint
   if ((input.flags & 4u) != 0u) {

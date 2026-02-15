@@ -219,7 +219,7 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
     v.setFloat32(0, canvasWidth, true);
     v.setFloat32(4, canvasHeight, true);
     v.setFloat32(8, time, true);
-    v.setFloat32(12, 0.5, true);  // parallaxStrength
+    v.setFloat32(12, this.parallaxStrength !== undefined ? this.parallaxStrength : 0.5, true);  // parallaxStrength
     v.setFloat32(16, cellPixelWidth, true);
     v.setFloat32(20, cellPixelHeight, true);
     v.setFloat32(24, gridWidth, true);
@@ -260,6 +260,7 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
     clearGrid,
     upload,
     render,
+    parallaxStrength: 0.5,
   };
 }
 
