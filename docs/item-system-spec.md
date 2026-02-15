@@ -437,15 +437,615 @@ export function getModifiedMovePreference(enemy, dungeon) {
 
 5. **Learning curve**: New players might not understand gravity mechanics without clear UI indicators.
 
+## Iteration 2: Echo Chambers - Making Gravity Visible
+
+### Core Evolution
+
+The key problem with Iteration 1: **gravity was invisible**. Players couldn't see force fields, couldn't understand why movement felt different, couldn't make informed tactical decisions.
+
+Iteration 2 introduces **Echo Chambers**: items don't just create gravity wells, they create **resonant chambers** that:
+1. **Store energy** from attacks/spells that pass through
+2. **Release stored energy** when enemies enter
+3. **Display visible ripples** showing their boundaries
+4. **Allow "tuning"** to amplify or dampen specific effects
+
+This makes gravity **tangible** - players can see, interact with, and exploit the system.
+
+### New Data Structures
+
+```javascript
+// src/lib/items/echoChamber.js
+
+/**
+ * Echo Chamber - items create resonant fields that store and release energy
+ */
+
+export const ECHO_TYPES = {
+  ATTACK: 'attack',    // Stores damage, releases on contact
+  DEFENSE: 'defense',  // Stores blocked damage, releases counter-attacks
+  MOTION: 'motion',    // Stores movement speed, releases speed boosts
+  SIGHT: 'sight'       // Stores FOV reveals, releases vision
+};
+
+/**
+ * Create an echo chamber item
+ */
+export function createEchoChamber(baseItem, floorLevel) {
+  const tier = determineTier(floorLevel);
+  const echoType = selectEchoType();
+  const capacity = getEchoCapacity(tier);
+  const rechargeRate = getRechargeRate(tier);
+  const range = 3 + tier * 2;
+  
+  return {
+    ...baseItem,
+    tier,
+    echoType,
+    echoCapacity: capacity,
+    echoStored: 0,
+    echoRecharge: rechargeRate,
+    echoRange: range,
+    polarity: Math.random() > 0.5 ? 1 : -1, // +1 attract, -1 repel
+    mass: getItemMass(tier),
+    // Visual properties
+    rippleColor: getRippleColor(echoType),
+    ripplePattern: getRipplePattern(echoType)
+  };
+}
+
+/**
+ * Get echo capacity based on tier
+ */
+function getEchoCapacity(tier) {
+  const capacities = {
+    common: 10,
+    uncommon: 25,
+    rare: 50,
+    epic: 100,
+    legendary: 200
+  };
+  return capacities[tier] || 10;
+}
+
+/**
+ * Get recharge rate per turn
+ */
+function getRechargeRate(tier) {
+  const rates = {
+    common: 1,
+    uncommon: 2,
+    rare: 4,
+    epic: 8,
+    legendary: 15
+  };
+  return rates[tier] || 1;
+}
+
+/**
+ * Select random echo type weighted by rarity
+ */
+function selectEchoType() {
+  const roll = Math.random();
+  if (roll < 0.25) return ECHO_TYPES.ATTACK;
+  if (roll < 0.50) return ECHO_TYPES.DEFENSE;
+  if (roll < 0.75) return ECHO_TYPES.MOTION;
+  return ECHO_TYPES.SIGHT;
+}
+
+/**
+ * Get visual ripple color for echo type
+ */
+function getRippleColor(echoType) {
+  const colors = {
+    attack: '#ff4444',    // Red for damage
+    defense: '#4444ff',   // Blue for protection
+    motion: '#44ff44',    // Green for movement
+    sight: '#ffff44'     // Yellow for vision
+  };
+  return colors[echoType] || '#ffffff';
+}
+
+/**
+ * Get ripple pattern type
+ */
+function getRipplePattern(echoType) {
+  const patterns = {
+    attack: 'pulse',
+    defense: 'shield',
+    motion: 'spiral',
+    sight: 'wave'
+  };
+  return patterns[echoType] || 'pulse';
+}
+
+/**
+ * Store energy in echo chamber
+ */
+export function storeEchoEnergy(item, energyAmount) {
+  if (!item.echoCapacity) return 0;
+  
+  const spaceRemaining = item.echoCapacity - (item.echoStored || 0);
+  const toStore = Math.min(energyAmount, spaceRemaining);
+  
+  return {
+    ...item,
+    echoStored: (item.echoStored || 0) + toStore
+  };
+}
+
+/**
+ * Release stored energy from echo chamber
+ */
+export function releaseEchoEnergy(item, triggerType) {
+  if (!item.echoStored || item.echoStored <= 0) return { item, released: 0 };
+  
+  // Can only release if trigger type matches or is compatible
+  const canRelease = checkEchoTrigger(item.echoType, triggerType);
+  if (!canRelease) return { item, released: 0 };
+  
+  const released = item.echoStored;
+  return {
+    ...item,
+    echoStored: 0,
+    lastEchoRelease: {
+      type: triggerType,
+      amount: released,
+      timestamp: Date.now()
+    }
+  };
+}
+
+/**
+ * Check if trigger type can release this echo
+ */
+function checkEchoTrigger(echoType, triggerType) {
+  if (echoType === ECHO_TYPES.ATTACK) {
+    return triggerType === 'enemy_enter' || triggerType === 'projectile_enter';
+  }
+  if (echoType === ECHO_TYPES.DEFENSE) {
+    return triggerType === 'damage_taken';
+  }
+  if (echoType === ECHO_TYPES.MOTION) {
+    return triggerType === 'player_enter' || triggerType === 'player_exit';
+  }
+  if (echoType === ECHO_TYPES.SIGHT) {
+    return triggerType === 'enemy_enter' || triggerType === 'player_enter';
+  }
+  return false;
+}
+
+/**
+ * Recharge echo chamber each turn
+ */
+export function rechargeEcho(item) {
+  if (!item.echoRecharge || !item.echoCapacity) return item;
+  
+  const newStored = Math.min(
+    item.echoCapacity,
+    (item.echoStored || 0) + item.echoRecharge
+  );
+  
+  return { ...item, echoStored: newStored };
+}
+```
+
+```javascript
+// src/lib/items/echoDungeon.js
+
+/**
+ * Place echo chambers in dungeon with visible markers
+ */
+
+export function placeEchoChambersInDungeon(dungeon, items) {
+  // Add echo chamber data to dungeon grid
+  for (const item of items) {
+    if (!item.echoRange) continue;
+    
+    const room = findBestRoom(dungeon.rooms, item);
+    if (!room) continue;
+    
+    const centerX = Math.floor(room.x + room.w / 2);
+    const centerY = Math.floor(room.y + room.h / 2);
+    
+    // Place item at center
+    item.x = centerX;
+    item.y = centerY;
+    
+    // Mark echo zone in grid
+    for (let dy = -item.echoRange; dy <= item.echoRange; dy++) {
+      for (let dx = -item.echoRange; dx <= item.echoRange; dx++) {
+        const tx = centerX + dx;
+        const ty = centerY + dy;
+        
+        if (ty >= 0 && ty < dungeon.height && tx >= 0 && tx < dungeon.width) {
+          const dist = Math.sqrt(dx * dx + dy * dy);
+          if (dist <= item.echoRange) {
+            // Add echo zone to cell
+            dungeon.grid[ty][tx].echoZone = {
+              itemId: item.id,
+              distance: dist,
+              polarity: item.polarity,
+              echoType: item.echoType,
+              // Visual properties for rendering
+              rippleColor: item.rippleColor,
+              ripplePattern: item.ripplePattern,
+              isCenter: dist < 1
+            };
+          }
+        }
+      }
+    }
+  }
+  
+  return dungeon;
+}
+
+/**
+ * Find best room for item based on echo type
+ */
+function findBestRoom(rooms, item) {
+  if (item.echoType === ECHO_TYPES.SIGHT) {
+    // Sight chambers go in rooms with good overview
+    return rooms.reduce((best, room) => 
+      (!best || room.w * room.h > best.w * best.h) ? room : best
+    , null);
+  }
+  
+  if (item.echoType === ECHO_TYPES.ATTACK) {
+    // Attack chambers go in high-traffic rooms (not first)
+    return rooms[Math.min(1, rooms.length - 1)];
+  }
+  
+  // Default: spread throughout dungeon
+  const index = Math.floor(Math.random() * rooms.length);
+  return rooms[index];
+}
+```
+
+```javascript
+// src/lib/items/echoMovement.js
+
+/**
+ * Echo chambers affect movement through the dungeon
+ */
+
+export function modifyMovementWithEcho(player, dungeon, dx, dy) {
+  const px = player.x;
+  const py = player.y;
+  
+  let totalMotionEcho = 0;
+  let gravityAssist = 0;
+  
+  // Check each cell in echo range
+  for (let dy = -10; dy <= 10; dy++) {
+    for (let dx = -10; dx <= 10; dx++) {
+      const tx = px + dx;
+      const ty = py + dy;
+      
+      if (ty >= 0 && ty < dungeon.height && tx >= 0 && tx < dungeon.width) {
+        const cell = dungeon.grid[ty][tx];
+        if (cell.echoZone) {
+          const zone = cell.echoZone;
+          
+          // Motion echo stores movement through it
+          if (zone.echoType === 'motion') {
+            const distance = Math.sqrt(dx * dx + dy * dy);
+            const falloff = 1 - (distance / zone.echoRange);
+            totalMotionEcho += falloff * zone.polarity;
+          }
+          
+          // Gravity affects movement cost
+          if (zone.polarity === 1) {
+            // Attract - helps movement toward center
+            const dotProduct = dx * (-dx) + dy * (-dy); // Toward center
+            gravityAssist += Math.abs(dotProduct) * 0.1;
+          } else {
+            // Repel - hinders movement toward center
+            const dotProduct = dx * dx + dy * dy;
+            gravityAssist -= Math.abs(dotProduct) * 0.05;
+          }
+        }
+      }
+    }
+  }
+  
+  return {
+    staminaCost: Math.max(0.5, player.staminaCost - totalMotionEcho * 0.5),
+    speedBonus: Math.max(0, 1 + gravityAssist)
+  };
+}
+
+/**
+ * Trigger motion echo when entering/leaving zone
+ */
+export function triggerMotionEcho(player, dungeon, entering) {
+  const px = player.x;
+  const py = player.y;
+  
+  if (py < 0 || py >= dungeon.height || px < 0 || px >= dungeon.width) return player;
+  
+  const cell = dungeon.grid[py][px];
+  if (!cell.echoZone) return player;
+  
+  const zone = cell.echoZone;
+  if (zone.echoType !== 'motion') return player;
+  
+  // Find the item this zone belongs to
+  const item = findEchoItem(dungeon, zone.itemId);
+  if (!item) return player;
+  
+  const triggerType = entering ? 'player_enter' : 'player_exit';
+  const { item: updatedItem, released } = releaseEchoEnergy(item, triggerType);
+  
+  if (released > 0) {
+    // Apply speed boost
+    return {
+      ...player,
+      speedBoost: (player.speedBoost || 0) + released,
+      echoItem: updatedItem
+    };
+  }
+  
+  return player;
+}
+```
+
+```javascript
+// src/lib/items/echoCombat.js
+
+/**
+ * Echo chambers interact with combat
+ */
+
+export function modifyAttackWithEcho(attacker, defender, baseDamage, dungeon) {
+  const cell = dungeon.grid[defender.y]?.[defender.x];
+  if (!cell?.echoZone) return baseDamage;
+  
+  const zone = cell.echoZone;
+  
+  // Attack echo amplifies damage to enemies in zone
+  if (zone.echoType === 'attack') {
+    const falloff = 1 - (zone.distance / zone.echoRange);
+    const amplification = 1 + (falloff * zone.polarity * 0.5);
+    return baseDamage * amplification;
+  }
+  
+  // Defense echo reduces damage taken
+  if (zone.echoType === 'defense') {
+    const falloff = 1 - (zone.distance / zone.echoRange);
+    const reduction = falloff * zone.polarity * 0.3;
+    return baseDamage * Math.max(0.1, 1 - reduction);
+  }
+  
+  return baseDamage;
+}
+
+/**
+ * Echo chambers release energy when enemies enter
+ */
+export function triggerEnemyEcho(enemy, dungeon) {
+  const cell = dungeon.grid[enemy.y]?.[enemy.x];
+  if (!cell?.echoZone) return { damage: 0, effects: [] };
+  
+  const zone = cell.echoZone;
+  const item = findEchoItem(dungeon, zone.itemId);
+  if (!item || !item.echoStored) return { damage: 0, effects: [] };
+  
+  const { item: updatedItem, released } = releaseEchoEnergy(item, 'enemy_enter');
+  
+  // Echo releases as damage or other effects
+  if (zone.echoType === 'attack') {
+    return {
+      damage: released,
+      effects: [{ type: 'stun', duration: Math.floor(released / 10) }],
+      updatedItem
+    };
+  }
+  
+  if (zone.echoType === 'sight') {
+    return {
+      damage: 0,
+      effects: [{ type: 'reveal', radius: released }],
+      updatedItem
+    };
+  }
+  
+  return { damage: 0, effects: [], updatedItem };
+}
+```
+
+```javascript
+// src/lib/renderer/echoRenderer.js
+
+/**
+ * Render echo chamber visualizations
+ */
+
+export function renderEchoZones(renderer, dungeon) {
+  for (let y = 0; y < dungeon.height; y++) {
+    for (let x = 0; x < dungeon.width; x++) {
+      const cell = dungeon.grid[y][x];
+      if (!cell.echoZone) continue;
+      
+      const zone = cell.echoZone;
+      renderEchoRipple(renderer, x, y, zone);
+    }
+  }
+}
+
+/**
+ * Render a single echo ripple
+ */
+function renderEchoRipple(renderer, x, y, zone) {
+  const alpha = 1 - (zone.distance / zone.echoRange);
+  const color = zone.rippleColor;
+  
+  if (zone.isCenter) {
+    // Draw item at center
+    renderer.setCell(x, y, '◉', color, '#000000', alpha, CELL_FLAGS.VISIBLE);
+  } else if (zone.distance < zone.echoRange * 0.3) {
+    // Inner ring - solid boundary
+    renderer.setCell(x, y, '○', color, '#000000', alpha * 0.7, CELL_FLAGS.VISIBLE);
+  } else if (zone.distance < zone.echoRange * 0.6) {
+    // Middle ring
+    renderer.setCell(x, y, '◐', color, '#000000', alpha * 0.4, CELL_FLAGS.VISIBLE);
+  } else {
+    // Outer ring - faint
+    renderer.setCell(x, y, '.', color, '#000000', alpha * 0.2, CELL_FLAGS.DIM);
+  }
+}
+
+/**
+ * Render gravity distortion (FOV warp)
+ */
+export function renderGravityFOV(renderer, dungeon, player) {
+  const px = player.x;
+  const py = player.y;
+  
+  for (let y = 0; y < dungeon.height; y++) {
+    for (let x = 0; x < dungeon.width; x++) {
+      const cell = dungeon.grid[y][x];
+      if (!cell.echoZone || cell.echoZone.distance > 5) continue;
+      
+      // Calculate vision distortion
+      const dist = Math.sqrt(
+        Math.pow(x - px, 2) + Math.pow(y - py, 2)
+      );
+      
+      if (dist < 5) {
+        const distortion = (1 - dist / 5) * cell.echoZone.polarity * 0.3;
+        // Apply slight color shift to simulate lensing
+        applyFOVDistortion(renderer, x, y, distortion);
+      }
+    }
+  }
+}
+
+/**
+ * Apply FOV color distortion
+ */
+function applyFOVDistortion(renderer, x, y, amount) {
+  // This would modify the cell's color channel
+  // Implementation depends on renderer capabilities
+  renderer.applyColorMod(x, y, amount);
+}
+```
+
+### UI Integration
+
+```javascript
+// src/lib/ui/echoTooltip.js
+
+/**
+ * Show echo chamber info on item tooltips
+ */
+
+export function getEchoTooltip(item) {
+  if (!item.echoType) return [];
+  
+  const lines = [
+    `━━━ Echo Chamber ━━━`,
+    `Type: ${item.echoType.toUpperCase()}`,
+    `Polarity: ${item.polarity > 0 ? '◉ Attract' : '○ Repel'}`,
+    `Range: ${item.echoRange} tiles`,
+    `Capacity: ${item.echoStored}/${item.echoCapacity}`,
+    `Recharge: +${item.echoRecharge}/turn`,
+    ''
+  ];
+  
+  // Add type-specific flavor
+  if (item.echoType === 'attack') {
+    lines.push('💥 Stores damage, releases on enemy contact');
+  } else if (item.echoType === 'defense') {
+    lines.push('🛡️ Stores blocked damage, counters attackers');
+  } else if (item.echoType === 'motion') {
+    lines.push('⚡ Stores movement, releases speed boost');
+  } else if (item.echoType === 'sight') {
+    lines.push('👁️ Stores reveals, releases enemy intel');
+  }
+  
+  // Show stored energy bar
+  const filled = Math.floor((item.echoStored / item.echoCapacity) * 10);
+  const bar = '[' + '█'.repeat(filled) + '░'.repeat(10 - filled) + ']';
+  lines.push(`Energy: ${bar} ${item.echoStored}/${item.echoCapacity}`);
+  
+  return lines;
+}
+```
+
+### Self-Scoring
+
+#### R1: Simplicity
+**Score: 70**
+- Core concept explainable: "Items create resonant chambers that store and release energy. Different types store different things - attack stores damage, defense stores blocked hits."
+- Added complexity: Now need to explain echo types, capacity, recharge, triggers
+- -15 for multiple echo types needing separate explanations
+- -15 for trigger conditions being complex
+
+#### R2: Depth
+**Score: 90**
+- 4 echo types × 2 polarities × positioning = 50+ tactical choices
+- Knowing when to release stored energy vs save it
+- Combo between multiple echo chambers
+- Building around specific echo types for specific builds
+- -10 for some obvious optimal strategies
+
+#### R3: Emergence
+**Score: 95**
+- Enemies triggering attack echoes, creating death spirals
+- Defense echoes creating "kill zones" where enemies can't survive
+- Motion echoes creating speed highways
+- Sight echoes revealing hidden enemies unexpectedly
+- Players discovering unintended combo interactions
+- -5 for some predictable patterns
+
+#### R4: Cross-System Impact
+**Score: 100**
+- Combat: damage amplification, counter-attacks
+- Defense: damage reduction, zone control
+- Stamina/movement: speed boosts, gravity assist
+- FOV/vision: distortion, reveal mechanics
+- Dungeon generation: echo chamber placement
+- Enemy behavior: triggering zones, pathing around
+- Economy: echo items high value
+- UI/Tooltips: new information display
+- -0 for hitting 8+ systems
+
+#### R5: Uniqueness
+**Score: 90**
+- Haven't seen "resonant chambers" exactly like this
+- The storage/release mechanic is novel
+- Combining with gravity adds unique spatial dimension
+- -10 for similar "charging" mechanics in some games
+
+#### R6: Implementability
+**Score: 85**
+- Pure functions, clear data structures
+- Rendering ripples is straightforward
+- Need to track stored energy per item per dungeon run
+- Some complexity in trigger system
+- -10 for needing renderer modifications
+- -5 for state management complexity
+
+**Total Score: (70 + 90 + 95 + 100 + 90 + 85) / 6 = 88.3**
+
+## Weaknesses
+
+1. **Complexity**: 4 echo types + polarity + capacity + triggers = lots of rules for players to learn
+2. **Visual Clutter**: Echo zones with ripples could clutter the screen in dense areas
+3. **Balance Risk**: Attack echoes might be strictly better than other types
+4. **State Management**: Need to persist echoStored per item across turns
+5. **Interaction Overload**: Too many things happening at once could overwhelm
+
 ## Next Iteration Focus
 
-1. **Visualization**: Add gravity field rendering to TilemapRenderer
-2. **Balancing pass**: Add movement speed penalties for heavy loadouts
-3. **FOV integration**: Make vision warp near high-mass items
-4. **Polish**: Add "gravity trails" for projectiles showing their curved paths
-5. **UI**: Show gravity polarity and strength on item tooltips
+1. **Simplification**: Reduce to 2-3 core echo types, consolidate mechanics
+2. **Visual Priority**: Show echoes at edge of range, not filling entire zone
+3. **Balancing**: Make each echo type situationally powerful, not universally
+4. **Tooltip Rework**: Show "what this does in 5 words or less"
+5. **Tutorial**: First dungeon should have obvious echo chambers to teach
 
-The "holy shit" moment: Player realizes that by equipping REPULSION items and standing near a wall, they can create a gravity well that DEFLECTS ENEMY PROJECTILES BACK AT THEM. Or discovers that enemy AI gets stuck in orbital patterns around treasure rooms, making them easy to kite.
+The "holy shit" moment: Player enters a room, sees ripples emanating from a treasure chest, realizes it's a MASSIVE ATTACK ECHO CHAMBER. They lure enemies into the zone, watch each enemy get hit by 50+ stored damage, creating a death trap around the treasure. Or: player discovers two REPULSION motion echoes next to each other, creating a gravity slingshot that makes them move 3x faster.
 
 ## Iteration 2: Gravity Wells + Elemental Resonance
 
