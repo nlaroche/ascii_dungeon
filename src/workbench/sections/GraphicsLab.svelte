@@ -115,6 +115,8 @@
         />
       </div>
     {/if}
+
+    <TownModal building={openBuilding} onClose={closeModal} />
   </div>
 </div>
 
