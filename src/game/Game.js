@@ -1,311 +1,57 @@
-import { createPlayer, addGold, addXp, applyDamage } from '../lib/index.js';
-import { generateDungeon } from '../lib/index.js';
-import { resolveCombat, collectTreasure } from '../lib/index.js';
-import { decideAction } from '../lib/index.js';
-import { CELL_FLAGS } from '../renderer/Renderer.js';
-
 /**
- * Main Game Logic
- * Handles dungeon runs, stamina, loot, and town phases
+ * Thin shell: delegates all game logic to the ECS world.
+ *
+ * @example
+ * const game = new Game(renderer);
+ * game.start();
+ * game.handleInput('w');
  */
+
+import { createGameWorld } from './createGameWorld.js';
+
 export class Game {
   constructor(renderer) {
     this.renderer = renderer;
-    this.state = {
-      phase: 'dungeon', // 'dungeon' | 'summary' | 'town'
-      dungeon: null,
-      player: createPlayer(),
-      runStats: {
-        enemiesKilled: 0,
-        treasureFound: 0,
-        stepsTaken: 0,
-        damageDealt: 0,
-        damageTaken: 0
-      },
-      log: [],
-      lastUpdate: Date.now()
-    };
+    this.world = null;
+    this.playerId = null;
+    this._animFrame = null;
+    this._lastTime = 0;
   }
 
   start() {
-    this.startDungeonRun();
-    this.gameLoop();
+    const { world, playerId } = createGameWorld({ renderer: this.renderer });
+    this.world = world;
+    this.playerId = playerId;
+    this._lastTime = performance.now();
+    this._loop(this._lastTime);
   }
 
-  startDungeonRun() {
-    this.state.phase = 'dungeon';
-    this.state.dungeon = generateDungeon({
-      width: 20,
-      height: 15,
-      roomCount: 5,
-      playerLevel: this.state.player.level
-    });
-    this.state.player = {
-      ...this.state.player,
-      stamina: this.state.player.maxStamina,
-      x: 1,
-      y: 1
-    };
-    this.state.runStats = {
-      enemiesKilled: 0,
-      treasureFound: 0,
-      stepsTaken: 0,
-      damageDealt: 0,
-      damageTaken: 0
-    };
-    this.log("Entered the dungeon...");
+  _loop(timestamp) {
+    const dt = Math.min((timestamp - this._lastTime) / 1000, 0.05);
+    this._lastTime = timestamp;
+
+    // Update ECS world — all systems run in pipeline order
+    const time = this.world.getResource('time');
+    time.elapsed += dt;
+    this.world.update(dt);
+
+    // Clear input after each frame
+    const input = this.world.getResource('input');
+    input.key = null;
+
+    this._animFrame = requestAnimationFrame((t) => this._loop(t));
   }
 
-  gameLoop() {
-    const now = Date.now();
-    const dt = (now - this.state.lastUpdate) / 1000;
-    this.state.lastUpdate = now;
-
-    this.update(dt);
-    this.render();
-
-    requestAnimationFrame(() => this.gameLoop());
-  }
-
-  update(dt) {
-    if (this.state.phase === 'dungeon') {
-      // AI-driven action every second
-      if (this.state.player.stamina > 0) {
-        this.performAIAction();
-      } else {
-        this.endDungeonRun();
-      }
-    }
-  }
-
-  performAIAction() {
-    const player = this.state.player;
-    const dungeon = this.state.dungeon;
-    
-    // Use AI library to decide action
-    const action = decideAction(
-      { x: player.x, y: player.y },
-      dungeon.grid,
-      { width: dungeon.width, height: dungeon.height }
-    );
-    
-    if (action.type === 'attack') {
-      this.combat(action.target);
-    } else if (action.type === 'move') {
-      this.performMove(action.dx, action.dy);
-    }
-  }
-
-  performMove(dx, dy) {
-    const player = this.state.player;
-    const dungeon = this.state.dungeon;
-    const nx = player.x + dx;
-    const ny = player.y + dy;
-    
-    if (ny >= 0 && ny < dungeon.height && nx >= 0 && nx < dungeon.width) {
-      const cell = dungeon.grid[ny][nx];
-      
-      if (cell.type === 'floor') {
-        // Update player position
-        this.state.player = {
-          ...player,
-          x: nx,
-          y: ny,
-          stamina: player.stamina - 1
-        };
-        
-        cell.explored = true;
-        this.state.runStats.stepsTaken++;
-        
-        // Check for treasure
-        if (cell.contents && cell.contents.type === 'treasure') {
-          this.handleTreasure(nx, ny, cell.contents);
-          cell.contents = null;
-        }
-      }
-    }
-  }
-
-  combat(enemy) {
-    const player = this.state.player;
-    
-    // Use combat library to resolve combat
-    const result = resolveCombat(player, enemy);
-    
-    this.state.runStats.damageDealt += result.defenderDamage;
-    this.log(`You hit the ${enemy.symbol} for ${result.defenderDamage} damage!`);
-    
-    // Update enemy in grid
-    if (!result.defenderKilled) {
-      this.state.dungeon.grid[enemy.y][enemy.x].contents = {
-        ...enemy,
-        hp: result.defenderHp
-      };
-    } else {
-      // Enemy killed!
-      this.state.runStats.enemiesKilled++;
-      this.state.runStats.gold = (this.state.runStats.gold || 0) + result.loot.gold;
-      this.state.dungeon.grid[enemy.y][enemy.x].contents = null;
-      this.log(`Killed ${enemy.symbol}! +${result.loot.gold} gold, +${result.loot.xp} XP`);
-      
-      // Update player with loot
-      this.state.player = addXp(addGold(player, result.loot.gold), result.loot.xp);
-    }
-    
-    // Handle counter-attack if enemy survived
-    if (!result.defenderKilled && result.attackerDamage > 0) {
-      this.state.player = applyDamage(player, result.attackerDamage);
-      this.state.runStats.damageTaken += result.attackerDamage;
-      this.log(`${enemy.symbol} hits you for ${result.attackerDamage} damage!`);
-    }
-    
-    // Decrease stamina
-    this.state.player = {
-      ...this.state.player,
-      stamina: this.state.player.stamina - 1
-    };
-    
-    // Check if player died
-    if (this.state.player.hp <= 0) {
-      this.log("You were defeated! Escaping...");
-      this.endDungeonRun();
-    }
-  }
-
-  handleTreasure(x, y, treasure) {
-    const loot = collectTreasure(treasure);
-    
-    // Update player with treasure
-    this.state.player = addXp(addGold(this.state.player, loot.gold), loot.xp);
-    this.state.runStats.treasureFound++;
-    this.state.runStats.gold = (this.state.runStats.gold || 0) + loot.gold;
-    this.log(`Found treasure! +${loot.gold} gold, +${loot.xp} XP`);
-  }
-
-  endDungeonRun() {
-    this.state.phase = 'summary';
-    this.log("Dungeon run complete!");
-    this.log(`Enemies: ${this.state.runStats.enemiesKilled}, Treasure: ${this.state.runStats.treasureFound}`);
-    this.log(`Steps: ${this.state.runStats.stepsTaken}, Gold earned: ${this.state.runStats.gold}`);
-  }
-
-  goToTown() {
-    this.state.phase = 'town';
-    this.log("Welcome to town!");
-  }
-
-  log(message) {
-    this.state.log.unshift(message);
-    if (this.state.log.length > 50) {
-      this.state.log.pop();
-    }
-  }
-
-  render() {
-    this.renderer.clearGrid();
-    
-    if (this.state.phase === 'dungeon') {
-      this.renderDungeon();
-    } else if (this.state.phase === 'summary') {
-      this.renderSummary();
-    } else if (this.state.phase === 'town') {
-      this.renderTown();
-    }
-    
-    // Always render HUD
-    this.renderHUD();
-  }
-
-  renderString(x, y, text, fg, bg) {
-    for (let i = 0; i < text.length; i++) {
-      const ch = text[i];
-      if (ch !== '\n') {
-        this.renderer.setCell(x + i, y, ch, fg, bg || '#000000', 0, CELL_FLAGS.VISIBLE);
-      }
-    }
-  }
-
-  renderDungeon() {
-    const dungeon = this.state.dungeon;
-    const player = this.state.player;
-    
-    for (let y = 0; y < dungeon.height; y++) {
-      for (let x = 0; x < dungeon.width; x++) {
-        const cell = dungeon.grid[y][x];
-        
-        if (x === player.x && y === player.y) {
-          this.renderer.setCell(x, y, '@', '#00ff00', '#000000', 0.5, CELL_FLAGS.VISIBLE);
-        } else if (cell.contents) {
-          this.renderer.setCell(x, y, cell.contents.symbol, '#ff0000', '#000000', 0.5, CELL_FLAGS.VISIBLE);
-        } else if (cell.type === 'wall') {
-          this.renderer.setCell(x, y, '#', '#666666', '#333333', 1.0, CELL_FLAGS.VISIBLE);
-        } else if (cell.type === 'floor') {
-          this.renderer.setCell(x, y, '.', '#333333', '#111111', 0.0, CELL_FLAGS.VISIBLE);
-        } else {
-          this.renderer.setCell(x, y, ' ', '#000000', '#000000', 0.0, 0);
-        }
-      }
-    }
-  }
-
-  renderSummary() {
-    const stats = this.state.runStats;
-    const player = this.state.player;
-    
-    this.renderString(2, 2, '=== DUNGEON RUN COMPLETE ===', '#ffff00');
-    this.renderString(2, 4, 'Enemies Killed: ' + stats.enemiesKilled, '#ffff00');
-    this.renderString(2, 5, 'Treasure Found: ' + stats.treasureFound, '#ffff00');
-    this.renderString(2, 6, 'Steps Taken: ' + stats.stepsTaken, '#ffff00');
-    this.renderString(2, 7, 'Gold Earned: ' + stats.gold, '#ffff00');
-    this.renderString(2, 9, 'Current Gold: ' + player.gold, '#ffffff');
-    this.renderString(2, 10, 'Level: ' + player.level + ' (' + player.xp + '/' + player.xpToNext + ' XP)', '#ffffff');
-    this.renderString(2, 12, 'Press [T] to go to Town', '#888888');
-    this.renderString(2, 13, 'Press [R] for another run', '#888888');
-  }
-
-  renderTown() {
-    const player = this.state.player;
-    
-    this.renderString(2, 2, '=== THE TOWN ===', '#00ffff');
-    this.renderString(2, 4, 'Welcome, ' + player.name + ' the Level ' + player.level + ' Hero!', '#ffffff');
-    this.renderString(2, 6, 'Gold: ' + player.gold, '#ffff00');
-    this.renderString(2, 7, 'HP: ' + player.hp + '/' + player.maxHp, '#ff0000');
-    this.renderString(2, 8, 'Attack: ' + player.attack, '#ff6666');
-    this.renderString(2, 9, 'Defense: ' + player.defense, '#66ff66');
-    this.renderString(2, 10, 'Intelligence: ' + player.intelligence, '#6666ff');
-    this.renderString(2, 12, '[T] Train Intelligence (+1, costs 50g)', '#888888');
-    this.renderString(2, 13, '[R] Return to Dungeon', '#888888');
-    this.renderString(2, 14, '[Q] Quit', '#888888');
-  }
-
-  renderHUD() {
-    const player = this.state.player;
-    const stats = this.state.runStats;
-    
-    let hud = 'HP: ' + player.hp + '/' + player.maxHp + '  Stamina: ' + player.stamina + '/' + player.maxStamina + '  Gold: ' + player.gold;
-    this.renderString(1, this.renderer.gridHeight - 1, hud, '#ffffff');
-  }
-
-  // Handle user input (called from UI)
   handleInput(key) {
-    if (this.state.phase === 'summary') {
-      if (key === 't' || key === 'T') {
-        this.goToTown();
-      } else if (key === 'r' || key === 'R') {
-        this.startDungeonRun();
-      }
-    } else if (this.state.phase === 'town') {
-      if (key === 'r' || key === 'R') {
-        this.startDungeonRun();
-      } else if (key === 't' || key === 'T') {
-        if (this.state.player.gold >= 50) {
-          this.state.player.gold -= 50;
-          this.state.player.intelligence++;
-          this.log("Intelligence increased!");
-        } else {
-          this.log("Not enough gold!");
-        }
-      }
+    if (!this.world) return;
+    const input = this.world.getResource('input');
+    input.key = key;
+  }
+
+  stop() {
+    if (this._animFrame) {
+      cancelAnimationFrame(this._animFrame);
+      this._animFrame = null;
     }
   }
 }

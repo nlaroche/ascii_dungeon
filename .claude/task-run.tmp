@@ -1,0 +1,108 @@
+Create a new file `src/lib/run.js` — a pure function module for managing dungeon runs (the core game loop state).
+
+## Game Loop Concept
+
+The game loop is: Dungeon → Completion Screen → Town → Repeat. Each run is "a day". The player enters a dungeon, explores floors, collects loot, fights enemies, and either dies or retires to town. The run tracks everything that happened.
+
+## Data Structures
+
+### Run State
+```js
+{
+  id: 'run_1',           // unique run id
+  day: 1,                // which day this is (run number, 1-indexed)
+  floor: 1,              // current floor (1-indexed)
+  maxFloors: 5,          // floors per run (scales with meta progression)
+  phase: 'dungeon',      // 'dungeon' | 'floor_complete' | 'run_complete' | 'town'
+
+  // Player snapshot at run start
+  startingPlayer: { ... },
+
+  // Current run stats (accumulate during the run)
+  stats: {
+    enemiesKilled: 0,
+    goldCollected: 0,
+    xpGained: 0,
+    itemsFound: 0,
+    floorsCleared: 0,
+    damageDealt: 0,
+    damageTaken: 0,
+    staminaUsed: 0,
+    secretsFound: 0,
+    timeStarted: Date.now(),
+  },
+
+  // Floor history
+  floors: [],            // array of { floor, enemies, treasures, events }
+
+  // Loot bag (items found this run, not yet sorted)
+  lootBag: [],
+
+  // Run outcome (set when run ends)
+  outcome: null,         // null | { reason: 'death'|'cleared'|'retired', floor, finalStats }
+}
+```
+
+### Floor Result
+```js
+{
+  floor: 1,
+  enemiesKilled: 3,
+  goldFound: 45,
+  xpGained: 120,
+  itemsFound: ['item_id_1'],
+  staminaSpent: 8,
+  playerHpAfter: 75,
+  events: [],            // future: random events, AI events
+}
+```
+
+### Day/Calendar State (meta-level, tracks across runs)
+```js
+{
+  currentDay: 1,
+  currentWeek: 1,
+  totalDays: 0,
+  runsCompleted: 0,
+  bestFloor: 0,
+  totalGoldEarned: 0,
+  totalEnemiesKilled: 0,
+  history: [],           // array of run summaries (last 50)
+}
+```
+
+## Functions to Export
+
+### Run Lifecycle
+- `createRun(day, player, config)` — Creates a fresh run state. Config has { maxFloors, difficulty }.
+- `advanceFloor(run)` — Increments floor, returns new run. Fails if floor >= maxFloors.
+- `completeFloor(run, floorResult)` — Records floor result, accumulates stats, returns new run with phase 'floor_complete'.
+- `endRun(run, reason)` — Ends the run. reason: 'death'|'cleared'|'retired'. Sets outcome, changes phase to 'run_complete'. Returns new run.
+- `setPhase(run, phase)` — Transition to a new phase. Returns new run.
+
+### Difficulty Scaling
+- `getFloorDifficulty(floor, day)` — Returns { enemyHpMult, enemyAtkMult, enemyCount, treasureMult }. Scales with floor and day number.
+- `getDungeonConfig(floor, day)` — Returns config object for generateDungeon() based on floor and day. { width, height, roomCount, playerLevel }.
+
+### Run Stats
+- `getRunSummary(run)` — Returns a clean summary object for display: { day, floorsCleared, totalGold, totalXp, enemiesKilled, itemsFound, outcome, duration }.
+- `getRunGrade(run)` — Returns a letter grade (S/A/B/C/D/F) based on performance (enemies killed, floors cleared, gold found relative to difficulty).
+
+### Calendar / Meta
+- `createCalendar()` — Creates fresh calendar state.
+- `recordRun(calendar, runSummary)` — Adds completed run to calendar history, increments day/week counters. Returns new calendar.
+- `getWeekSummary(calendar)` — Returns aggregate stats for the current week.
+- `getCurrentTimeOfDay(day)` — Returns 'dawn'|'morning'|'noon'|'afternoon'|'dusk'|'night' based on day number (purely cosmetic, cycles every 6 runs).
+
+### Stamina
+- `getStaminaCost(action)` — Returns stamina cost for an action. action: 'move'=1, 'attack'=2, 'explore'=3, 'rest'=0.
+- `hasStamina(player, action)` — Returns boolean.
+- `spendStamina(player, action)` — Returns new player with stamina reduced.
+- `restoreStamina(player, amount)` — Returns new player with stamina restored (capped at max).
+
+## Rules
+- ALL functions are pure — return new objects, never mutate
+- NO side effects, NO DOM, NO imports from other modules (except maybe rng.js if needed)
+- Export everything as named exports
+- Use JSDoc-style comments sparingly (function signatures only)
+- Keep code clean and concise

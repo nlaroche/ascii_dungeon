@@ -1,0 +1,107 @@
+Create a new file `src/lib/town.js` — a pure function module for the town/hub system between dungeon runs.
+
+## Concept
+
+After each dungeon run, the player returns to town. In town they can:
+- View and manage their inventory (equip/unequip items, compare stats)
+- Visit the vendor (buy/sell items)
+- Rest at the inn (restore HP/stamina, costs gold)
+- View their equipment and its living records
+- Prepare for the next run
+
+## Data Structures
+
+### Town State
+```js
+{
+  // Player's persistent inventory (items not equipped)
+  stash: [],             // array of item objects (from items.js)
+  stashCapacity: 20,     // max items in stash
+
+  // Vendor inventory (refreshes each day)
+  vendor: {
+    items: [],           // items for sale, generated based on day/player level
+    buybackStack: [],    // recently sold items player can buy back
+  },
+
+  // Inn
+  inn: {
+    restCost: 10,        // gold cost to rest
+    healAmount: 0.5,     // heals 50% of maxHp
+    staminaRestore: 1.0, // restores 100% stamina
+  },
+
+  // Town upgrades (permanent, persist across runs)
+  upgrades: {
+    stashSize: 0,        // +5 stash capacity per level
+    vendorQuality: 0,    // better items in vendor per level
+    innDiscount: 0,      // cheaper inn per level
+    blacksmith: 0,       // can upgrade item tiers at blacksmith
+  },
+}
+```
+
+### Vendor Item Generation
+Items for sale depend on player level and day:
+- 4-6 items per refresh
+- Mix of tiers weighted by player level (more common at low level, rarer at high)
+- Prices based on tier: common=20, uncommon=50, rare=150, epic=500, legendary=2000
+
+## Functions to Export
+
+### Town Lifecycle
+- `createTown()` — Creates initial town state with empty stash and default upgrades.
+- `refreshVendor(town, playerLevel, day)` — Generates new vendor inventory. Returns new town.
+
+### Inventory Management
+- `addToStash(town, item)` — Adds item to stash if space available. Returns { town, success, message }.
+- `removeFromStash(town, itemIndex)` — Removes item at index. Returns { town, item }.
+- `sortStash(town, sortBy)` — Sorts stash by 'tier'|'slot'|'level'. Returns new town.
+- `isStashFull(town)` — Returns boolean.
+- `getStashCapacity(town)` — Returns max capacity including upgrades.
+
+### Equipment
+- `equipItem(town, player, stashIndex)` — Equips item from stash, moves old equipped item to stash. Returns { town, player }.
+- `unequipItem(town, player, slot)` — Unequips item to stash. Returns { town, player }.
+- `compareItems(itemA, itemB)` — Returns comparison object { better: [], worse: [], equal: [] } listing stat differences.
+
+### Vendor
+- `buyItem(town, player, vendorIndex)` — Buys item from vendor. Deducts gold, adds to stash. Returns { town, player, success, message }.
+- `sellItem(town, player, stashIndex)` — Sells item from stash. Adds gold, moves to buyback. Returns { town, player, success, message }.
+- `buybackItem(town, player, buybackIndex)` — Buys back a recently sold item. Returns { town, player, success, message }.
+- `getItemPrice(item)` — Returns gold value of an item (for selling, typically 40% of buy price).
+- `getItemBuyPrice(item)` — Returns buy price.
+
+### Inn
+- `restAtInn(town, player)` — Pays gold, restores HP and stamina. Returns { town, player, success, message }.
+- `getRestCost(town)` — Returns current rest cost (affected by upgrades).
+
+### Upgrades
+- `getUpgradeCost(upgradeType, currentLevel)` — Returns gold cost for next level. Scales: base * 2^level.
+- `purchaseUpgrade(town, player, upgradeType)` — Buys upgrade. Returns { town, player, success, message }.
+- `getUpgradeEffects(town)` — Returns computed effects of all upgrades.
+
+### Loot Processing (bridge between run and town)
+- `processLootBag(town, lootBag)` — Takes items from a completed run's loot bag and adds them to stash (overflow drops lowest tier). Returns { town, added, dropped }.
+
+## Item Price Table
+```js
+const TIER_PRICES = {
+  common: 20,
+  uncommon: 50,
+  rare: 150,
+  epic: 500,
+  legendary: 2000,
+};
+```
+
+## Upgrade Costs
+Base costs: stashSize=100, vendorQuality=200, innDiscount=50, blacksmith=500
+Each level doubles the cost.
+
+## Rules
+- ALL functions are pure — return new objects, never mutate
+- NO side effects, NO DOM
+- May import from items.js (createItem, ITEM_TIERS, ITEM_SLOTS) for vendor item generation
+- Export everything as named exports
+- Keep code clean and concise

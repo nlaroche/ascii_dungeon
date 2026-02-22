@@ -1,0 +1,198 @@
+Create a new file `src/workbench/sections/GameLoopLab.svelte` — a workbench tab for visualizing and controlling the game loop state machine.
+
+## Purpose
+This tab lets developers see and control the full game loop: dungeon → floor_complete → town → next run. It shows the current state, lets you manually trigger transitions, simulate runs, and inspect all the data.
+
+## API Available
+
+From `src/lib/run.js`:
+```js
+import {
+  createRun, advanceFloor, completeFloor, endRun, setPhase,
+  getFloorDifficulty, getDungeonConfig,
+  getRunSummary, getRunGrade,
+  createCalendar, recordRun, getWeekSummary, getCurrentTimeOfDay,
+  getStaminaCost, hasStamina, spendStamina, restoreStamina,
+} from '../../lib/run.js';
+```
+
+From `src/lib/town.js`:
+```js
+import {
+  createTown, refreshVendor,
+  addToStash, removeFromStash, sortStash,
+  equipItem, unequipItem,
+  buyItem, sellItem, getItemPrice, getItemBuyPrice,
+  restAtInn, getRestCost,
+  getUpgradeCost, purchaseUpgrade, getUpgradeEffects,
+  processLootBag,
+} from '../../lib/town.js';
+```
+
+From `src/lib/player.js`:
+```js
+import { createPlayer, applyDamage, healPlayer, addGold, addXp } from '../../lib/player.js';
+```
+
+From `src/lib/items.js`:
+```js
+import { createItem, getItemDisplayName, getItemColor, getTotalLevel } from '../../lib/items.js';
+```
+
+From workbench components:
+```js
+import ParamSlider from '../components/ParamSlider.svelte';
+import StatBar from '../components/StatBar.svelte';
+```
+
+## Layout
+
+Full-height flexbox layout. Three main areas:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│ Header: "Game Loop"  Day 3 (Week 1)  [Dawn]    ⟳ Reset All  │
+├──────────┬────────────────────────────────────┬──────────────┤
+│          │                                    │              │
+│  Phase   │         Phase Content              │   Player     │
+│  Diagram │    (changes based on phase)        │   Status     │
+│          │                                    │   ────────   │
+│  ○ Town  │  DUNGEON: floor info, enemies,     │   HP bar     │
+│  ● Dung  │    stamina, simulate actions       │   Stamina    │
+│  ○ Floor │  FLOOR_COMPLETE: floor results     │   Gold       │
+│  ○ Run   │  TOWN: vendor, stash, inn          │   Level      │
+│  ○ Town  │  RUN_COMPLETE: summary + grade     │   Equipment  │
+│          │                                    │   ────────   │
+│  ────    │                                    │   Run Stats  │
+│  Controls│                                    │   Calendar   │
+│  ────    │                                    │              │
+│  ▶ Next  │                                    │              │
+│  ⏭ Auto  │                                    │              │
+│  ⟳ Reset │                                    │              │
+├──────────┴────────────────────────────────────┴──────────────┤
+│ Event Log (scrollable, last 30 messages)                     │
+└──────────────────────────────────────────────────────────────┘
+```
+
+## Left Column: Phase Diagram + Controls (200px)
+
+### Phase State Machine Visualization
+Show the game loop as a vertical list of phases with the current one highlighted:
+- Town (prepare) → Dungeon (explore) → Floor Complete → [next floor or] Run Complete → Town
+
+Use dots/circles: ○ for inactive, ● for active. Draw connecting lines between phases. The active phase should glow with its accent color.
+
+### Phase Transition Controls
+- **"Simulate Floor"** button — Generates a random floor result (enemies killed, gold, items found) and calls completeFloor. Visible during 'dungeon' phase.
+- **"Next Floor"** button — Calls advanceFloor. Visible during 'floor_complete' phase.
+- **"End Run"** button with dropdown: Death / Cleared / Retired — Calls endRun. Visible during 'dungeon' or 'floor_complete'.
+- **"Return to Town"** button — Sets phase to 'town'. Visible during 'run_complete'.
+- **"Start Run"** button — Creates a new run from town. Visible during 'town' phase.
+- **"Auto Run"** button — Simulates an entire run automatically (all floors) with short delays between steps.
+
+### Parameter Controls
+- ParamSlider: Player Level (1-100)
+- ParamSlider: Difficulty multiplier (0.5-3.0, step 0.1)
+
+## Center Panel: Phase Content (flex: 1)
+
+Content changes based on `run.phase`:
+
+### Phase: 'dungeon'
+- Current floor number (large)
+- Floor difficulty info from getFloorDifficulty
+- Dungeon config from getDungeonConfig
+- Stamina bar (current / max)
+- Action buttons: Move (-1 stam), Attack (-2 stam), Explore (-3 stam), Rest (+5 stam)
+- Each action logs a message and updates player stamina
+
+### Phase: 'floor_complete'
+- Floor result card showing: enemies killed, gold found, XP gained, items found, stamina spent
+- Loot bag contents (if any items found)
+- "Next Floor" or "End Run" options prominently displayed
+
+### Phase: 'run_complete'
+- Run summary from getRunSummary
+- Run grade from getRunGrade (large, colored: S=gold, A=green, B=cyan, C=yellow, D=orange, F=red)
+- Stats grid: floors cleared, enemies killed, gold collected, items found, duration
+- Run history (last 5 runs from calendar)
+
+### Phase: 'town'
+- Three cards side by side: Vendor | Stash | Inn
+- Vendor card: list items for sale with prices, buy buttons
+- Stash card: list stash items, equip/sell buttons
+- Inn card: rest button with cost, upgrade buttons with costs
+- Equipment display: current weapon/armor/amulet with item colors
+
+## Right Column: Player Status + Run Stats (240px)
+
+### Player Status
+- HP bar (StatBar)
+- Stamina bar (StatBar)
+- Gold display
+- Level + XP bar
+- Equipment slots (3 rows: weapon, armor, amulet with item names)
+
+### Run Stats (during a run)
+- Current floor / max floors
+- Enemies killed this run
+- Gold collected this run
+- Items found this run
+
+### Calendar
+- Current day / week
+- Time of day from getCurrentTimeOfDay (with icon/color)
+- Runs completed total
+- Best floor reached
+
+## Bottom: Event Log
+- Scrollable log showing last 30 messages
+- Each action logs a message: "Floor 2 cleared: 5 enemies, 120 gold"
+- Phase transitions log: "Entered town on Day 4"
+- Color-coded: loot=gold, damage=red, heal=green, phase=cyan
+
+## State Management
+```js
+let player = createPlayer();
+let run = null;          // null when in town with no active run
+let town = createTown();
+let calendar = createCalendar();
+let eventLog = [];
+let phase = 'town';     // 'town' | 'dungeon' | 'floor_complete' | 'run_complete'
+let playerLevel = 1;
+let difficulty = 1.0;
+```
+
+## Simulation Logic
+
+### simulateFloor()
+Generate a random floor result:
+```js
+const enemies = 2 + Math.floor(Math.random() * 5);
+const gold = enemies * (10 + Math.floor(Math.random() * 20));
+const xp = enemies * (15 + Math.floor(Math.random() * 10));
+const foundItem = Math.random() < 0.3; // 30% chance
+```
+
+### autoRun()
+Run all floors automatically with 500ms delays between:
+```js
+for each floor: simulateFloor → completeFloor → advanceFloor → repeat
+Then endRun('cleared') → recordRun → setPhase('town')
+```
+
+## Style Rules
+- Inherit ALL design tokens from parent Workbench
+- Use `.lab` wrapper class with `display: flex; flex-direction: column; flex: 1; min-height: 0`
+- Phase diagram uses accent colors: town=green, dungeon=cyan, floor_complete=amber, run_complete=red
+- Cards use `background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space-md)`
+- Run grade uses gradient background
+- Log lines fade opacity with age
+- Use `svelte/transition` for phase content transitions (fade between phases)
+
+## Important
+- Svelte 4 syntax only
+- All imports at top of script
+- Must build with vite
+- Make it interactive and satisfying — clicking through the phases should feel good
+- The phase diagram should clearly show where you are in the loop

@@ -230,32 +230,7 @@
 </div>
 
 <style>
-  .section { padding: var(--space-md) 0; display: flex; flex-direction: column; gap: var(--space-md); }
-
-  .card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: var(--space-lg);
-  }
-
-  .card h2 {
-    color: var(--fg);
-    font-size: 18px;
-    font-weight: 600;
-    margin: 0 0 var(--space-sm);
-  }
-
-  .card h3 {
-    color: var(--fg-muted);
-    font-size: 13px;
-    font-weight: 600;
-    margin: var(--space-md) 0 var(--space-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .hint { color: var(--fg-dim); font-size: 12px; margin: 0 0 var(--space-sm); }
+  .section { display: flex; flex-direction: column; gap: var(--space-md); }
 
   /* Palette Grid */
   .palette-grid {
@@ -433,44 +408,5 @@
     color: var(--fg-dim);
     font-size: 10px;
     text-align: center;
-  }
-</style>
-<script>
-  // Placeholder for Palette Lab
-</script>
-
-<div class="section">
-  <div class="card">
-    <h2>Palette Lab</h2>
-    <p class="hint">Coming soon</p>
-  </div>
-</div>
-
-<style>
-  .section {
-    padding: var(--space-md) 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-md);
-  }
-
-  .card {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: var(--space-lg);
-  }
-
-  .card h2 {
-    color: var(--fg);
-    font-size: 18px;
-    font-weight: 600;
-    margin: 0 0 var(--space-sm);
-  }
-
-  .hint {
-    color: var(--fg-dim);
-    font-size: 12px;
-    margin: 0;
   }
 </style>

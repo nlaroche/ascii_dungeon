@@ -13,6 +13,7 @@
   import JuiceLab from './sections/JuiceLab.svelte';
   import PaletteLab from './sections/PaletteLab.svelte';
   import GameLoopLab from './sections/GameLoopLab.svelte';
+  import UILab from './sections/UILab.svelte';
 
   let activeSection = 'gameloop';
 
@@ -29,6 +30,7 @@
     { id: 'skilltrees', label: 'Skill Trees' },
     { id: 'juice', label: 'Juice' },
     { id: 'palette', label: 'Palette' },
+    { id: 'ui', label: 'UI' },
   ];
 
   function handleSectionChange(event) {
@@ -75,6 +77,8 @@
           <JuiceLab />
         {:else if activeSection === 'palette'}
           <PaletteLab />
+        {:else if activeSection === 'ui'}
+          <UILab />
         {/if}
       </div>
     {/key}
@@ -83,19 +87,19 @@
 
 <style>
   .workbench {
-    /* ── Palette (CC-29) ── */
-    --bg:            #212123;
-    --bg-card:       #3a3858;
-    --bg-muted:      #352b42;
-    --bg-accent:     #45444f;
+    /* ── Palette (Neutral Zinc) ── */
+    --bg:            #09090b;
+    --bg-card:       #18181b;
+    --bg-muted:      #27272a;
+    --bg-accent:     #3f3f46;
 
-    --border:        #45444f;
-    --border-muted:  #3a3858;
-    --border-accent: #5f556a;
+    --border:        #27272a;
+    --border-muted:  #1e1e22;
+    --border-accent: #3f3f46;
 
-    --fg:            #f2f0e5;
-    --fg-muted:      #b8b5b9;
-    --fg-dim:        #868188;
+    --fg:            #fafafa;
+    --fg-muted:      #a1a1aa;
+    --fg-dim:        #71717a;
 
     --accent:        #68c2d3;
     --accent-green:  #a2dcc7;
@@ -195,5 +199,33 @@
 
   :global(.workbench button:active:not(:disabled)) {
     transform: scale(0.97);
+  }
+
+  /* ── Shared section/card styles ── */
+  :global(.workbench .section) {
+    padding: var(--space-md) 0;
+  }
+  :global(.workbench .card) {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: var(--space-lg);
+  }
+  :global(.workbench .card h2) {
+    color: var(--fg);
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 var(--space-sm);
+  }
+  :global(.workbench .card h3) {
+    color: var(--fg-muted);
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0 0 var(--space-sm);
+  }
+  :global(.workbench .hint) {
+    color: var(--fg-dim);
+    font-size: 12px;
+    margin: 0;
   }
 </style>

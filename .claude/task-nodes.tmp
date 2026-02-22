@@ -1,0 +1,137 @@
+Rewrite `src/lib/skills.js` to use PROCEDURAL graph generation instead of hand-crafted nodes. The goal is 400+ nodes in a massive, logically-grouped skill tree.
+
+## Architecture Change
+
+Replace the hardcoded `SKILL_GRAPH_NODES` object and `SKILL_GRAPH_EDGES` array with a `generateSkillGraph()` function that builds the graph programmatically. Call it once at module load to create the exported constants.
+
+## Generation Algorithm
+
+### Cluster-Based Layout
+The graph is organized into **clusters** arranged radially around the center:
+
+1. **6 Major Branches** (one per region: combat, defense, vitality, exploration, fortune, arcane)
+   - Each branch radiates outward from center at 60-degree intervals
+   - Each branch has 3-4 **sub-clusters** along its length (inner, mid, outer, deep)
+
+2. **Sub-Cluster Structure**
+   - Inner cluster (distance 3-6 from center): 8-12 small nodes, 2-3 notables
+   - Mid cluster (distance 7-12): 10-15 small nodes, 3-4 notables, 1 keystone
+   - Outer cluster (distance 13-18): 12-18 small nodes, 4-5 notables, 1-2 keystones
+   - Deep cluster (distance 19-24): 5-8 nodes, 2-3 notables, 1-2 keystones (rare, powerful)
+
+3. **Cross-links** between adjacent branches at the mid and outer distances (6-10 bridge nodes per pair of adjacent branches)
+
+### Node Generation
+For each cluster, generate nodes with:
+- **Position**: Scatter around the cluster center with some randomness (use a seeded PRNG for determinism — `seed = 42`)
+- **Type**: Based on cluster rules above
+- **Stats**: Pull from the region's stat pool (defined below)
+- **Values**: Scale with distance from center:
+  - small: `2 + Math.floor(distance * 0.5)`
+  - notable: `8 + Math.floor(distance * 1.5)`
+  - keystone: `30 + Math.floor(distance * 3)`
+- **Labels**: Generate from a pool of themed names per region
+- **Chars**: Use region-appropriate ASCII characters
+
+### Seeded PRNG
+Use a simple mulberry32 PRNG seeded with 42 so the graph is always identical:
+```js
+function mulberry32(seed) {
+  return function() {
+    seed |= 0; seed = seed + 0x6D2B79F5 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+```
+
+### Edge Generation
+- Within each cluster: connect each node to 2-3 nearest neighbors (ensures cluster connectivity)
+- Between clusters on same branch: connect 3-5 nodes from adjacent clusters
+- Cross-links: connect 2-3 nodes between adjacent branches at similar distances
+- Ensure the entire graph is connected from 'start' (validate with BFS after generation)
+
+### Region Stat Pools
+Each region draws stats from its pool:
+```js
+const STAT_POOLS = {
+  combat: [
+    { stat: 'attack', label: 'Strike' },
+    { stat: 'critChance', label: 'Precision' },
+    { stat: 'critMultiplier', label: 'Lethality' },
+    { stat: 'attackSpeed', label: 'Swiftness' },
+    { stat: 'aoeRadius', label: 'Reach' },
+    { stat: 'bleedChance', label: 'Rend' },
+  ],
+  defense: [
+    { stat: 'defense', label: 'Guard' },
+    { stat: 'blockChance', label: 'Bulwark' },
+    { stat: 'dodgeChance', label: 'Reflex' },
+    { stat: 'damageReduction', label: 'Fortify' },
+    { stat: 'thorns', label: 'Retaliate' },
+    { stat: 'armor', label: 'Plate' },
+  ],
+  vitality: [
+    { stat: 'maxHP', label: 'Vigor' },
+    { stat: 'hpRegen', label: 'Mend' },
+    { stat: 'lifesteal', label: 'Siphon' },
+    { stat: 'resistAll', label: 'Endure' },
+    { stat: 'healBonus', label: 'Restore' },
+    { stat: 'reviveChance', label: 'Defiance' },
+  ],
+  exploration: [
+    { stat: 'moveSpeed', label: 'Stride' },
+    { stat: 'staminaMax', label: 'Endurance' },
+    { stat: 'mapReveal', label: 'Sight' },
+    { stat: 'secretDetect', label: 'Intuition' },
+    { stat: 'trapDisarm', label: 'Finesse' },
+    { stat: 'stealthChance', label: 'Shadow' },
+  ],
+  fortune: [
+    { stat: 'goldFind', label: 'Greed' },
+    { stat: 'itemRarity', label: 'Luck' },
+    { stat: 'shopDiscount', label: 'Bargain' },
+    { stat: 'chestBonus', label: 'Plunder' },
+    { stat: 'vendorPrice', label: 'Appraise' },
+    { stat: 'doubleDropChance', label: 'Windfall' },
+  ],
+  arcane: [
+    { stat: 'manaMax', label: 'Reservoir' },
+    { stat: 'spellPower', label: 'Channel' },
+    { stat: 'cooldownReduction', label: 'Haste' },
+    { stat: 'auraRange', label: 'Radiance' },
+    { stat: 'elementalDamage', label: 'Infuse' },
+    { stat: 'manaRegen', label: 'Flow' },
+  ],
+};
+```
+
+### Name Generation
+For notable and keystone nodes, generate compound names:
+- Pull the stat's label as base
+- Add a tier prefix based on distance: inner = "", mid = "Greater ", outer = "Supreme ", deep = "Transcendent "
+- Keystones get unique epic names from a small pool per region (e.g., combat: "God of War", "Annihilator", "Berserker", "Warlord", etc.)
+
+### Character Assignment
+- small nodes: use '·' (middle dot)
+- notable nodes: use region-themed chars (combat: '/', defense: '[', vitality: '+', exploration: '.', fortune: '$', arcane: '*')
+- keystone nodes: use '★'
+
+## Output Format
+The generation function must produce the same data format as before:
+- `SKILL_GRAPH_NODES` — object keyed by node id
+- `SKILL_GRAPH_EDGES` — array of [nodeIdA, nodeIdB] pairs
+- `SKILL_GRAPH_ADJACENCY` — built from edges
+
+All existing exported functions (createSkillTree, canAllocate, allocateNode, deallocateNode, getVisibleNodes, getVisibleEdges, getSkillBonuses, getNodeInfo, getAvailablePoints, getRemainingPoints, getTreeStats, getRegionColor, getNodeTypeChar, REGIONS) must continue to work exactly the same way.
+
+## Validation
+After generation, run a BFS from 'start' to verify every node is reachable. If any node is unreachable, connect it to its nearest reachable neighbor.
+
+## Target
+- At least 400 nodes total
+- At least 500 edges
+- 6 distinct regions with clear spatial separation
+- Keystones hidden deep (distance 15+)
+- The graph should look organic, not grid-like

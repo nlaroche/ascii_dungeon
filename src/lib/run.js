@@ -230,7 +230,7 @@ export function getRunSummary(run) {
 export function getRunGrade(run) {
   const { enemiesKilled, floorsCleared, goldCollected } = run.stats;
   const maxFloors = run.maxFloors;
-  const difficulty = run.day * 0.5 + floorsCleored * 0.3;
+  const difficulty = run.day * 0.5 + floorsCleared * 0.3;
 
   const score = (floorsCleared / maxFloors) * 40 +
     Math.min(enemiesKilled / (difficulty * 5), 1) * 30 +

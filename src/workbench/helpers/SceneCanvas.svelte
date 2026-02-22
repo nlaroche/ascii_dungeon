@@ -21,6 +21,7 @@
   let canvas;
   let renderer = null;
   let error = null;
+  let cleanup = null;
 
   const dispatch = createEventDispatcher();
 
@@ -129,12 +130,6 @@
       let animFrame = requestAnimationFrame(loop);
 
       // Mouse event handlers
-      if (onMouseMove || onClick) {
-        canvas.addEventListener('mousemove', handleMouseMove);
-        canvas.addEventListener('click', handleClick);
-        canvas.addEventListener('mouseleave', handleMouseLeave);
-      }
-
       const handleMouseMove = (e) => {
         if (!renderer) return;
         const { gx, gy, px, py } = pixelToGrid(e);
@@ -150,6 +145,12 @@
       const handleMouseLeave = () => {
         if (onMouseMove) onMouseMove(-1, -1, 0, 0);
       };
+
+      if (onMouseMove || onClick) {
+        canvas.addEventListener('mousemove', handleMouseMove);
+        canvas.addEventListener('click', handleClick);
+        canvas.addEventListener('mouseleave', handleMouseLeave);
+      }
 
       cleanup = () => {
         running = false;

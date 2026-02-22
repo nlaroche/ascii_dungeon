@@ -1,0 +1,93 @@
+## Task: Apply proper game juice to TownModal.svelte
+
+Only modify `src/workbench/helpers/TownModal.svelte`. Do NOT touch any other file. IGNORE all build warnings.
+
+### Problem
+Current animations are too slow and don't have real squash/stretch. Hover transitions use `var(--transition)` (200ms) which feels sluggish. Need Disney-style squash/stretch with proper inverse scale axes and fast response times.
+
+### Change 1: Add juicy keyframe animations after the existing keyframes
+Add these new keyframes at the end of the `<style>` block, before `</style>`:
+
+```css
+  @keyframes pop-in {
+    0% { transform: scale(0); opacity: 0; }
+    50% { transform: scaleX(1.15) scaleY(0.85); }
+    75% { transform: scaleX(0.95) scaleY(1.05); }
+    100% { transform: scale(1); opacity: 1; }
+  }
+
+  @keyframes squash-click {
+    0% { transform: scaleX(1) scaleY(1); }
+    40% { transform: scaleX(1.2) scaleY(0.8); }
+    70% { transform: scaleX(0.9) scaleY(1.1); }
+    100% { transform: scaleX(1) scaleY(1); }
+  }
+```
+
+### Change 2: Fix modal open animation — real squash/stretch
+Replace the existing `@keyframes modal-card-in`:
+```css
+  @keyframes modal-card-in {
+    0% { opacity: 0; transform: scale(0.5) scaleY(1.3); }
+    40% { opacity: 1; transform: scaleX(1.08) scaleY(0.92); }
+    65% { transform: scaleX(0.97) scaleY(1.03); }
+    80% { transform: scaleX(1.01) scaleY(0.99); }
+    100% { transform: scale(1); }
+  }
+```
+
+### Change 3: Speed up ALL transition times
+Replace every occurrence of `transition: all var(--transition);` with `transition: all 60ms ease-out;`
+Replace every occurrence of `transition: background var(--transition);` with `transition: background 60ms ease-out;`
+Replace every occurrence of `transition: color var(--transition);` with `transition: color 60ms ease-out;`
+Replace `transition: all 0.1s ease;` with `transition: all 60ms ease-out;`
+Replace `transition: border-color 0.1s, box-shadow 0.1s;` with `transition: border-color 60ms ease-out, box-shadow 60ms ease-out;`
+Replace `transition: background 0.1s;` with `transition: background 60ms ease-out;`
+
+### Change 4: Buttons use squash-click on active instead of just scale
+Replace the existing active rule:
+```css
+  .buy-btn:active, .accept-btn:active, .upgrade-btn:active, .action-btn:active, .rest-btn:active {
+    transform: scale(0.95);
+  }
+```
+With:
+```css
+  .buy-btn:active, .accept-btn:active, .upgrade-btn:active, .action-btn:active, .rest-btn:active {
+    animation: squash-click 150ms ease-out;
+  }
+```
+
+### Change 5: Stash items pop in with staggered delay
+In the template, change the stash slot div to include a pop animation for filled slots. Find:
+```svelte
+                <div class="stash-slot" class:filled={i < 4} style={i < 4 ? `color: ${stashItems[i].fg}` : ''} title={i < 4 ? stashItems[i].name : 'Empty'}>
+```
+Replace with:
+```svelte
+                <div class="stash-slot" class:filled={i < 4} style={i < 4 ? `color: ${stashItems[i].fg}; animation: pop-in 200ms ${i * 40}ms both ease-out` : ''} title={i < 4 ? stashItems[i].name : 'Empty'}>
+```
+
+### Change 6: Vendor items stagger in
+Change the vendor `{#each}` to include index. Find:
+```svelte
+              {#each vendorItems as item}
+                <li class="item-row">
+```
+Replace with:
+```svelte
+              {#each vendorItems as item, i}
+                <li class="item-row" style="animation: pop-in 150ms {i * 30}ms both ease-out">
+```
+
+### Change 7: Quest entries stagger in
+Find:
+```svelte
+              {#each quests as quest}
+                <li class="quest-entry">
+```
+Replace with:
+```svelte
+              {#each quests as quest, i}
+                <li class="quest-entry" style="animation: pop-in 150ms {i * 50}ms both ease-out">
+```

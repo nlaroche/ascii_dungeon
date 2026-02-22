@@ -1,6 +1,4 @@
 <script>
-  import { fade } from 'svelte/transition';
-
   export let building = null;
   export let onClose = null;
 
@@ -56,7 +54,6 @@
     on:keydown={(e) => e.key === 'Enter' && handleBackdropClick()}
     role="button"
     tabindex="0"
-    transition:fade={{ duration: 100 }}
   >
     <div
       class="modal"
@@ -205,12 +202,14 @@
     position: fixed;
     inset: 0;
     z-index: 100;
-    background: rgba(0, 0, 0, 0.4);
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(4px) grayscale(0.5);
+    -webkit-backdrop-filter: blur(4px) grayscale(0.5);
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 20px;
-    animation: modal-backdrop-in 100ms ease;
+    animation: modal-backdrop-in 200ms ease both;
   }
 
   .modal {
@@ -222,7 +221,7 @@
     width: 100%;
     max-height: 80vh;
     overflow-y: auto;
-    animation: modal-card-in 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    animation: modal-card-in 200ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
   }
 
   .modal-header {
@@ -428,9 +427,6 @@
     transform: scale(1.05);
   }
 
-  .buy-btn:active, .accept-btn:active, .upgrade-btn:active, .action-btn:active, .rest-btn:active {
-    transform: scale(0.95);
-  }
 
   .rest-cost {
     color: var(--accent-amber);

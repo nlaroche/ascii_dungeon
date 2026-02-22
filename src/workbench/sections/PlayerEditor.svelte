@@ -3,13 +3,11 @@
 </script>
 
 <div class="section">
-  <h2>Player Editor</h2>
-  <p style="color: #666;">Coming in Phase 4</p>
+  <div class="card">
+    <h2>Player Editor</h2>
+    <p class="hint">Coming in Phase 4</p>
+  </div>
 </div>
 
 <style>
-  .section h2 {
-    color: #ffaa00;
-    margin-bottom: 20px;
-  }
 </style>

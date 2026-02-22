@@ -150,9 +150,9 @@ describe('visual stages', () => {
 
   it('getItemColor reflects primary record', () => {
     let item = createItem('weapon', 1, seededRng());
-    expect(getItemColor(item)).toBe('#888888'); // default
+    expect(getItemColor(item)).toBe('#868188'); // default (CC-29 recordLow)
     item = addRecordXP(item, 'kill', 10);
-    expect(getItemColor(item)).toBe('#888888'); // kill lv1 color
+    expect(getItemColor(item)).toBe('#868188'); // kill lv1 color (CC-29 recordLow)
   });
 });
 

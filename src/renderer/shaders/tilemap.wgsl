@@ -5,7 +5,7 @@
 struct Uniforms {
   resolution: vec2<f32>,
   time: f32,
-  parallaxStrength: f32,
+  vignettePulse: f32,
   cellPixelSize: vec2<f32>,
   gridSize: vec2<f32>,
   cameraOffset: vec2<f32>,
@@ -24,6 +24,8 @@ struct Cell {
   flags: u32,
   offsetX: f32,
   offsetY: f32,
+  scaleX: f32,
+  scaleY: f32,
 };
 
 @group(0) @binding(0) var<uniform> uniforms: Uniforms;
@@ -101,23 +103,23 @@ fn fogOfWar(worldPos: vec2<f32>, time: f32) -> vec3<f32> {
   // Combine: fog banks with wispy detail
   let fog = flow1 * 0.5 + flow2 * 0.3 + detail * 0.2;
 
-  // Shape into wisps: mostly dark, with bright fog bands
-  let wisps = smoothstep(0.35, 0.65, fog) * 0.055;
+  // Shape into wisps: mostly dark, subtle fog bands
+  let wisps = smoothstep(0.35, 0.65, fog) * 0.025;
   // Secondary faint glow in darkest regions (deep ambient)
-  let deepGlow = (1.0 - smoothstep(0.2, 0.5, fog)) * 0.012;
+  let deepGlow = (1.0 - smoothstep(0.2, 0.5, fog)) * 0.006;
 
-  // Runic symbols: sparse, fading in and out
-  let runeGrid = vec2<i32>(floor(worldPos * 0.5)); // one rune per 2x2 cells
+  // Runic symbols: very sparse, fading in and out
+  let runeGrid = vec2<i32>(floor(worldPos * 0.5));
   let runeHash = hash2d(runeGrid.x + 73, runeGrid.y + 191);
-  let runeActive = step(0.92, runeHash); // ~8% of grid has a rune
-  let runePulse = sin(time * 0.4 + runeHash * 20.0) * 0.5 + 0.5;
-  let runeGlow = runeActive * runePulse * 0.02;
+  let runeActive = step(0.95, runeHash); // ~5% of grid has a rune
+  let runePulse = sin(time * 0.3 + runeHash * 20.0) * 0.5 + 0.5;
+  let runeGlow = runeActive * runePulse * 0.008;
 
-  // Deep blue-indigo-purple palette
+  // Deep blue-indigo palette — subdued
   let tint = vec3<f32>(
-    wisps * 0.3 + deepGlow * 0.5 + runeGlow * 0.6,
-    wisps * 0.35 + deepGlow * 0.4 + runeGlow * 0.3,
-    wisps * 1.0 + deepGlow * 1.0 + runeGlow * 1.0
+    wisps * 0.2 + deepGlow * 0.3 + runeGlow * 0.4,
+    wisps * 0.25 + deepGlow * 0.25 + runeGlow * 0.2,
+    wisps * 0.7 + deepGlow * 0.7 + runeGlow * 0.7
   );
 
   return tint;
@@ -127,20 +129,21 @@ fn fogOfWar(worldPos: vec2<f32>, time: f32) -> vec3<f32> {
 fn fogEdge(worldPos: vec2<f32>, time: f32) -> f32 {
   let tendril1 = fbm(worldPos * 0.3 + vec2<f32>(time * 0.07, -time * 0.05));
   let tendril2 = valueNoise(worldPos * 0.6 - vec2<f32>(time * 0.04, time * 0.09));
-  // Wispy fingers pattern
-  return smoothstep(0.4, 0.6, tendril1 * 0.7 + tendril2 * 0.3) * 0.15;
+  // Wispy fingers pattern — subtle
+  return smoothstep(0.4, 0.6, tendril1 * 0.7 + tendril2 * 0.3) * 0.06;
 }
 
 // Screen-space post effects: vignette + color grading
 fn applyPostFX(color: vec3<f32>, screenPos: vec2<f32>) -> vec3<f32> {
   let uv = screenPos / uniforms.resolution;
 
-  // Vignette: smooth darkening toward edges
+  // Vignette: smooth darkening toward edges + pulse from damage
   let center = uv - vec2<f32>(0.5, 0.5);
   let vignetteDist = length(center) * 1.3;
-  let vignette = 1.0 - smoothstep(0.4, 1.1, vignetteDist);
+  let baseVignette = 1.0 - smoothstep(0.4, 1.1, vignetteDist);
+  let pulseVignette = baseVignette * (1.0 - uniforms.vignettePulse * 1.5);
 
-  var c = color * vignette;
+  var c = color * pulseVignette;
 
   // Color grading: very subtle warm/cool split (reduced to not distort readability)
   let luminance = dot(c, vec3<f32>(0.299, 0.587, 0.114));
@@ -174,10 +177,20 @@ fn vertexMain(
   let gridY = f32(localIdx / gridW);
   let localPos = quadPos[vertexIndex];
 
+  // Default scale=0 (from zeroed buffer) to 1.0
+  let sx = select(cell.scaleX, 1.0, cell.scaleX == 0.0);
+  let sy = select(cell.scaleY, 1.0, cell.scaleY == 0.0);
+
+  // Scale quad around cell center
+  let scaledPos = vec2<f32>(
+    (localPos.x - 0.5) * sx + 0.5,
+    (localPos.y - 0.5) * sy + 0.5,
+  );
+
   // World grid position (un-shifted, for light map sampling)
   let worldGridPos = vec2<f32>(
-    gridX + cell.offsetX + localPos.x,
-    gridY + cell.offsetY + localPos.y,
+    gridX + cell.offsetX + scaledPos.x,
+    gridY + cell.offsetY + scaledPos.y,
   );
 
   // Cell position in pixels with sub-cell offset and camera offset (global scroll)
@@ -235,9 +248,17 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
   let sdfValue = textureSample(sdfAtlas, atlasSampler, input.atlasUV).r;
 
   // SDF threshold with smoothstep for antialiased edges
-  let edge = uniforms.sdfEdge;
   let spread = uniforms.sdfSmoothing;
-  let sdfAlpha = 1.0 - smoothstep(edge - spread, edge + spread, sdfValue);
+
+  // Bold flag: shift threshold inward for thicker glyphs
+  let isBold = (input.flags & 8u) != 0u;
+  let activeEdge = select(uniforms.sdfEdge, uniforms.sdfEdge - 0.12, isBold);
+  let sdfAlpha = 1.0 - smoothstep(activeEdge - spread, activeEdge + spread, sdfValue);
+
+  // Outline ring (wider threshold, subtract fill)
+  let outlineEdge = activeEdge - 0.1;
+  let outlineRaw = 1.0 - smoothstep(outlineEdge - spread, outlineEdge + spread, sdfValue);
+  let outlineAlpha = max(outlineRaw - sdfAlpha, 0.0);
 
   // Visibility factor (continuous 0→1, used for fog-of-war blending)
   let vis = clamp(input.light, 0.0, 1.0);
@@ -309,9 +330,9 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
       let tendrilStrength = fogEdge(input.worldGridPos, uniforms.time);
       // Fog wisps drifting over remembered terrain
       let fogWisp = fogOfWar(input.worldGridPos + vec2<f32>(50.0, 30.0), uniforms.time * 0.7);
-      // Combine: tendrils at edges + subtle ambient fog at full explored
-      let fogLayer = fogWisp * 1.5 + vec3<f32>(tendrilStrength * 0.3, tendrilStrength * 0.35, tendrilStrength * 0.8);
-      result = result + fogLayer * invVis * 0.5;
+      // Combine: tendrils at edges + very subtle ambient fog
+      let fogLayer = fogWisp * 0.6 + vec3<f32>(tendrilStrength * 0.15, tendrilStrength * 0.18, tendrilStrength * 0.4);
+      result = result + fogLayer * invVis * 0.3;
     }
 
     return vec4<f32>(applyPostFX(result, input.position.xy), 1.0);
@@ -331,8 +352,62 @@ fn fragmentMain(input: VertexOutput) -> @location(0) vec4<f32> {
 
   // Glyph foreground with premultiplied alpha
   let overlayLit = max(vis, 0.05);
+
+  // ── DAMAGE_FX: chunky pixelated damage numbers ──
+  // Uses textureLoad (nearest-neighbor) instead of textureSample (bilinear)
+  // to get hard pixel edges like a bitmap font. Snaps to coarse texel grid.
+  if ((input.flags & 16u) != 0u) {
+    // Pixelated SDF: snap UV to coarse grid, then textureLoad (no filtering)
+    let texDims = vec2<f32>(textureDimensions(sdfAtlas, 0));
+    let pixelBlock = 8.0; // each visible "pixel" = 8x8 atlas texels → chunky bitmap look
+    let rawTexel = input.atlasUV * texDims;
+    let snapped = floor(rawTexel / pixelBlock) * pixelBlock + pixelBlock * 0.5;
+    let texCoord = vec2<i32>(clamp(snapped, vec2<f32>(0.5), texDims - 0.5));
+    let pixSdf = textureLoad(sdfAtlas, texCoord, 0).r;
+
+    let charPhase = floor(input.worldGridPos.x) * 2.61;
+    let pulse = sin(uniforms.time * 4.0 + charPhase) * 0.5 + 0.5;
+
+    // ── FILL — hard binary from pixelated SDF ──
+    let fillEdge = uniforms.sdfEdge + 0.05;
+    let fillAlpha = step(pixSdf, fillEdge);
+    let fillBoost = pulse * 0.1;
+    let fillColor = min(input.fg.rgb + fillBoost, vec3<f32>(1.0));
+    let fAlpha = fillAlpha * input.fg.a;
+
+    // ── BLACK OUTLINE — thick hard border ──
+    let outlineEdge = fillEdge + 0.13;
+    let outlineRaw = step(pixSdf, outlineEdge);
+    let outlineOnly = max(outlineRaw - fillAlpha, 0.0);
+    let blackOutline = vec3<f32>(0.04, 0.04, 0.05);
+    let oAlpha = outlineOnly;
+
+    // ── GLOW — soft halo (uses smooth sdfValue, not pixelated) ──
+    let glowEdge = outlineEdge + 0.04;
+    let glowSpread = spread * 3.0;
+    let glowRaw = 1.0 - smoothstep(glowEdge - glowSpread, glowEdge + glowSpread, sdfValue);
+    let glowOnly = max(glowRaw - outlineRaw, 0.0);
+    let glowColor = input.fg.rgb * (0.2 + pulse * 0.3);
+    let gAlpha = glowOnly * (0.25 + pulse * 0.15);
+
+    // ── Composite back-to-front (premultiplied alpha) ──
+    var rgb = glowColor * gAlpha;
+    var a = gAlpha;
+    rgb = rgb * (1.0 - oAlpha) + blackOutline * oAlpha;
+    a = a * (1.0 - oAlpha) + oAlpha;
+    rgb = rgb * (1.0 - fAlpha) + fillColor * fAlpha;
+    a = a * (1.0 - fAlpha) + fAlpha;
+
+    return vec4<f32>(rgb, a);
+  }
+
   let glyphAlpha = sdfAlpha * input.fg.a;
   let glyphColor = input.fg.rgb * overlayLit * glyphAlpha;
 
-  return vec4<f32>(glyphColor, glyphAlpha);
+  // Outline via bg color (only when bg.a > 0)
+  let olAlpha = outlineAlpha * input.bg.a;
+  let olColor = input.bg.rgb * overlayLit * olAlpha;
+  let totalAlpha = glyphAlpha + olAlpha * (1.0 - glyphAlpha);
+
+  return vec4<f32>(glyphColor + olColor, totalAlpha);
 }

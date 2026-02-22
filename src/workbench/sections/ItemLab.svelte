@@ -1,5 +1,7 @@
 <script>
   import { onMount } from 'svelte';
+  import { slide, fade } from 'svelte/transition';
+  import { quintOut } from 'svelte/easing';
   import ParamSlider from '../components/ParamSlider.svelte';
   import ParamSelect from '../components/ParamSelect.svelte';
   import StatBar from '../components/StatBar.svelte';
@@ -13,6 +15,7 @@
     getRecordMaxHP, getRecordLifesteal, getRecordStaminaEfficiency,
     getRecordMovementSpeed, getRecordMapReveal, getRecordGoldBonus, getRecordRareChance,
   } from '../../lib/items.js';
+  import { COLORS } from '../../lib/palette.js';
 
   // ── State ──
   let equipment = {
@@ -35,20 +38,29 @@
   $: eqResult = getEquipmentStats(equipment);
   $: stats = eqResult.stats;
   $: resonances = eqResult.resonances;
+  $: totalLevel = getTotalLevel(selectedItem);
+
+  // Muted record colors
+  const REC = {
+    kill:     { color: COLORS.combat, dim: COLORS.bgMuted, label: 'Kill',     action: 'Slay Enemy' },
+    treasure: { color: COLORS.fortune, dim: COLORS.bgMuted, label: 'Treasure', action: 'Find Treasure' },
+    explore:  { color: COLORS.defense, dim: COLORS.bgMuted, label: 'Explore',  action: 'Explore Dungeon' },
+    survive:  { color: COLORS.vitality, dim: COLORS.bgMuted, label: 'Survive',  action: 'Survive Hit' },
+  };
 
   // ── Actions ──
-  function doAction(recordType, label) {
+  function doAction(recordType) {
     equipment[selectedSlot] = addRecordXP(equipment[selectedSlot], recordType, xpAmount);
-    equipment = equipment; // trigger reactivity
+    equipment = equipment;
     const item = equipment[selectedSlot];
     const rec = item.records[recordType];
-    log(`${label}: +${xpAmount} XP to ${recordType} on ${item.name} (Lv${rec.level}, ${rec.xp}/${rec.level >= MAX_LEVEL ? 'MAX' : xpToNextLevel(rec.level)} XP)`);
+    log(`+${xpAmount} XP → ${REC[recordType].label} on ${item.name} (Lv${rec.level}, ${rec.xp}/${rec.level >= MAX_LEVEL ? 'MAX' : xpToNextLevel(rec.level)} XP)`);
   }
 
   function generateNew() {
     equipment[selectedSlot] = createItem(selectedSlot, floorLevel);
     equipment = equipment;
-    log(`Generated new ${equipment[selectedSlot].tier} ${selectedSlot}: ${equipment[selectedSlot].name}`);
+    log(`New ${equipment[selectedSlot].tier} ${selectedSlot}: ${equipment[selectedSlot].name}`);
   }
 
   function generateLegacy() {
@@ -59,7 +71,7 @@
     equipment[selectedSlot] = createLegacyItem(selectedSlot, floorLevel, overrides);
     equipment = equipment;
     const item = equipment[selectedSlot];
-    log(`Found ancient ${item.tier} ${item.name} with ${overrides[RECORD_TYPES[chosen]]} ${RECORD_TYPES[chosen]} levels!`);
+    log(`Ancient ${item.tier} ${item.name} — ${overrides[RECORD_TYPES[chosen]]} ${RECORD_TYPES[chosen]} levels`);
   }
 
   function maxOutRecord(recordType) {
@@ -70,271 +82,220 @@
     }
     equipment[selectedSlot] = item;
     equipment = equipment;
-    log(`Maxed out ${recordType} on ${item.name} to Lv${item.records[recordType].level}`);
+    log(`Maxed ${recordType} → Lv${item.records[recordType].level}`);
   }
 
   function resetItem() {
     equipment[selectedSlot] = createItem(selectedSlot, floorLevel);
     equipment = equipment;
-    log(`Reset ${selectedSlot} to fresh item`);
+    log(`Reset ${selectedSlot}`);
   }
 
   function log(msg) {
     actionLog = [msg, ...actionLog.slice(0, 49)];
   }
-
-  function pct(v) { return `${Math.round(v * 100)}%`; }
-
-  const slotOptions = [
-    { value: 'weapon', label: 'Weapon' },
-    { value: 'armor', label: 'Armor' },
-    { value: 'amulet', label: 'Amulet' },
-  ];
-
-  const RECORD_COLORS = {
-    kill: '#ff4444',
-    treasure: '#ffdd00',
-    explore: '#44aaff',
-    survive: '#44ff44',
-  };
-
-  const RECORD_LABELS = {
-    kill: 'Kill',
-    treasure: 'Treasure',
-    explore: 'Explore',
-    survive: 'Survive',
-  };
-
-  const ACTION_LABELS = {
-    kill: 'Slay Enemy',
-    treasure: 'Find Treasure',
-    explore: 'Explore Dungeon',
-    survive: 'Survive Hit',
-  };
 </script>
 
-<div class="section">
-  <div class="header-row">
-    <h2>Item Lab</h2>
-    <button class="guide-btn" on:click={() => showGuide = !showGuide}>
-      {showGuide ? 'Hide Guide' : 'How It Works'}
-    </button>
-  </div>
+<div class="lab">
+  <!-- Header -->
+  <header class="lab-header">
+    <div class="title-group">
+      <h2>Item Lab</h2>
+      <button class="text-btn" on:click={() => showGuide = !showGuide}>
+        {showGuide ? 'Hide guide' : 'How it works'}
+      </button>
+    </div>
+    <div class="item-badge" style="--c: {itemColor}">
+      <span class="badge-char">{selectedItem.char}</span>
+      <div class="badge-info">
+        <span class="badge-name">{displayName}</span>
+        <span class="badge-meta">Total Lv{totalLevel}</span>
+      </div>
+    </div>
+  </header>
 
   {#if showGuide}
-    <div class="guide">
-      <h3>Living Records Item System</h3>
-      <p>Items grow and transform based on how you use them. Every action leaves a mark.</p>
+    <div class="guide" transition:slide={{ duration: 200, easing: quintOut }}>
+      <p class="guide-lead">Items grow and transform based on how you use them. Every action leaves a permanent mark.</p>
       <div class="guide-grid">
-        <div class="guide-card" style="border-color: #ff4444">
-          <strong style="color: #ff4444">KILL</strong> — Slay enemies to sharpen your weapon.
-          Grants bonus damage (+2 to +50), and crit chance at Lv5+ (up to 30%).
-        </div>
-        <div class="guide-card" style="border-color: #ffdd00">
-          <strong style="color: #ffdd00">TREASURE</strong> — Collect gold and loot.
-          Grants gold bonus at Lv2+ (up to +100%), rare item chance at Lv5+ (up to 25%).
-        </div>
-        <div class="guide-card" style="border-color: #44aaff">
-          <strong style="color: #44aaff">EXPLORE</strong> — Traverse the dungeon.
-          Reduces stamina cost (5%/lv), grants movement speed at Lv4+, map reveal at Lv2+.
-        </div>
-        <div class="guide-card" style="border-color: #44ff44">
-          <strong style="color: #44ff44">SURVIVE</strong> — Take hits and endure.
-          Grants defense (+2 to +50), damage reduction (5%/lv), +5 HP/lv, lifesteal at Lv3+.
-        </div>
+        {#each Object.entries(REC) as [type, r]}
+          <div class="guide-card" style="--c: {r.color}">
+            <strong>{r.label}</strong>
+            <span>
+              {#if type === 'kill'}Slay enemies for bonus damage (+2 to +50), crit chance at Lv5+.
+              {:else if type === 'treasure'}Collect loot for gold bonus at Lv2+, rare drops at Lv5+.
+              {:else if type === 'explore'}Traverse the dungeon for stamina reduction, speed at Lv4+, map reveal at Lv2+.
+              {:else}Take hits for defense, damage reduction, +5 HP/lv, lifesteal at Lv3+.
+              {/if}
+            </span>
+          </div>
+        {/each}
       </div>
-      <h3>Resonance</h3>
-      <p>When two equipped items share the same dominant record type at Lv3+, they <strong>resonate</strong>, creating a powerful combo bonus. Different primary types can also create complementary resonance (kill+survive = Warrior Soul, treasure+explore = Treasure Hunter, etc.).</p>
-      <h3>Visual Growth</h3>
-      <p>Each level-up adds a permanent visual mark to the item. The item's name changes with its primary record: a kill-focused sword becomes "Sharpened" at Lv1, "Bloodied" at Lv3, "Champion's" at Lv7, and "Legendary" at Lv10. Its color intensifies as it grows.</p>
-      <h3>XP Curve</h3>
-      <p>Lv1: 10 XP, Lv2: 20, Lv3: 40, Lv4: 80 ... Lv10: 5120 XP. Total to max one record: 10,230 XP.</p>
+      <div class="guide-row"><strong>Resonance</strong> — Matching dominant records at Lv3+ across items create combo bonuses.</div>
+      <div class="guide-row"><strong>Growth</strong> — Names evolve with primary record. XP doubles each level: 10 → 20 → 40 → ... → 5120.</div>
     </div>
   {/if}
 
-  <div class="layout">
-    <!-- LEFT: Equipment & Controls -->
-    <div class="panel controls-panel">
-      <h3>Equipment</h3>
+  <!-- Main layout -->
+  <div class="main-grid">
 
+    <!-- LEFT: Equipment & Controls -->
+    <section class="panel">
+      <h4>Equipment</h4>
       <div class="eq-slots">
         {#each ['weapon', 'armor', 'amulet'] as slot}
           {@const item = equipment[slot]}
           {@const color = getItemColor(item)}
-          <button
-            class="eq-slot"
-            class:selected={selectedSlot === slot}
-            on:click={() => selectedSlot = slot}
-          >
+          {@const active = selectedSlot === slot}
+          <button class="eq-slot" class:active on:click={() => selectedSlot = slot}>
             <span class="slot-char" style="color: {color}">{item.char}</span>
-            <span class="slot-info">
+            <span class="slot-body">
               <span class="slot-name" style="color: {color}">{getItemDisplayName(item)}</span>
-              <span class="slot-meta">[{item.tier}] {slot}</span>
+              <span class="slot-meta">{item.tier} {slot}</span>
             </span>
             {#if item.primaryRecord}
-              <span class="slot-badge" style="background: {RECORD_COLORS[item.primaryRecord]}">{RECORD_LABELS[item.primaryRecord]} Lv{item.records[item.primaryRecord].level}</span>
+              {@const pr = item.primaryRecord}
+              <span class="slot-tag" style="--c: {REC[pr].color}">{REC[pr].label} {item.records[pr].level}</span>
             {:else}
-              <span class="slot-badge empty">Fresh</span>
+              <span class="slot-tag dim">Fresh</span>
             {/if}
           </button>
         {/each}
       </div>
 
-      <div class="divider"></div>
-
-      <h3>Actions</h3>
-      <ParamSlider label="XP per Action" min={1} max={200} step={1} value={xpAmount} on:change={e => xpAmount = e.detail} />
-
-      <div class="action-grid">
-        {#each Object.entries(ACTION_LABELS) as [type, label]}
-          <button class="action-btn" style="border-color: {RECORD_COLORS[type]}" on:click={() => doAction(type, label)}>
-            <span style="color: {RECORD_COLORS[type]}">{label}</span>
+      <h4>Actions</h4>
+      <ParamSlider label="XP per action" min={1} max={200} step={1} value={xpAmount} on:change={e => xpAmount = e.detail} />
+      <div class="btn-grid">
+        {#each Object.entries(REC) as [type, r]}
+          <button class="act-btn" style="--c: {r.color}" on:click={() => doAction(type)}>
+            {r.action}
           </button>
         {/each}
       </div>
 
-      <div class="divider"></div>
-
-      <h3>Item Generation</h3>
-      <ParamSlider label="Floor Level" min={1} max={30} step={1} value={floorLevel} on:change={e => floorLevel = e.detail} />
-      <div class="gen-row">
-        <button class="gen-btn" on:click={generateNew}>New Random</button>
-        <button class="gen-btn legacy" on:click={generateLegacy}>Find Ancient</button>
-        <button class="gen-btn danger" on:click={resetItem}>Reset</button>
+      <h4>Generate</h4>
+      <ParamSlider label="Floor level" min={1} max={30} step={1} value={floorLevel} on:change={e => floorLevel = e.detail} />
+      <div class="btn-row">
+        <button class="text-btn" on:click={generateNew}>Random</button>
+        <button class="text-btn gold" on:click={generateLegacy}>Ancient</button>
+        <button class="text-btn danger" on:click={resetItem}>Reset</button>
       </div>
 
-      <div class="divider"></div>
-
-      <h3>Quick Max</h3>
-      <div class="action-grid">
-        {#each Object.entries(RECORD_LABELS) as [type, label]}
-          <button class="max-btn" style="border-color: {RECORD_COLORS[type]}" on:click={() => maxOutRecord(type)}>
-            Max {label}
+      <h4>Quick Max</h4>
+      <div class="btn-grid sm">
+        {#each Object.entries(REC) as [type, r]}
+          <button class="max-btn" style="--c: {r.color}" on:click={() => maxOutRecord(type)}>
+            {r.label}
           </button>
         {/each}
       </div>
-    </div>
+    </section>
 
     <!-- MIDDLE: Item Details -->
-    <div class="panel detail-panel">
-      <h3>Selected Item</h3>
-
-      <div class="item-header">
-        <span class="big-char" style="color: {itemColor}">{selectedItem.char}</span>
+    <section class="panel detail">
+      <div class="item-hero" style="--c: {itemColor}">
+        <span class="hero-char">{selectedItem.char}</span>
         <div>
-          <div class="item-name" style="color: {itemColor}">{displayName}</div>
-          <div class="item-meta">[{selectedItem.tier}] {selectedItem.slot} | Floor {selectedItem.floorCreated} | Total Lv{getTotalLevel(selectedItem)}</div>
+          <div class="hero-name">{displayName}</div>
+          <div class="hero-meta">{selectedItem.tier} {selectedItem.slot} · Floor {selectedItem.floorCreated} · Total Lv{totalLevel}</div>
         </div>
       </div>
 
+      <h4>Living Records</h4>
       <div class="records">
         {#each Object.entries(selectedItem.records) as [type, rec]}
           {@const needed = rec.level >= MAX_LEVEL ? 1 : xpToNextLevel(rec.level)}
-          {@const xpPct = rec.level >= MAX_LEVEL ? 100 : Math.round(rec.xp / needed * 100)}
+          {@const pct = rec.level >= MAX_LEVEL ? 100 : Math.round(rec.xp / needed * 100)}
           {@const stage = getVisualStage(type, rec.level)}
-          <div class="record-row">
-            <div class="record-label" style="color: {RECORD_COLORS[type]}">{RECORD_LABELS[type]}</div>
-            <div class="record-level">Lv{rec.level}</div>
-            <div class="record-bar-wrap">
-              <div class="record-bar" style="width: {xpPct}%; background: {RECORD_COLORS[type]}"></div>
+          {@const r = REC[type]}
+          <div class="rec" style="--c: {r.color}">
+            <div class="rec-head">
+              <span class="rec-label">{r.label}</span>
+              <span class="rec-lv">{rec.level}</span>
+              <div class="rec-bar"><div class="rec-fill" style="width: {pct}%"></div></div>
+              <span class="rec-xp">{#if rec.level >= MAX_LEVEL}MAX{:else}{rec.xp}/{needed}{/if}</span>
             </div>
-            <div class="record-xp">
-              {#if rec.level >= MAX_LEVEL}MAX{:else}{rec.xp}/{needed}{/if}
-            </div>
+            {#if rec.level > 0}
+              <div class="rec-bonus">{stage.prefix ? `"${stage.prefix}"` : ''} — {getRecordBonusForType(type, rec.level)}</div>
+            {/if}
           </div>
-          {#if rec.level > 0}
-            <div class="record-bonus" style="color: {stage.color}">
-              {stage.prefix ? `"${stage.prefix}"` : ''} — {getRecordBonusForType(type, rec.level)}
-            </div>
-          {/if}
         {/each}
       </div>
 
       {#if selectedItem.visualMarks.length > 0}
-        <div class="marks-section">
-          <h4>Visual Marks ({selectedItem.visualMarks.length})</h4>
-          <div class="marks-list">
-            {#each selectedItem.visualMarks as mark, i}
-              <span class="mark">{mark}</span>
-            {/each}
-          </div>
+        <h4>Visual Marks <span class="count">{selectedItem.visualMarks.length}</span></h4>
+        <div class="marks" in:fade={{ duration: 150 }}>
+          {#each selectedItem.visualMarks as mark}
+            <span class="mark">{mark}</span>
+          {/each}
         </div>
       {/if}
 
-      <div class="divider"></div>
-
-      <h3>Tooltip Preview</h3>
-      <pre class="tooltip-preview">{tooltip.join('\n')}</pre>
-    </div>
+      <h4>Tooltip</h4>
+      <pre class="tooltip">{tooltip.join('\n')}</pre>
+    </section>
 
     <!-- RIGHT: Stats & Resonance -->
-    <div class="panel stats-panel">
-      <h3>Equipment Stats</h3>
-      <div class="stat-group">
-        <h4>Combat</h4>
-        <StatBar label="Bonus Damage" value={stats.bonusDamage} max={Math.max(stats.bonusDamage, 60)} color="#ff4444" />
-        <StatBar label="Crit Chance" value={Math.round(stats.critChance * 100)} max={50} color="#ff8844" />
-        <StatBar label="Bonus Defense" value={stats.bonusDefense} max={Math.max(stats.bonusDefense, 60)} color="#4444ff" />
-        <StatBar label="Damage Reduction" value={Math.round(stats.damageReduction * 100)} max={75} color="#6666ff" />
-        <StatBar label="Bonus Max HP" value={stats.bonusMaxHP} max={Math.max(stats.bonusMaxHP, 50)} color="#44ff44" />
-        <StatBar label="Lifesteal" value={Math.round(stats.lifesteal * 100)} max={50} color="#88ff88" />
-      </div>
-      <div class="stat-group">
-        <h4>Movement</h4>
-        <StatBar label="Stamina Eff." value={Math.round(stats.staminaEfficiency * 100)} max={100} color="#44aaff" />
-        <StatBar label="Move Speed" value={Math.round(stats.movementSpeed * 100)} max={100} color="#66ccff" />
-        <StatBar label="Map Reveal" value={stats.mapReveal} max={20} color="#8888ff" />
-      </div>
-      <div class="stat-group">
-        <h4>Fortune</h4>
-        <StatBar label="Gold Bonus" value={Math.round(stats.goldBonus * 100)} max={100} color="#ffdd00" />
-        <StatBar label="Rare Chance" value={Math.round(stats.rareItemChance * 100)} max={50} color="#ffaa00" />
-      </div>
+    <section class="panel sidebar">
+      <h4>Combat</h4>
+      <StatBar label="Bonus Damage" value={stats.bonusDamage} max={Math.max(stats.bonusDamage, 60)} color={COLORS.combat} />
+      <StatBar label="Crit Chance" value={Math.round(stats.critChance * 100)} max={50} color={COLORS.accentAmber} />
+      <StatBar label="Bonus Defense" value={stats.bonusDefense} max={Math.max(stats.bonusDefense, 60)} color={COLORS.defense} />
+      <StatBar label="Dmg Reduction" value={Math.round(stats.damageReduction * 100)} max={75} color={COLORS.defense} />
+      <StatBar label="Bonus Max HP" value={stats.bonusMaxHP} max={Math.max(stats.bonusMaxHP, 50)} color={COLORS.vitality} />
+      <StatBar label="Lifesteal" value={Math.round(stats.lifesteal * 100)} max={50} color={COLORS.vitality} />
 
-      <div class="divider"></div>
+      <h4>Movement</h4>
+      <StatBar label="Stamina Eff." value={Math.round(stats.staminaEfficiency * 100)} max={100} color={COLORS.exploration} />
+      <StatBar label="Move Speed" value={Math.round(stats.movementSpeed * 100)} max={100} color={COLORS.exploration} />
+      <StatBar label="Map Reveal" value={stats.mapReveal} max={20} color={COLORS.defense} />
 
-      <h3>Resonance</h3>
+      <h4>Fortune</h4>
+      <StatBar label="Gold Bonus" value={Math.round(stats.goldBonus * 100)} max={100} color={COLORS.fortune} />
+      <StatBar label="Rare Chance" value={Math.round(stats.rareItemChance * 100)} max={50} color={COLORS.fortune} />
+
+      <h4>Resonance</h4>
       {#if resonances.length > 0}
         {#each resonances as r}
-          <div class="resonance-card" style="border-color: {r.color}">
-            <div class="res-label" style="color: {r.color}">{r.label}</div>
+          <div class="res-card" style="--c: {r.color}">
+            <div class="res-name">{r.label}</div>
             <div class="res-desc">{r.description}</div>
             <StatBar label="Strength" value={r.strength} max={50} color={r.color} />
           </div>
         {/each}
       {:else}
-        <div class="no-resonance">
-          No resonance active. Equip items with matching or complementary primary records at Lv3+ to activate.
-        </div>
+        <p class="empty">No resonance. Match dominant records at Lv3+ across equipment.</p>
       {/if}
 
-      <div class="divider"></div>
-
-      <h3>Resonance Map</h3>
+      <h4>Resonance Map</h4>
       <div class="res-map">
-        <div class="res-map-row"><span class="res-combo">Kill + Kill</span> = <span style="color:#ff0000">Blood Brothers</span> (+damage)</div>
-        <div class="res-map-row"><span class="res-combo">Treasure + Treasure</span> = <span style="color:#ffdd00">Golden Pair</span> (+gold)</div>
-        <div class="res-map-row"><span class="res-combo">Explore + Explore</span> = <span style="color:#00aaff">Pathfinders</span> (+movement)</div>
-        <div class="res-map-row"><span class="res-combo">Survive + Survive</span> = <span style="color:#8888ff">Iron Bond</span> (+defense)</div>
-        <div class="res-map-row"><span class="res-combo">Kill + Survive</span> = <span style="color:#ff8800">Warrior Soul</span> (+atk & def)</div>
-        <div class="res-map-row"><span class="res-combo">Treasure + Explore</span> = <span style="color:#44ff44">Treasure Hunter</span> (+loot & speed)</div>
-        <div class="res-map-row"><span class="res-combo">Kill + Treasure</span> = <span style="color:#ff4400">Berserker</span> (+offense)</div>
-        <div class="res-map-row"><span class="res-combo">Explore + Survive</span> = <span style="color:#ffff88">Paladin</span> (+tank)</div>
+        {#each [
+          ['Kill + Kill', 'Blood Brothers', COLORS.bloodBrothers],
+          ['Treasure + Treasure', 'Golden Pair', COLORS.goldenPair],
+          ['Explore + Explore', 'Pathfinders', COLORS.pathfinders],
+          ['Survive + Survive', 'Iron Bond', COLORS.ironBond],
+          ['Kill + Survive', 'Warrior Soul', COLORS.warriorSoul],
+          ['Treasure + Explore', 'Treasure Hunter', COLORS.treasureHunter],
+          ['Kill + Treasure', 'Berserker', COLORS.berserker],
+          ['Explore + Survive', 'Paladin', COLORS.paladin],
+        ] as [pair, name, color]}
+          <div class="res-row">
+            <span class="res-pair">{pair}</span>
+            <span style="color: {color}; font-weight: 600">{name}</span>
+          </div>
+        {/each}
       </div>
-    </div>
+    </section>
   </div>
 
-  <!-- Action Log -->
-  <div class="log-panel">
-    <h3>Action Log</h3>
-    <div class="log-scroll">
-      {#each actionLog as msg, i}
-        <div class="log-entry" style="opacity: {1 - i * 0.02}">{msg}</div>
-      {/each}
-      {#if actionLog.length === 0}
-        <div class="log-empty">Perform actions to see results here...</div>
-      {/if}
-    </div>
+  <!-- Log -->
+  <div class="log">
+    {#each actionLog as msg, i}
+      <div class="log-line" style="opacity: {1 - i * 0.02}">{msg}</div>
+    {/each}
+    {#if actionLog.length === 0}
+      <div class="log-line empty">Perform actions to see results here.</div>
+    {/if}
   </div>
 </div>
 
@@ -368,137 +329,183 @@
 </script>
 
 <style>
-  .section h2 { color: #ffaa00; margin-bottom: 10px; }
-  .section h3 { color: #aaa; margin: 10px 0 8px; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; }
-  .section h4 { color: #777; margin: 8px 0 4px; font-size: 11px; text-transform: uppercase; }
+  /* ── Lab container (inherits tokens from Workbench) ── */
+  .lab { line-height: 1.5; }
 
-  .header-row { display: flex; align-items: center; gap: 16px; margin-bottom: 10px; }
-  .guide-btn {
-    background: #222; color: #ffaa00; border: 1px solid #444; padding: 4px 12px;
-    font-family: monospace; font-size: 11px; cursor: pointer; border-radius: 3px;
+  /* ── Header ── */
+  .lab-header {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: var(--space-md);
   }
-  .guide-btn:hover { border-color: #ffaa00; }
+  .title-group { display: flex; align-items: baseline; gap: var(--space-md); }
+  h2 { color: var(--fg); font-size: 18px; font-weight: 600; margin: 0; letter-spacing: 0.5px; }
 
+  .item-badge {
+    display: flex; align-items: center; gap: var(--space-sm);
+    background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius);
+    padding: var(--space-sm) var(--space-md);
+  }
+  .badge-char { font-size: 22px; color: var(--c); }
+  .badge-info { display: flex; flex-direction: column; }
+  .badge-name { font-size: 13px; font-weight: 600; color: var(--c); }
+  .badge-meta { font-size: 9px; color: var(--fg-dim); }
+
+  /* ── Buttons ── */
+  .text-btn {
+    background: none; border: 1px solid var(--border); color: var(--fg-muted);
+    padding: 4px 12px; border-radius: var(--radius); cursor: pointer;
+    font-family: inherit; font-size: 11px; transition: all var(--transition-fast);
+  }
+  .text-btn:hover { color: var(--fg); border-color: var(--fg-dim); }
+  .text-btn.gold { border-color: var(--border); color: var(--accent-amber); }
+  .text-btn.gold:hover { border-color: var(--accent-amber); }
+  .text-btn.danger { border-color: var(--border); color: var(--accent-red); }
+  .text-btn.danger:hover { border-color: var(--accent-red); }
+
+  /* ── Guide ── */
   .guide {
-    background: #0a0a18; border: 1px solid #333; border-radius: 4px; padding: 16px;
-    margin-bottom: 16px; font-size: 12px; line-height: 1.6; color: #ccc;
+    background: var(--bg-card); border-radius: var(--radius);
+    padding: var(--space-md); margin-bottom: var(--space-md);
   }
-  .guide h3 { color: #ffaa00; margin-top: 16px; }
-  .guide h3:first-child { margin-top: 0; }
-  .guide p { margin: 6px 0; }
-  .guide-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
+  .guide-lead { color: var(--fg); margin: 0 0 var(--space-sm); font-size: 13px; }
+  .guide-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-sm); margin-bottom: var(--space-sm); }
   .guide-card {
-    background: #111; border-left: 3px solid; padding: 8px 12px; font-size: 11px;
-    border-radius: 0 3px 3px 0;
+    background: var(--bg-muted); border-left: 2px solid var(--c);
+    padding: var(--space-sm) 12px; border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    font-size: 11px; color: var(--fg-muted);
+  }
+  .guide-card strong { color: var(--c); display: block; margin-bottom: 2px; }
+  .guide-row { color: var(--fg-muted); font-size: 11px; padding: 2px 0; }
+  .guide-row strong { color: var(--fg); }
+
+  /* ── Section headers ── */
+  h4 {
+    font-size: 10px; text-transform: uppercase; letter-spacing: 1.5px;
+    color: var(--fg-dim); margin: var(--space-md) 0 var(--space-sm); font-weight: 500;
+  }
+  h4:first-child { margin-top: 0; }
+  .count { color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+
+  /* ── Main Grid ── */
+  .main-grid {
+    display: grid; grid-template-columns: 280px 1fr 260px;
+    gap: var(--space-md); margin-bottom: var(--space-md);
   }
 
-  .layout { display: grid; grid-template-columns: 280px 1fr 300px; gap: 16px; }
-  .panel { background: #0d0d1a; border: 1px solid #222; border-radius: 4px; padding: 12px; }
+  .panel {
+    background: var(--bg-card); border: 1px solid var(--border);
+    border-radius: var(--radius); padding: var(--space-md);
+  }
 
-  /* Equipment Slots */
-  .eq-slots { display: flex; flex-direction: column; gap: 6px; }
+  /* ── Equipment Slots ── */
+  .eq-slots { display: flex; flex-direction: column; gap: var(--space-xs); }
   .eq-slot {
-    display: flex; align-items: center; gap: 8px; padding: 8px;
-    background: #111; border: 1px solid #333; border-radius: 3px;
-    cursor: pointer; font-family: monospace; font-size: 12px; color: #ccc;
-    text-align: left;
+    display: flex; align-items: center; gap: var(--space-sm); padding: var(--space-sm) 10px;
+    background: var(--bg-muted); border: 1px solid transparent; border-radius: var(--radius-sm);
+    cursor: pointer; font-family: inherit; font-size: 12px; color: var(--fg);
+    text-align: left; transition: all var(--transition-fast);
   }
-  .eq-slot:hover { border-color: #555; }
-  .eq-slot.selected { border-color: #ffaa00; background: #1a1a28; }
-  .slot-char { font-size: 20px; width: 28px; text-align: center; }
-  .slot-info { flex: 1; display: flex; flex-direction: column; }
-  .slot-name { font-size: 11px; font-weight: bold; }
-  .slot-meta { font-size: 10px; color: #666; }
-  .slot-badge {
-    font-size: 9px; padding: 2px 6px; border-radius: 3px; color: #000; font-weight: bold;
+  .eq-slot:hover { background: var(--bg-accent); transform: translateX(2px); }
+  .eq-slot.active { border-color: var(--border-accent); background: var(--bg-accent); box-shadow: 0 0 0 1px var(--border-accent); }
+  .slot-char { font-size: 18px; width: 24px; text-align: center; }
+  .slot-body { flex: 1; display: flex; flex-direction: column; }
+  .slot-name { font-size: 11px; font-weight: 600; }
+  .slot-meta { font-size: 9px; color: var(--fg-dim); }
+  .slot-tag {
+    font-size: 9px; padding: 2px 6px; border-radius: 3px; font-weight: 600;
+    background: color-mix(in srgb, var(--c) 20%, transparent); color: var(--c);
   }
-  .slot-badge.empty { background: #444; color: #888; }
+  .slot-tag.dim { background: var(--bg-accent); color: var(--fg-dim); }
 
-  .divider { border-top: 1px solid #222; margin: 12px 0; }
+  /* ── Action/Max Buttons ── */
+  .btn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-xs); }
+  .btn-grid.sm { gap: 3px; }
+  .btn-row { display: flex; gap: var(--space-xs); }
+  .btn-row .text-btn { flex: 1; text-align: center; }
 
-  /* Actions */
-  .action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-  .action-btn {
-    background: #111; border: 1px solid; padding: 8px 6px;
-    font-family: monospace; font-size: 11px; cursor: pointer; border-radius: 3px;
-    color: #ccc;
+  .act-btn {
+    background: var(--bg-muted); border: 1px solid var(--border); padding: 7px 6px;
+    font-family: inherit; font-size: 11px; cursor: pointer; border-radius: var(--radius-sm);
+    color: var(--c); transition: all var(--transition-fast);
+    border-left: 2px solid var(--c);
   }
-  .action-btn:hover { background: #1a1a28; }
-  .action-btn:active { transform: scale(0.97); }
-
-  .gen-row { display: flex; gap: 6px; }
-  .gen-btn {
-    flex: 1; background: #111; border: 1px solid #444; padding: 6px 8px;
-    font-family: monospace; font-size: 11px; color: #ccc; cursor: pointer;
-    border-radius: 3px;
-  }
-  .gen-btn:hover { border-color: #888; }
-  .gen-btn.legacy { border-color: #886600; color: #ffaa00; }
-  .gen-btn.legacy:hover { border-color: #ffaa00; }
-  .gen-btn.danger { border-color: #662222; color: #ff4444; }
-  .gen-btn.danger:hover { border-color: #ff4444; }
+  .act-btn:hover { background: var(--bg-accent); }
+  .act-btn:active { transform: scale(0.97); }
 
   .max-btn {
-    background: #111; border: 1px solid; padding: 4px 6px;
-    font-family: monospace; font-size: 10px; cursor: pointer; border-radius: 3px;
-    color: #888;
+    background: var(--bg-muted); border: 1px solid var(--border); padding: 4px 6px;
+    font-family: inherit; font-size: 10px; cursor: pointer; border-radius: var(--radius-sm);
+    color: var(--fg-dim); transition: all var(--transition-fast);
+    border-left: 2px solid color-mix(in srgb, var(--c) 40%, transparent);
   }
-  .max-btn:hover { color: #eee; background: #1a1a28; }
+  .max-btn:hover { color: var(--c); background: var(--bg-accent); border-left-color: var(--c); }
 
-  /* Item Details */
-  .item-header { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-  .big-char { font-size: 36px; }
-  .item-name { font-size: 16px; font-weight: bold; }
-  .item-meta { font-size: 11px; color: #666; }
+  /* ── Item Hero ── */
+  .item-hero { display: flex; align-items: center; gap: var(--space-md); margin-bottom: var(--space-md); }
+  .hero-char { font-size: 36px; color: var(--c); }
+  .hero-name { font-size: 16px; font-weight: 600; color: var(--c); }
+  .hero-meta { font-size: 11px; color: var(--fg-muted); margin-top: 2px; }
 
-  .records { display: flex; flex-direction: column; gap: 2px; }
-  .record-row { display: flex; align-items: center; gap: 8px; height: 20px; }
-  .record-label { width: 70px; font-size: 11px; font-weight: bold; }
-  .record-level { width: 30px; font-size: 11px; text-align: right; color: #aaa; }
-  .record-bar-wrap { flex: 1; height: 6px; background: #1a1a28; border-radius: 3px; overflow: hidden; }
-  .record-bar { height: 100%; transition: width 0.3s ease; border-radius: 3px; }
-  .record-xp { width: 70px; font-size: 10px; color: #666; text-align: right; }
-  .record-bonus { font-size: 10px; margin-left: 108px; margin-bottom: 4px; }
+  /* ── Records ── */
+  .records { display: flex; flex-direction: column; gap: var(--space-xs); }
+  .rec {
+    background: var(--bg-muted); border-radius: var(--radius-sm); padding: var(--space-sm) 10px;
+    border-left: 2px solid var(--c); transition: background var(--transition-fast), transform var(--transition-fast);
+  }
+  .rec:hover { background: var(--bg-accent); transform: translateX(2px); }
+  .rec-head { display: flex; align-items: center; gap: var(--space-sm); }
+  .rec-label { width: 62px; font-size: 11px; font-weight: 600; color: var(--c); }
+  .rec-lv { width: 18px; font-size: 12px; text-align: right; color: var(--fg); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .rec-bar { flex: 1; height: 4px; background: var(--bg); border-radius: 2px; overflow: hidden; margin: 0 var(--space-xs); }
+  .rec-fill { height: 100%; background: var(--c); opacity: 0.7; transition: width 0.3s ease; border-radius: 2px; }
+  .rec-xp { width: 55px; font-size: 10px; color: var(--fg-dim); text-align: right; font-variant-numeric: tabular-nums; }
+  .rec-bonus { font-size: 10px; color: var(--fg-muted); margin-top: 3px; padding-left: 2px; }
 
-  .marks-section { margin-top: 12px; }
-  .marks-list { display: flex; flex-wrap: wrap; gap: 4px; }
+  /* ── Marks ── */
+  .marks { display: flex; flex-wrap: wrap; gap: var(--space-xs); }
   .mark {
-    background: #1a1a28; border: 1px solid #333; padding: 2px 8px;
-    font-size: 10px; color: #aaa; border-radius: 3px;
+    background: var(--bg-muted); border: 1px solid var(--border); padding: 2px 8px;
+    font-size: 10px; color: var(--fg-muted); border-radius: 3px;
+    transition: background var(--transition-fast), color var(--transition-fast);
   }
+  .mark:hover { background: var(--bg-accent); color: var(--fg); }
 
-  .tooltip-preview {
-    background: #0a0a14; border: 1px solid #333; border-radius: 3px;
-    padding: 10px; font-size: 11px; color: #ccc; line-height: 1.5;
+  /* ── Tooltip ── */
+  .tooltip {
+    background: var(--bg-muted); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    padding: 10px; font-size: 11px; color: var(--fg-muted); line-height: 1.5;
     white-space: pre; overflow-x: auto; margin: 0;
   }
 
-  /* Stats */
-  .stat-group { margin-bottom: 8px; }
-
-  /* Resonance */
-  .resonance-card {
-    background: #111; border: 1px solid; border-radius: 4px; padding: 8px;
-    margin-bottom: 8px;
+  /* ── Resonance ── */
+  .res-card {
+    background: var(--bg-muted); border-left: 2px solid var(--c);
+    border-radius: var(--radius-sm); padding: var(--space-sm); margin-bottom: var(--space-sm);
+    transition: background var(--transition-fast), transform var(--transition-fast);
+    animation: fade-in 200ms ease;
   }
-  .res-label { font-size: 13px; font-weight: bold; margin-bottom: 4px; }
-  .res-desc { font-size: 11px; color: #aaa; margin-bottom: 6px; }
-  .no-resonance { font-size: 11px; color: #555; padding: 8px; background: #111; border-radius: 3px; }
+  .res-card:hover { background: var(--bg-accent); transform: translateX(2px); }
+  .res-name { font-size: 12px; font-weight: 600; color: var(--c); margin-bottom: 2px; }
+  .res-desc { font-size: 10px; color: var(--fg-muted); margin-bottom: 6px; }
+  .empty { font-size: 11px; color: var(--fg-dim); margin: 0; }
 
-  .res-map { font-size: 10px; line-height: 1.8; }
-  .res-map-row { color: #888; }
-  .res-combo { color: #aaa; }
-
-  /* Log */
-  .log-panel {
-    margin-top: 16px; background: #0a0a14; border: 1px solid #222;
-    border-radius: 4px; padding: 12px;
+  .res-map { font-size: 10px; }
+  .res-row {
+    display: flex; justify-content: space-between; padding: 3px var(--space-xs);
+    border-bottom: 1px solid var(--border-muted);
   }
-  .log-scroll { max-height: 120px; overflow-y: auto; }
-  .log-entry { font-size: 11px; color: #888; padding: 2px 0; border-bottom: 1px solid #1a1a1a; }
-  .log-empty { font-size: 11px; color: #444; }
+  .res-pair { color: var(--fg-dim); }
 
-  @media (max-width: 1200px) {
-    .layout { grid-template-columns: 1fr; }
+  /* ── Log ── */
+  .log {
+    background: var(--bg-card); border-radius: var(--radius); padding: var(--space-sm) var(--space-md);
+    max-height: 100px; overflow-y: auto;
+  }
+  .log-line { font-size: 10px; color: var(--fg-dim); padding: 2px 0; animation: fade-in 150ms ease; }
+  .log-line.empty { font-style: italic; animation: none; }
+
+  /* ── Responsive ── */
+  @media (max-width: 1100px) {
+    .main-grid { grid-template-columns: 1fr; }
   }
 </style>

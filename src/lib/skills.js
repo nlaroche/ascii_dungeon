@@ -229,7 +229,7 @@ function generateSkillGraph() {
           // Offset slightly from the small node
           const offsetAngle = 0.15;
           const smallNodeAngle = Math.atan2(smallNode.y, smallNode.x);
-          const radius = Math.sqrt(smallNode.x * smallNode.x + smallNode.y * smallNode.y) + 0.8;
+          const radius = Math.sqrt(smallNode.x * smallNode.x + smallNode.y * smallNode.y) + MIN_NODE_DISTANCE;
           
           const x = Math.cos(smallNodeAngle + offsetAngle) * radius;
           const y = Math.sin(smallNodeAngle + offsetAngle) * radius;
@@ -297,6 +297,34 @@ function generateSkillGraph() {
     }
   }
   
+  // ── Collision resolution: force-directed repulsion ──
+  const nodeIds = Object.keys(nodes);
+  for (let iter = 0; iter < 50; iter++) {
+    let moved = false;
+    for (let i = 0; i < nodeIds.length; i++) {
+      const a = nodes[nodeIds[i]];
+      if (a.id === 'start') continue;
+      for (let j = i + 1; j < nodeIds.length; j++) {
+        const b = nodes[nodeIds[j]];
+        if (b.id === 'start') continue;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < MIN_NODE_DISTANCE && dist > 0.001) {
+          const overlap = (MIN_NODE_DISTANCE - dist) / 2;
+          const nx = dx / dist;
+          const ny = dy / dist;
+          a.x -= nx * overlap;
+          a.y -= ny * overlap;
+          b.x += nx * overlap;
+          b.y += ny * overlap;
+          moved = true;
+        }
+      }
+    }
+    if (!moved) break;
+  }
+
   // Connect nodes within each region using structured approach
   for (const region of REGIONS) {
     const tiers = ['inner', 'mid', 'outer', 'deep'];

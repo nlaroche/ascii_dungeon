@@ -1,6 +1,6 @@
 <script>
   import { createEventDispatcher } from 'svelte';
-  
+
   export let label = '';
   export let min = 0;
   export let max = 100;
@@ -24,9 +24,9 @@
   <input
     {id}
     type="range"
-    {min} 
-    {max} 
-    {step} 
+    {min}
+    {max}
+    {step}
     {value}
     on:input={handleChange}
   />
@@ -34,49 +34,62 @@
 
 <style>
   .param-slider {
-    margin-bottom: 15px;
+    margin-bottom: var(--space-md, 16px);
   }
-  
+
   label {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 5px;
-    font-size: 12px;
+    margin-bottom: var(--space-xs, 4px);
+    font-size: 11px;
   }
-  
+
   .label {
-    color: #888;
+    color: var(--fg-muted);
   }
-  
+
   .value {
-    color: #00ffff;
-    font-weight: bold;
+    color: var(--accent);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
   }
-  
+
   input[type="range"] {
     width: 100%;
-    height: 6px;
-    background: #333;
-    border-radius: 3px;
+    height: 4px;
+    background: var(--bg-accent);
+    border-radius: 2px;
     outline: none;
     -webkit-appearance: none;
-  }
-  
-  input[type="range"]::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 16px;
-    height: 16px;
-    background: #00ff00;
-    border-radius: 50%;
     cursor: pointer;
   }
-  
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 12px;
+    height: 12px;
+    background: var(--accent-green);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform 120ms ease, background 120ms ease;
+  }
+
+  input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.2);
+  }
+
   input[type="range"]::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
-    background: #00ff00;
+    width: 12px;
+    height: 12px;
+    background: var(--accent-green);
     border-radius: 50%;
     cursor: pointer;
     border: none;
+  }
+
+  input[type="range"]::-moz-range-track {
+    height: 4px;
+    background: var(--bg-accent);
+    border-radius: 2px;
   }
 </style>

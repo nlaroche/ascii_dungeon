@@ -1,0 +1,98 @@
+Rewrite the skill tree graph generation in skills.js and the visualization in SkillTreeLab.svelte. The current version has overlapping nodes, random ugly clustering, unreadable text, and is far too dark.
+
+## Problem 1: Node positions overlap and look random
+
+The current `generateSkillGraph()` places nodes with random positions like:
+```js
+const x = Math.cos(nodeAngle) * distance + (rng() - 0.5) * 2;
+```
+
+This creates overlapping blobs of nodes. Instead, use a STRUCTURED geometric layout:
+
+### New layout algorithm for `generateSkillGraph()`:
+
+Each region fans out from center in a **60-degree wedge**. Within each wedge, nodes are placed on **concentric rings** at fixed radii with even angular spacing. This prevents overlap entirely.
+
+Replace the entire node generation loop with this approach:
+
+```js
+// Ring radii for each tier (in grid units)
+const RING_RADII = {
+  inner: [3, 4.5, 6],      // 3 rings
+  mid: [8, 9.5, 11],        // 3 rings
+  outer: [13, 14.5, 16, 18], // 4 rings
+  deep: [20, 22, 24]         // 3 rings
+};
+
+// For each region, compute the angular wedge
+// Each region gets 60 degrees (PI/3) of arc
+// Nodes are evenly distributed within that wedge along rings
+
+for (const region of REGIONS) {
+  const baseAngle = REGION_ANGLES[region];
+  const wedgeWidth = Math.PI / 3.5; // slightly less than 60 deg for gaps between regions
+
+  for each tier (inner/mid/outer/deep):
+    for each ring in RING_RADII[tier]:
+      distribute N nodes evenly along the arc at this radius
+      N = smallCount / number_of_rings for small nodes
+      place notable nodes at key positions (every 3rd-4th position)
+
+  // Keystones go at the center of outer/deep rings, slightly offset
+```
+
+Key rules:
+- **Minimum distance between any two nodes**: 1.8 grid units (enforced by placement)
+- **Nodes snap to ring positions** — no random jitter on position
+- **Each ring has a fixed number of slots** based on its circumference within the wedge
+- **Connect nodes to their neighbors on the same ring AND to the closest node on adjacent rings**
+
+### Edge generation must also be structured:
+
+Instead of random connections, use:
+1. Connect each node to the closest 2-3 nodes on the same ring (adjacent slots)
+2. Connect each node to the closest node on the ring inside and outside it
+3. This creates a nice web/mesh pattern within each region wedge
+4. Cross-region links only at the edges where wedges meet (2-3 links per boundary)
+
+## Problem 2: SVG is too dark and nodes are unreadable
+
+In SkillTreeLab.svelte, fix the visual rendering:
+
+### Background
+Change the SVG background from `fill="var(--bg)"` (which is #09090b, nearly black) to a slightly lighter dark: `fill="#141418"`. This provides contrast without being jarring.
+
+### Add a subtle grid pattern
+Add a grid/dot pattern to the SVG background so users can see they're panning over a space:
+```svelte
+<defs>
+  <pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse">
+    <circle cx="25" cy="25" r="0.5" fill="#2a2a30" />
+  </pattern>
+</defs>
+<rect ... fill="url(#grid)" />
+```
+
+### Node rendering improvements:
+- **Unallocated nodes**: fill should be `#1e1e24` (visible dark, not invisible), stroke should be the region color at 0.6 opacity
+- **Small node text**: use `font-size={radius * 1.5}` instead of `radius * 1.2` for readability
+- **All text fill-opacity**: change from 0.6 to 0.85 for unallocated nodes so you can actually read them
+- **Allocated node glow**: increase glow circle opacity from 0.3 to 0.5 and radius from +4 to +6
+- **Edge opacity**: unallocated edges should be 0.15 not 0.3 (less visual noise), allocated edges should be 1.0 at stroke-width 2
+- **Available nodes** (can be allocated next): give them a brighter stroke (opacity 0.9) and a subtle outer ring to make them pop as "clickable"
+
+### Increase SPACING from 50 to 70
+Change the SPACING constant from 50 to 70 to give nodes more room.
+
+### Tooltip improvements:
+- Add a subtle box-shadow to tooltip: `box-shadow: 0 4px 12px rgba(0,0,0,0.5)`
+- Show the node's region name in the tooltip
+- Position tooltip 30px ABOVE the node (add margin-top offset)
+
+## Important constraints:
+- Keep all existing exports and API surface in skills.js unchanged
+- Keep all existing Svelte component interface the same
+- The graph must still be connected (BFS from 'start' reaches all nodes)
+- Maintain the seeded PRNG so the graph is deterministic
+- Svelte 4 syntax only
+- Do NOT change any other files

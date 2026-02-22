@@ -1,0 +1,119 @@
+# Aider Conventions for ASCII Dungeon
+
+You are working on a Svelte 4 + Vite 5 + JavaScript game project. Follow these rules strictly.
+
+## Architecture
+- Game logic lives in `src/lib/` as pure functions (no side effects, no DOM, no renderer)
+- Each lib module exports pure functions that return new objects (immutable pattern)
+- `src/game/Game.js` is the orchestrator that imports from `src/lib/`
+- `src/renderer/Renderer.js` handles all WebGPU rendering
+- `src/workbench/` contains the developer workbench (Svelte components)
+- Workbench sections live in `src/workbench/sections/`, reusable controls in `src/workbench/components/`
+
+## Code Style
+- JavaScript only (no TypeScript)
+- ES modules (`import`/`export`), no CommonJS
+- Svelte 4 syntax (not Svelte 5 runes)
+- Use `createEventDispatcher` for child-to-parent communication in Svelte
+- Keep functions small and focused
+- No unnecessary comments or docstrings
+
+## File Rules
+- NEVER modify `package.json` scripts (they work as-is)
+- NEVER modify `vite.config.js`
+- NEVER add new dependencies without being explicitly told to
+- All imports in Svelte must be in the top-level `<script>` block (never inside `{#if}`)
+- Barrel re-exports go in `src/lib/index.js`
+
+## Build
+- The build must pass: `vite build` (runs automatically via test command)
+- Fix any build errors before finishing
+- Do not introduce unused imports or variables (Svelte will warn)
+
+## When Editing Specs
+- Check off completed criteria: `- [ ]` becomes `- [x]`
+- Only check off criteria that are fully implemented and verified
+
+
+---
+TASK:
+Completely rewrite src/workbench/sections/GraphicsLab.svelte with a much better demo scene and working controls.
+
+PROBLEMS TO FIX:
+1. The cellSize and animSpeed sliders do nothing because the render loop closure captures their initial values
+2. The demo scene is boring placeholder content
+3. Need a proper animated dungeon scene
+
+SLIDER FIX:
+The render loop is created once in onMount with a closure. Svelte reactive variables inside closures don't update. Fix by storing mutable state on a shared object:
+
+  let config = { cellSize: 16, animSpeed: 1.0 };
+
+Then in the render loop, read config.cellSize and config.animSpeed instead of the let variables.
+For the slider handlers, update the config object:
+  on:change={e => { config.cellSize = e.detail; renderer.cellSize = e.detail; }}
+  on:change={e => config.animSpeed = e.detail}
+
+The cellSize also needs to update renderer.cellSize so the render() call uses the new value.
+
+DEFAULT CELL SIZE: Change from 12 to 16 (bigger, more legible)
+
+DEMO SCENE - "Dungeon Explorer":
+Create a proper dungeon layout. The grid is 80 wide x 50 tall.
+
+Layout (hardcoded 2D array or procedural):
+- Build a dungeon with 3-4 rooms connected by corridors
+- Rooms are roughly 8x6 to 12x8 cells
+- Corridors are 1-2 cells wide
+
+Rendering rules:
+- Walls: '#' char, fg '#555555', bg '#2a2a3a', depth 1.0, flags VISIBLE
+- Floor: use SPACE character ' ', fg '#000000', bg '#1a1a2e', depth 0.0, flags VISIBLE|EXPLORED  (NO DOTS - use background color to show floor)
+- Corridor floor: ' ', fg '#000000', bg '#15152a', depth 0.0, flags VISIBLE|EXPLORED
+- Player: '@', fg '#00ff88', bg '#1a1a2e', depth 0.5, flags VISIBLE
+- Torches: '!' at specific wall-adjacent positions, depth 0.5, flags VISIBLE|HIGHLIGHTED
+  - fg color cycles using Math.sin: lerp between '#ff6600' and '#ffaa00'
+  - Place 6-8 torches in the dungeon along walls
+- Enemies: 'G' goblin in green-red '#cc4400', 'S' skeleton '#aaaaaa', 'D' dragon '#ff00ff'
+  - Place 3-4 enemies in different rooms
+- Treasure: '$' in '#ffdd00', bg '#1a1a2e', depth 0.0, flags VISIBLE|HIGHLIGHTED
+  - Place 2-3 treasure piles
+- Door: '+' in '#886644', bg '#1a1a2e', connecting rooms
+
+Animation - Walking character:
+Create a path array of {x, y} waypoints that trace through the dungeon.
+The character walks along this path over time:
+  const pathIndex = Math.floor(time * 3) % path.length;
+  const playerPos = path[pathIndex];
+
+As the player moves, mark cells within a radius of 5 as VISIBLE.
+Cells outside that radius but previously visited: EXPLORED only (dimmer).
+Cells never visited: flags = 0 (black).
+
+This creates a "fog of war" discovery effect.
+
+TITLE: renderString "Dungeon Explorer Demo" at (2, 0) in '#ffaa00'
+
+Add a renderString helper method:
+  function renderString(x, y, text, fg, bg) {
+    for (let i = 0; i < text.length; i++) {
+      if (text[i] !== '\n') {
+        renderer.setCell(x + i, y, text[i], fg, bg || '#000000', 0, CELL_FLAGS.VISIBLE);
+      }
+    }
+  }
+
+SLIDERS:
+- Cell Size: min 8, max 24, step 1, default 16
+- Anim Speed: min 0, max 5, step 0.1, default 1.0
+
+Keep the same HTML structure, styles, and Svelte 4 patterns.
+Keep the onMount/onDestroy/error handling pattern.
+Keep the ParamSlider imports and usage.
+
+IMPORTANT:
+- Use Svelte 4 syntax (not runes)
+- The config object pattern is critical for slider reactivity
+- CELL_FLAGS is imported from '../../renderer/Renderer.js'
+- Floor tiles should use SPACE char with colored backgrounds, NOT dots
+- Make the dungeon feel alive with the torch animation and walking character

@@ -1,11 +1,11 @@
 <script>
   import { createEventDispatcher } from 'svelte';
-  
+
   export let label = '';
   export let value = false;
-  
+
   const dispatch = createEventDispatcher();
-  
+
   function toggle() {
     value = !value;
     dispatch('change', value);
@@ -14,8 +14,8 @@
 
 <div class="param-toggle">
   <span class="label">{label}</span>
-  <button 
-    class="toggle" 
+  <button
+    class="toggle"
     class:on={value}
     on:click={toggle}
     aria-pressed={value}
@@ -29,41 +29,47 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 15px;
+    margin-bottom: var(--space-md, 16px);
   }
-  
+
   .label {
-    color: #888;
-    font-size: 12px;
+    color: var(--fg-muted);
+    font-size: 11px;
   }
-  
+
   .toggle {
-    width: 44px;
-    height: 24px;
-    background: #333;
-    border: none;
-    border-radius: 12px;
+    width: 36px;
+    height: 20px;
+    background: var(--bg-accent);
+    border: 1px solid var(--border);
+    border-radius: 10px;
     cursor: pointer;
     position: relative;
-    transition: background 0.2s;
+    transition: all 200ms ease;
   }
-  
+
+  .toggle:hover {
+    border-color: var(--fg-dim);
+  }
+
   .toggle.on {
-    background: #00ff00;
+    background: var(--accent-green);
+    border-color: var(--accent-green);
   }
-  
+
   .knob {
     position: absolute;
     top: 2px;
     left: 2px;
-    width: 20px;
-    height: 20px;
-    background: #fff;
+    width: 14px;
+    height: 14px;
+    background: var(--fg-dim);
     border-radius: 50%;
-    transition: transform 0.2s;
+    transition: all 200ms ease;
   }
-  
+
   .toggle.on .knob {
-    transform: translateX(20px);
+    transform: translateX(16px);
+    background: var(--fg);
   }
 </style>

@@ -39,8 +39,8 @@ describe('colorToU32', () => {
 });
 
 describe('CELL_SIZE_BYTES', () => {
-  it('is 32 bytes', () => {
-    expect(CELL_SIZE_BYTES).toBe(32);
+  it('is 40 bytes', () => {
+    expect(CELL_SIZE_BYTES).toBe(40);
   });
 });
 
@@ -49,6 +49,7 @@ describe('CELL_FLAGS', () => {
     expect(CELL_FLAGS.VISIBLE).toBe(1);
     expect(CELL_FLAGS.EXPLORED).toBe(2);
     expect(CELL_FLAGS.HIGHLIGHTED).toBe(4);
+    expect(CELL_FLAGS.BOLD).toBe(8);
   });
 });
 

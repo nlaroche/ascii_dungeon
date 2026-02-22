@@ -1,0 +1,22 @@
+Fix the hover flicker bug in SkillTreeLab.svelte.
+
+## The Problem
+When hovering over skill nodes, they flicker. This is because `.node-group:hover { transform: scale(1.2) }` shifts the node under the cursor, causing mouseleave -> scale back -> mouseenter -> loop.
+
+## The Fix
+Add an invisible hit-area circle to each node group that's larger than the visible node, so the cursor stays within the hit area even when the node scales up.
+
+In the `{#each visibleNodes}` block, add a transparent circle BEFORE the glow/node circles:
+
+```svelte
+<!-- Hit area (invisible, prevents hover flicker) -->
+<circle
+  r={radius + 10}
+  fill="transparent"
+  stroke="none"
+/>
+```
+
+Also change the hover transform in CSS from `transform: scale(1.2)` to use `transform-origin: center` and a smaller scale like `scale(1.15)` to keep it subtle.
+
+Do NOT change any other logic or styling. Only fix the flicker.

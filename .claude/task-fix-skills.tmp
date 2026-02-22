@@ -1,0 +1,46 @@
+Fix three critical bugs in SkillTreeLab.svelte:
+
+## Bug 1: Nodes flicker and jump on hover
+The CSS `.node-group:hover { transform: scale(1.15) }` OVERRIDES the inline `transform="translate(x, y)"` attribute set by Svelte. This makes nodes jump to (0,0) on hover.
+
+FIX: Remove the CSS hover transform entirely. Instead, handle hover scaling in the Svelte template by wrapping the node content in a nested `<g>` that does the scaling. Change the node-group `<g>` to ONLY have the translate, and add an inner `<g class="node-inner">` that gets the hover scale:
+
+```svelte
+<g transform="translate({pos.x}, {pos.y})" ...handlers...>
+  <g class="node-inner">
+    <!-- hit area, glow, circle, text all go here -->
+  </g>
+</g>
+```
+
+Then the CSS becomes:
+```css
+.node-inner {
+  transition: transform 0.15s ease-out;
+  transform-origin: 0 0;
+}
+.node-group:hover .node-inner {
+  transform: scale(1.15);
+}
+```
+
+## Bug 2: Can't click on nodes — panning eats clicks
+The mousedown handler on the container div triggers panning even when clicking on nodes. The event bubbles up from the node click.
+
+FIX: In `handleMouseDown`, also check that the click target is NOT inside a `.node-group`. Add `e.target.closest('.node-group')` check:
+
+```js
+function handleMouseDown(e) {
+  // Don't start panning if clicking on a node
+  if (e.target.closest && e.target.closest('.node-group')) return;
+  isPanning = true;
+  panStart = { x: e.clientX, y: e.clientY };
+}
+```
+
+Also add `e.stopPropagation()` in `handleNodeClick` to prevent it from reaching the container.
+
+## Bug 3: Only 8 nodes visible — need more points
+Change default `playerLevel` from 1 to 20 and `floorsCleared` from 0 to 10 so the user starts with 30 points and can immediately explore the tree. This is a workbench/testing tool — having enough points to play with is essential.
+
+Apply all three fixes. Do not change anything else.

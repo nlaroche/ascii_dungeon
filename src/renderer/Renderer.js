@@ -18,7 +18,9 @@ export class Renderer {
     this.tilemap = null;
     this.cameraOffsetX = 0;
     this.cameraOffsetY = 0;
-    this.parallaxStrength = 0.3;
+    this.gridOffsetX = 0;
+    this.gridOffsetY = 0;
+    this.vignettePulse = 0;
   }
 
   async init() {
@@ -73,11 +75,11 @@ export class Renderer {
     observer.observe(this.canvas.parentElement || this.canvas);
   }
 
-  setCell(x, y, char, fgColor, bgColor, depth = 0, flags = 0, light = 1.0, offsetX = 0, offsetY = 0, layer = 0) {
+  setCell(x, y, char, fgColor, bgColor, depth = 0, flags = 0, light = 1.0, offsetX = 0, offsetY = 0, layer = 0, scaleX = 1.0, scaleY = 1.0) {
     const charCode = typeof char === 'string' ? char.charCodeAt(0) : char;
     const fg = colorToU32(fgColor);
     const bg = colorToU32(bgColor);
-    this.tilemap.setTile(layer, x, y, charCode, fg, bg, depth, flags, light, offsetX, offsetY);
+    this.tilemap.setTile(layer, x, y, charCode, fg, bg, depth, flags, light, offsetX, offsetY, scaleX, scaleY);
   }
 
   setCells(cellArray) {
@@ -120,8 +122,6 @@ export class Renderer {
   }
 
   render() {
-    this.tilemap.parallaxStrength = this.parallaxStrength;
-
     const dpr = window.devicePixelRatio || 1;
     const commandEncoder = this.device.createCommandEncoder();
     const textureView = this.context.getCurrentTexture().createView();
@@ -136,8 +136,9 @@ export class Renderer {
       this.time,
       this.cellSize * dpr,
       this.cellSize * 1.5 * dpr,
-      this.cameraOffsetX * dpr,
-      this.cameraOffsetY * dpr
+      (this.cameraOffsetX + this.gridOffsetX) * dpr,
+      (this.cameraOffsetY + this.gridOffsetY) * dpr,
+      this.vignettePulse
     );
 
     this.device.queue.submit([commandEncoder.finish()]);

@@ -79,14 +79,15 @@ test.describe('Graphics Lab smoke test', () => {
 
     await page.goto('/#workbench');
 
-    // Click on Graphics tab
-    await page.getByText('Graphics').click();
+    // Click on Graphics tab (scoped to sidebar to avoid content collisions)
+    const sidebar = page.locator('nav, .sidebar, aside').first();
+    await sidebar.getByText('Graphics', { exact: true }).click();
 
     // Wait for the graphics lab canvas to be ready
-    const canvas = page.locator('.preview canvas');
+    const canvas = page.locator('canvas').first();
     await canvas.waitFor({ state: 'visible', timeout: 15_000 });
 
-    await page.locator('.preview canvas[data-ready="1"]').waitFor({ timeout: 10_000 });
+    await page.locator('canvas[data-ready="1"]').waitFor({ timeout: 10_000 });
 
     await page.waitForTimeout(500);
 

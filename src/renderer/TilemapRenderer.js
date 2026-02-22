@@ -1,6 +1,6 @@
 import tilemapShaderCode from './shaders/tilemap.wgsl?raw';
 
-// Cell struct must match shader exactly (32 bytes total, 4-byte aligned):
+// Cell struct must match shader exactly (40 bytes total, 4-byte aligned):
 // glyph: u32 (offset 0)
 // fg: u32 (offset 4)
 // bg: u32 (offset 8)
@@ -9,13 +9,17 @@ import tilemapShaderCode from './shaders/tilemap.wgsl?raw';
 // flags: u32 (offset 20)
 // offsetX: f32 (offset 24)
 // offsetY: f32 (offset 28)
+// scaleX: f32 (offset 32)
+// scaleY: f32 (offset 36)
 
-export const CELL_SIZE_BYTES = 32;
+export const CELL_SIZE_BYTES = 40;
 
 export const CELL_FLAGS = {
   VISIBLE: 1,      // BIT0
   EXPLORED: 2,    // BIT1
   HIGHLIGHTED: 4, // BIT2
+  BOLD: 8,        // BIT3
+  DAMAGE_FX: 16,  // BIT4
 };
 
 export const LAYER_COUNT = 5;
@@ -45,13 +49,13 @@ export function colorToU32(cssColor) {
   if (hex.length === 3) {
     hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
   }
-  
+
   // Parse RGB components
   const r = parseInt(hex.slice(0, 2), 16);
   const g = parseInt(hex.slice(2, 4), 16);
   const b = parseInt(hex.slice(4, 6), 16);
-  const a = 255;
-  
+  const a = hex.length === 8 ? parseInt(hex.slice(6, 8), 16) : 255;
+
   // Pack as (r<<24)|(g<<16)|(b<<8)|a, >>> 0 for unsigned
   return ((r << 24) | (g << 16) | (b << 8) | a) >>> 0;
 }
@@ -183,7 +187,7 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
    * @param {number} depth - 0.0=floor, 0.5=entity, 1.0=ceiling
    * @param {number} flags - cell flags (VISIBLE|EXPLORED|HIGHLIGHTED)
    */
-  function setTile(layer, x, y, glyph, fg, bg, depth, flags = 0, light = 1.0, offsetX = 0, offsetY = 0) {
+  function setTile(layer, x, y, glyph, fg, bg, depth, flags = 0, light = 1.0, offsetX = 0, offsetY = 0, scaleX = 1.0, scaleY = 1.0) {
     if (x < 0 || x >= gridWidth || y < 0 || y >= gridHeight) {
       return;
     }
@@ -210,6 +214,10 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
     dataView.setFloat32(offset + 24, offsetX, true);
     // offsetY: f32
     dataView.setFloat32(offset + 28, offsetY, true);
+    // scaleX: f32
+    dataView.setFloat32(offset + 32, scaleX, true);
+    // scaleY: f32
+    dataView.setFloat32(offset + 36, scaleY, true);
   }
   
   /**
@@ -253,24 +261,24 @@ export function createTilemapRenderer(device, format, atlasTexture, gridWidth, g
    * @param {number} cameraOffsetY
    * @returns {GPUTexture}
    */
-  function render(encoder, outputTexture, canvasWidth, canvasHeight, time = 0, cellPixelWidth = 12, cellPixelHeight = 18, cameraOffsetX = 0, cameraOffsetY = 0) {
+  function render(encoder, outputTexture, canvasWidth, canvasHeight, time = 0, cellPixelWidth = 12, cellPixelHeight = 18, cameraOffsetX = 0, cameraOffsetY = 0, vignettePulse = 0) {
     // Uniform struct layout (must match shader):
     // resolution: vec2<f32>     offset 0
     // time: f32                 offset 8
-    // parallaxStrength: f32     offset 12
+    // vignettePulse: f32        offset 12
     // cellPixelSize: vec2<f32>  offset 16
     // gridSize: vec2<f32>       offset 24
     // cameraOffset: vec2<f32>   offset 32
     // sdfEdge: f32              offset 40
     // sdfSmoothing: f32         offset 44
     // cellsPerLayer: u32        offset 48
-    // _pad: u32                 offset 52 (padding to 16-byte alignment)
+    // lightSubRes: f32          offset 52
     const uniformData = new ArrayBuffer(UNIFORM_SIZE);
     const v = new DataView(uniformData);
     v.setFloat32(0, canvasWidth, true);
     v.setFloat32(4, canvasHeight, true);
     v.setFloat32(8, time, true);
-    v.setFloat32(12, 0.0, true); // parallaxStrength (unused, kept for struct alignment)
+    v.setFloat32(12, vignettePulse, true);
     v.setFloat32(16, cellPixelWidth, true);
     v.setFloat32(20, cellPixelHeight, true);
     v.setFloat32(24, gridWidth, true);

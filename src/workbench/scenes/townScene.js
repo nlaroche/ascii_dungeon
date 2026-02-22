@@ -31,15 +31,6 @@ let hoveredBuilding = null;
 let mouseGridX = -1, mouseGridY = -1;
 let canvasEl = null;
 
-const vendorItems = [
-  { label: 'Iron Sword      12g' },
-  { label: 'Leather Armor    8g' },
-  { label: 'Health Potion    3g' },
-  { label: 'Torch Bundle     2g' },
-  { label: 'Map Fragment     5g' },
-  { label: 'Lucky Charm     15g' },
-];
-
 /** Build town layout relative to grid dimensions */
 function buildTown(W, H) {
   const map = [];
@@ -288,45 +279,6 @@ export function onFrame(renderer, dt) {
       renderer.setCell(drawX, drawY, npc.char, npc.fg, '#4e584a', 0,
         CELL_FLAGS.VISIBLE, 1.0, npc.x - drawX, bobY, LAYERS.OBJECTS);
     }
-  }
-
-  // ── UI Panels (right side) ──
-  const panelX = Math.floor(W * 0.28);
-  const panelW = Math.min(24, W - panelX - 2);
-
-  // Vendor panel
-  drawPanel(renderer, panelX, 1, panelW, 10, {
-    title: ' Vendor ',
-    chars: BOX_DOUBLE,
-  });
-  drawList(renderer, panelX + 1, 2, panelW - 2, 8, vendorItems, {
-    selected: Math.floor(sceneTime * 0.5) % vendorItems.length,
-  });
-
-  // Inn panel
-  drawPanel(renderer, panelX, 12, panelW, 8, {
-    title: ' Inn ',
-  });
-  drawText(renderer, panelX + 2, 13, 'Rest & recover HP', { fg: COLORS.fgMuted });
-  drawHLine(renderer, panelX + 1, 15, panelW - 2);
-  drawText(renderer, panelX + 2, 16, 'Cost: 5 gold', { fg: COLORS.accentAmber });
-  drawText(renderer, panelX + 2, 17, 'HP restored: 100%', { fg: COLORS.accentGreen });
-  drawText(renderer, panelX + 2, 18, 'Status: Rested', { fg: COLORS.accent });
-
-  // Stash panel
-  drawPanel(renderer, panelX, 21, panelW, 9, {
-    title: ' Stash (5/20) ',
-  });
-  const stashItems = [
-    { label: '[S] Iron Sword +1', fg: COLORS.fgMuted },
-    { label: '[A] Leather Armor', fg: COLORS.defense },
-    { label: '[P] Potion x3', fg: COLORS.heal },
-    { label: '[R] Fire Rune', fg: COLORS.damage },
-    { label: '[ ] Empty', fg: COLORS.fgDim },
-    { label: '[ ] Empty', fg: COLORS.fgDim },
-  ];
-  for (let i = 0; i < stashItems.length; i++) {
-    drawText(renderer, panelX + 2, 22 + i, stashItems[i].label, { fg: stashItems[i].fg });
   }
 
   renderer.render();

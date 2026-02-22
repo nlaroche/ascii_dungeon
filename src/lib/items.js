@@ -3,6 +3,8 @@
 // Kill enemies with a sword -> it gets sharper. Walk far with boots -> they use less stamina.
 // Pair items with matching histories -> they resonate and amplify each other.
 
+import { COLORS } from './palette.js';
+
 // ── Record Types (4 core) ──
 
 export const RECORD_TYPES = {
@@ -182,36 +184,36 @@ export function getVisualMark(recordType, level) {
 
 const VISUAL_STAGES = {
   kill: [
-    { threshold: 0, color: '#666666', prefix: '' },
-    { threshold: 1, color: '#888888', prefix: 'Sharpened' },
-    { threshold: 3, color: '#aa6666', prefix: 'Bloodied' },
-    { threshold: 5, color: '#cc3333', prefix: "Murderer's" },
-    { threshold: 7, color: '#ff0000', prefix: "Champion's" },
-    { threshold: 10, color: '#ff4444', prefix: 'Legendary' },
+    { threshold: 0, color: COLORS.recordBase, prefix: '' },
+    { threshold: 1, color: COLORS.recordLow, prefix: 'Sharpened' },
+    { threshold: 3, color: COLORS.killMid, prefix: 'Bloodied' },
+    { threshold: 5, color: COLORS.killMid, prefix: "Murderer's" },
+    { threshold: 7, color: COLORS.killHigh, prefix: "Champion's" },
+    { threshold: 10, color: COLORS.killHigh, prefix: 'Legendary' },
   ],
   treasure: [
-    { threshold: 0, color: '#666666', prefix: '' },
-    { threshold: 1, color: '#888844', prefix: 'Gilded' },
-    { threshold: 3, color: '#aaaa44', prefix: 'Shimmering' },
-    { threshold: 5, color: '#cccc44', prefix: "Fortune's" },
-    { threshold: 7, color: '#ffee44', prefix: "Kingmaker's" },
-    { threshold: 10, color: '#ffff00', prefix: 'Legendary' },
+    { threshold: 0, color: COLORS.recordBase, prefix: '' },
+    { threshold: 1, color: COLORS.recordLow, prefix: 'Gilded' },
+    { threshold: 3, color: COLORS.treasureMid, prefix: 'Shimmering' },
+    { threshold: 5, color: COLORS.treasureMid, prefix: "Fortune's" },
+    { threshold: 7, color: COLORS.treasureHigh, prefix: "Kingmaker's" },
+    { threshold: 10, color: COLORS.treasureHigh, prefix: 'Legendary' },
   ],
   explore: [
-    { threshold: 0, color: '#666666', prefix: '' },
-    { threshold: 1, color: '#668888', prefix: "Wayfinder's" },
-    { threshold: 3, color: '#6688aa', prefix: "Cartographer's" },
-    { threshold: 5, color: '#4466aa', prefix: "World Walker's" },
-    { threshold: 7, color: '#4444cc', prefix: "Realm Traverser's" },
-    { threshold: 10, color: '#6666ff', prefix: 'Legendary' },
+    { threshold: 0, color: COLORS.recordBase, prefix: '' },
+    { threshold: 1, color: COLORS.recordLow, prefix: "Wayfinder's" },
+    { threshold: 3, color: COLORS.exploreMid, prefix: "Cartographer's" },
+    { threshold: 5, color: COLORS.exploreMid, prefix: "World Walker's" },
+    { threshold: 7, color: COLORS.exploreHigh, prefix: "Realm Traverser's" },
+    { threshold: 10, color: COLORS.exploreHigh, prefix: 'Legendary' },
   ],
   survive: [
-    { threshold: 0, color: '#666666', prefix: '' },
-    { threshold: 1, color: '#666688', prefix: 'Warded' },
-    { threshold: 3, color: '#6666aa', prefix: "Veteran's" },
-    { threshold: 5, color: '#4444aa', prefix: "Guardian's" },
-    { threshold: 7, color: '#4422cc', prefix: "Immortal's" },
-    { threshold: 10, color: '#4444ff', prefix: 'Legendary' },
+    { threshold: 0, color: COLORS.recordBase, prefix: '' },
+    { threshold: 1, color: COLORS.recordLow, prefix: 'Warded' },
+    { threshold: 3, color: COLORS.surviveMid, prefix: "Veteran's" },
+    { threshold: 5, color: COLORS.surviveMid, prefix: "Guardian's" },
+    { threshold: 7, color: COLORS.surviveHigh, prefix: "Immortal's" },
+    { threshold: 10, color: COLORS.surviveHigh, prefix: 'Legendary' },
   ],
 };
 
@@ -232,7 +234,7 @@ export function getItemDisplayName(item) {
 }
 
 export function getItemColor(item) {
-  if (!item.primaryRecord) return '#888888';
+  if (!item.primaryRecord) return COLORS.recordLow;
   return getVisualStage(item.primaryRecord, item.records[item.primaryRecord].level).color;
 }
 
@@ -250,14 +252,14 @@ export const RESONANCE_TYPES = {
 };
 
 const RESONANCE_META = {
-  blood_brothers:   { label: 'Blood Brothers',   bonus: 'damage',     color: '#ff0000' },
-  golden_pair:      { label: 'Golden Pair',       bonus: 'gold',       color: '#ffdd00' },
-  pathfinders:      { label: 'Pathfinders',       bonus: 'movement',   color: '#00aaff' },
-  iron_bond:        { label: 'Iron Bond',         bonus: 'defense',    color: '#8888ff' },
-  warrior_soul:     { label: 'Warrior Soul',      bonus: 'all_combat', color: '#ff8800' },
-  treasure_hunter:  { label: 'Treasure Hunter',   bonus: 'loot_speed', color: '#44ff44' },
-  berserker:        { label: 'Berserker',         bonus: 'offense',    color: '#ff4400' },
-  paladin:          { label: 'Paladin',           bonus: 'tank',       color: '#ffff88' },
+  blood_brothers:   { label: 'Blood Brothers',   bonus: 'damage',     color: COLORS.bloodBrothers },
+  golden_pair:      { label: 'Golden Pair',       bonus: 'gold',       color: COLORS.goldenPair },
+  pathfinders:      { label: 'Pathfinders',       bonus: 'movement',   color: COLORS.pathfinders },
+  iron_bond:        { label: 'Iron Bond',         bonus: 'defense',    color: COLORS.ironBond },
+  warrior_soul:     { label: 'Warrior Soul',      bonus: 'all_combat', color: COLORS.warriorSoul },
+  treasure_hunter:  { label: 'Treasure Hunter',   bonus: 'loot_speed', color: COLORS.treasureHunter },
+  berserker:        { label: 'Berserker',         bonus: 'offense',    color: COLORS.berserker },
+  paladin:          { label: 'Paladin',           bonus: 'tank',       color: COLORS.paladin },
 };
 
 const COMP_MAP = {

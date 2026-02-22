@@ -1,0 +1,115 @@
+Fix GameLoopLab.svelte — it's broken and unusable. Multiple critical issues:
+
+## 1. ALL CSS variables are wrong — nothing renders correctly
+
+The component uses CSS variables that DO NOT EXIST in the parent Workbench.svelte. Replace every single one:
+
+WRONG → CORRECT:
+- `var(--bg-app)` → `var(--bg)`
+- `var(--bg-card)` → `var(--bg-card)` (this one is correct)
+- `var(--bg-elevated)` → `var(--bg-muted)`
+- `var(--bg-hover)` → `var(--bg-accent)`
+- `var(--text-primary)` → `var(--fg)`
+- `var(--text-muted)` → `var(--fg-muted)`
+- `var(--text-gold)` → `var(--accent-amber)`
+- `var(--text-red)` → `var(--accent-red)`
+- `var(--text-green)` → `var(--accent-green)`
+- `var(--text-cyan)` → `var(--accent)`
+- `var(--accent-cyan)` → `var(--accent)` (parent uses --accent for cyan)
+- `var(--accent-purple)` → `var(--accent)` (no purple token exists)
+- `var(--accent-yellow)` → `var(--accent-amber)`
+- `var(--accent-orange)` → `var(--accent-amber)`
+- `var(--text-sm)` → remove, use literal `11px`
+- `var(--text-xs)` → remove, use literal `10px`
+- `var(--text-base)` → remove, use literal `12px`
+- `var(--text-lg)` → remove, use literal `14px`
+- `var(--text-xl)` → remove, use literal `16px`
+- `var(--text-2xl)` → remove, use literal `20px`
+
+The available tokens from Workbench.svelte are ONLY:
+--bg, --bg-card, --bg-muted, --bg-accent, --border, --border-muted, --border-accent, --fg, --fg-muted, --fg-dim, --accent, --accent-green, --accent-amber, --accent-red, --radius-sm, --radius, --radius-lg, --space-xs, --space-sm, --space-md, --space-lg, --space-xl, --font-mono, --transition-fast, --transition
+
+## 2. Auto run must LOOP — town → dungeon → town → dungeon → repeat
+
+Current auto run does one dungeon run then stops. Change it to be a continuous loop:
+- Start in town
+- Auto-start a run
+- Simulate all floors
+- End run → run_complete
+- Process loot → return to town
+- Advance day
+- Wait 1 second in town
+- Start next run automatically
+- Keep looping until user clicks "Stop Auto"
+
+The `autoRun` function should use `setTimeout` chains (not setInterval) for clearer control:
+
+```js
+let autoRunning = false;
+
+async function autoRun() {
+  autoRunning = true;
+  addLogEntry('Auto-run started — looping town ↔ dungeon', 'phase');
+  autoStep();
+}
+
+function autoStep() {
+  if (!autoRunning) return;
+
+  if (phase === 'town') {
+    startRun();
+    setTimeout(autoStep, 400);
+  } else if (phase === 'dungeon') {
+    simulateFloor();
+    setTimeout(autoStep, 400);
+  } else if (phase === 'floor_complete') {
+    if (run.floor < run.maxFloors) {
+      nextFloor();
+    } else {
+      endCurrentRun('cleared');
+    }
+    setTimeout(autoStep, 400);
+  } else if (phase === 'run_complete') {
+    returnToTown();
+    setTimeout(autoStep, 1000); // pause in town
+  }
+}
+
+function stopAutoRun() {
+  autoRunning = false;
+  addLogEntry('Auto-run stopped', 'info');
+}
+```
+
+Remove the old `autoRunInterval` / `setInterval` approach entirely.
+
+## 3. Make the town phase actually useful and visible
+
+The town phase should feel like arriving somewhere. Add:
+- A welcome message showing the day
+- Player gold prominently displayed
+- Equipment section showing what's equipped with equip/unequip from stash
+- The vendor should be populated (call refreshVendor when returning to town)
+- Show the stash with item colors and levels
+
+## 4. Phase indicator should show the LOOP clearly
+
+Change the phase list from a linear list to show the circular nature:
+```
+Town → Dungeon → Floor Complete → Run Complete → Town (loops)
+```
+The active phase dot should pulse/glow.
+
+## 5. Better visual hierarchy
+
+- The floor title in dungeon phase should be prominent
+- Floor complete should show a satisfying results card
+- Run complete grade should be large and colorful
+- Town cards should have clear headers and borders
+- Log entries should be color-coded properly using the CORRECT tokens
+
+## 6. Remove duplicate log function
+
+There are two functions: `log()` and `addLogEntry()` that do the same thing. Remove `log()` and keep only `addLogEntry()`.
+
+Do NOT change any imports or the lib modules. Only fix GameLoopLab.svelte.
